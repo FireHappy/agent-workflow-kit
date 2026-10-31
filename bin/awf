@@ -1,0 +1,913 @@
+#!/usr/bin/env bash
+# awf — agent workflow framework
+#
+# 在空项目（或已有仓库）中生成一套与 harness 无关的 agent 工作流框架：
+#   agent-workflow/ 状态账本 + 流程规范 + 校验工具
+#   AGENTS.md       仓库根入口（生成物，不属于工作流目录）
+#
+# 兼容 bash 3.2（macOS 自带），仅依赖 POSIX 工具。
+set -eu
+
+AWF_VERSION="1"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TPL_DIR="$KIT_DIR/templates"
+
+say() { printf '%s\n' "$*"; }
+warn() { printf 'WARN  %s\n' "$*" >&2; }
+die() { printf 'FAIL  %s\n' "$*" >&2; exit 1; }
+
+today() { date '+%Y-%m-%d'; }
+now() { date '+%Y-%m-%d %H:%M'; }
+
+hash_files() {
+  if command -v shasum >/dev/null 2>&1; then
+    cat "$@" | shasum -a 256 | awk '{print substr($1,1,8)}'
+  else
+    cat "$@" | sha256sum | awk '{print substr($1,1,8)}'
+  fi
+}
+
+slug() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-$//'
+}
+
+yaml_get() {
+  local key="$1" file="$2"
+  sed -n "s/^${key}:[[:space:]]*//p" "$file" | head -n 1 | sed 's/[[:space:]]*$//'
+}
+
+usage() {
+  cat <<'EOF'
+awf — agent workflow framework
+
+用法:
+  awf init [目录] [--name 名称] [--id 标识] [--purpose 一句话] [--stack 类型]
+           [--keep-docs] [--force]
+      在目标目录生成 agent-workflow/ 框架与仓库根 AGENTS.md。
+      --keep-docs  已存在的 README.md 与 workflows/*.md 不覆盖（迁移旧项目用）。
+      --no-register 不写入全局索引（默认自动登记，便于跨项目检索）。
+
+  awf bootstrap
+      按当前 project.yaml 重建 AGENTS.md 受控区块（只替换区块，不动其他内容）。
+      若项目已在全局索引中，会顺带刷新其路径与别名。
+
+  awf check
+      校验框架完整性、AGENTS.md 入口新鲜度、进行中任务的必填字段。
+
+  awf status
+      从 tasks/*/current.md、todo.md、done.md 生成 tasks/status.md。
+
+  awf register
+      把当前项目登记到全局索引（~/.agents/projects.tsv 与 AGENTS.md）。
+
+  awf projects
+      打印已登记的项目（别名 → 路径）。
+
+  awf find <别名|ID>
+      按别名或 ID 查找项目路径。
+
+说明:
+  init 之后请编辑 agent-workflow/project.yaml，再运行 awf bootstrap。
+  check 的退出码 = 失败项数量，可直接用于 pre-commit / CI。
+EOF
+}
+
+# ---------------------------------------------------------------- 项目根发现
+
+find_root() {
+  local d="$PWD"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/agent-workflow/project.yaml" ]; then
+      printf '%s\n' "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------- 模板渲染
+
+# 使用调用方设置的 P_* 变量渲染模板；字面替换，不受正则或 & 影响。
+render() {
+  local tpl="$1" out="$2"
+  awk \
+    -v v_id="$P_ID" \
+    -v v_name="$P_NAME" \
+    -v v_purpose="$P_PURPOSE" \
+    -v v_aliases="$P_ALIASES" \
+    -v v_stack="$P_STACK" \
+    -v v_gate="$P_GATE" \
+    -v v_compile="$P_COMPILE" \
+    -v v_test="$P_TEST" \
+    -v v_scopes="$P_SCOPES" \
+    -v v_serialized="$P_SERIALIZED" \
+    -v v_digest="$P_DIGEST" \
+    -v v_version="$AWF_VERSION" \
+    -v v_date="$(today)" '
+    function rep(s, k, v,   out, i) {
+      out = ""
+      while ((i = index(s, k)) > 0) {
+        out = out substr(s, 1, i - 1) v
+        s = substr(s, i + length(k))
+      }
+      return out s
+    }
+    {
+      l = $0
+      l = rep(l, "{{ID}}", v_id)
+      l = rep(l, "{{NAME}}", v_name)
+      l = rep(l, "{{PURPOSE}}", v_purpose)
+      l = rep(l, "{{ALIASES}}", v_aliases)
+      l = rep(l, "{{STACK}}", v_stack)
+      l = rep(l, "{{GATE}}", v_gate)
+      l = rep(l, "{{COMPILE}}", v_compile)
+      l = rep(l, "{{TEST}}", v_test)
+      l = rep(l, "{{SCOPES}}", v_scopes)
+      l = rep(l, "{{SERIALIZED}}", v_serialized)
+      l = rep(l, "{{DIGEST}}", v_digest)
+      l = rep(l, "{{VERSION}}", v_version)
+      l = rep(l, "{{DATE}}", v_date)
+      print l
+    }
+  ' "$tpl" > "$out"
+}
+
+load_project() {
+  local f="$1" tpl
+  [ -f "$f" ] || die "缺少 $f"
+
+  P_ID="$(yaml_get id "$f")"
+  P_NAME="$(yaml_get name "$f")"
+  P_PURPOSE="$(yaml_get purpose "$f")"
+  P_ALIASES="$(yaml_get aliases "$f")"
+  P_STACK="$(yaml_get stack "$f")"
+  P_GATE="$(yaml_get gate "$f")"
+  P_COMPILE="$(yaml_get compile "$f")"
+  P_TEST="$(yaml_get test "$f")"
+  P_SCOPES="$(yaml_get scopes "$f")"
+  P_SERIALIZED="$(yaml_get serialized "$f")"
+
+  [ -n "$P_ID" ] || die "$f 缺少 id"
+  [ -n "$P_NAME" ] || die "$f 缺少 name"
+
+  # 入口里展示“未配置”，但 project.yaml 本身保持空值，避免把占位文字当命令执行
+  [ -n "$P_PURPOSE" ] || P_PURPOSE="$P_NAME 项目"
+  [ -n "$P_ALIASES" ] || P_ALIASES="$P_NAME"
+  [ -n "$P_GATE" ] || P_GATE="./agent-workflow/check_workflow.sh"
+  [ -n "$P_COMPILE" ] || P_COMPILE="（未配置，见 agent-workflow/project.yaml）"
+  [ -n "$P_TEST" ] || P_TEST="（未配置，见 agent-workflow/project.yaml）"
+  [ -n "$P_SCOPES" ] || P_SCOPES="主工程(.)"
+  [ -n "$P_SERIALIZED" ] || P_SERIALIZED="无"
+
+  tpl="$(dirname "$f")/templates/AGENTS.md.tmpl"
+  if [ -f "$tpl" ]; then
+    P_DIGEST="$(hash_files "$f" "$tpl")"
+  else
+    P_DIGEST="$(hash_files "$f")"
+  fi
+}
+
+# 只替换 <!-- awf:begin --> 与 <!-- awf:end --> 之间；无标记则追加。
+write_agents() {
+  local root="$1" block="$2" f="$1/AGENTS.md"
+
+  if [ ! -f "$f" ]; then
+    cp "$block" "$f"
+    return 0
+  fi
+
+  if grep -q '<!-- awf:begin' "$f"; then
+    awk -v bf="$block" '
+      BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
+      /<!-- awf:begin/ { printf "%s", blk; skip = 1; next }
+      /<!-- awf:end/   { skip = 0; next }
+      !skip { print }
+    ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  else
+    { printf '\n'; cat "$block"; } >> "$f"
+  fi
+}
+
+# ---------------------------------------------------------------- init
+
+detect_stack() {
+  local d="$1"
+  if [ -f "$d/Cargo.toml" ]; then echo rust
+  elif [ -f "$d/go.mod" ]; then echo go
+  elif [ -f "$d/package.json" ]; then echo node
+  elif [ -f "$d/pom.xml" ]; then echo maven
+  elif [ -f "$d/gradlew" ] || [ -f "$d/build.gradle" ] || [ -f "$d/build.gradle.kts" ]; then echo gradle
+  elif [ -d "$d/Assets" ] && [ -d "$d/ProjectSettings" ]; then echo unity
+  else echo generic
+  fi
+}
+
+default_verify() {
+  case "$1" in
+    rust)   echo "cargo build|cargo test" ;;
+    go)     echo "go build ./...|go test ./..." ;;
+    node)   echo "npm run build|npm test" ;;
+    maven)  echo "./mvnw -q package|./mvnw -q test" ;;
+    gradle) echo "./gradlew build|./gradlew test" ;;
+    *)      echo "|" ;;
+  esac
+}
+
+put_if_absent() {
+  local f="$1"
+  if [ -f "$f" ]; then
+    cat >/dev/null
+  else
+    cat > "$f"
+  fi
+}
+
+write_task_files() {
+  local dir="$1"
+
+  put_if_absent "$dir/dev/todo.md" <<'EOF'
+# 待开发
+
+| 任务ID | 优先级 | 描述 | 登记日期 |
+|--------|--------|------|----------|
+EOF
+
+  put_if_absent "$dir/debug/todo.md" <<'EOF'
+# 待调试
+
+| 任务ID | 优先级 | 问题描述 | 登记日期 |
+|--------|--------|----------|----------|
+EOF
+
+  put_if_absent "$dir/docs/todo.md" <<'EOF'
+# 待撰写
+
+| 任务ID | 优先级 | 文档主题 | 登记日期 |
+|--------|--------|----------|----------|
+EOF
+
+  put_if_absent "$dir/dev/done.md" <<'EOF'
+# 已完成
+
+| 任务ID | 优先级 | 描述 | 完成日期 |
+|--------|--------|------|----------|
+EOF
+
+  put_if_absent "$dir/debug/done.md" <<'EOF'
+# 已完成
+
+| 任务ID | 优先级 | 问题描述 | 完成日期 |
+|--------|--------|----------|----------|
+EOF
+
+  put_if_absent "$dir/docs/done.md" <<'EOF'
+# 已完成
+
+| 任务ID | 优先级 | 文档主题 | 完成日期 |
+|--------|--------|----------|----------|
+EOF
+
+  put_if_absent "$dir/dev/current.md" <<'EOF'
+# 正在开发
+
+> 任务从 `todo.md` 移入此文件开始执行，完成后移入 `done.md`。
+> 优先级只写 `P0` / `P1` / `P2` / `P3`。
+> `awf status` 会解析本文件，任务块格式必须保持：`## [ID] 标题` + 字段表 + `### 下一步`。
+
+（暂无进行中任务）
+
+<!-- 任务块格式示例（ID 用 XXX 占位，不会被解析）：
+
+## [DEV-XXX] 任务标题
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | agent / human / unassigned |
+| 协作模式 | single / parallel |
+| 来源任务 | 无 / DEBUG-003 / 用户直接触发 |
+| 修改范围 | 模块 / 目录 / 关键文件 |
+| 分支/工作区 | 分支名 / worktree 标识 / N/A |
+| 依赖 | 无 |
+| 最近更新 | YYYY-MM-DD |
+
+### 目标
+一句话说明交付什么。
+
+### 验收标准
+- [ ] 校验命令通过
+- [ ] 目标行为符合预期
+- [ ] 没有已知回归
+
+### 下一步
+下一位 agent 可直接接手的最小动作。
+-->
+EOF
+
+  put_if_absent "$dir/debug/current.md" <<'EOF'
+# 正在调试
+
+> 问题从 `todo.md` 移入此文件开始排查，解决后移入 `done.md`。
+> 每个任务块必须写清：现象、假设、证伪方法、下一步。
+
+（暂无进行中任务）
+EOF
+
+  put_if_absent "$dir/docs/current.md" <<'EOF'
+# 正在撰写
+
+> 文档任务从 `todo.md` 移入此文件开始撰写，完成后移入 `done.md`。
+
+（暂无进行中任务）
+EOF
+}
+
+write_aux_files() {
+  local root="$1"
+
+  put_if_absent "$root/agent-workflow/memory/README.md" <<'EOF'
+# memory 模块
+
+- `cache/`：临时证据、日志片段、待确认结论。超过 7 天应清理或转存。
+- `history/`：长期归档，存放完整修复过程与可复用结论。
+
+命名：
+
+```text
+cache/   <主题>_<YYYY-MM-DD>.md
+history/ <主题>_<YYYY-MM-DD>.md
+```
+
+长期任务可在文件内写 `<!-- long-term: true -->` 免于过期清理。
+EOF
+
+  put_if_absent "$root/agent-workflow/memory/cache/README.md" <<'EOF'
+# cache
+
+临时证据放这里。任务归档时删除或转存到 `../history/`。
+EOF
+
+  put_if_absent "$root/agent-workflow/memory/history/README.md" <<'EOF'
+# history
+
+长期归档放这里。`tasks/*/done.md` 的归档链接应指向本目录。
+EOF
+
+  put_if_absent "$root/agent-workflow/tools/README.md" <<'EOF'
+# tools
+
+项目操作手册：构建、测试、调试、分支规范。
+
+只写经过验证、可直接执行的命令；实验记录写 `../memory/`，结论写 `../docs/`。
+
+替换本文件时建议保留三类内容：
+
+1. 构建与验证命令（可直接复制执行）
+2. 环境前置条件与已知限制
+3. 常见问题与排查入口
+EOF
+
+  put_if_absent "$root/agent-workflow/check_workflow.sh" <<'EOF'
+#!/bin/sh
+# 兼容入口：等价于 agent-workflow/bin/awf check
+exec "$(dirname "$0")/bin/awf" check "$@"
+EOF
+  chmod +x "$root/agent-workflow/check_workflow.sh"
+}
+
+cmd_init() {
+  local target="." name="" id="" purpose="" stack="" force=0 keep_docs=0 no_register=0
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name)    name="$2"; shift 2 ;;
+      --name=*)  name="${1#*=}"; shift ;;
+      --id)      id="$2"; shift 2 ;;
+      --id=*)    id="${1#*=}"; shift ;;
+      --purpose) purpose="$2"; shift 2 ;;
+      --purpose=*) purpose="${1#*=}"; shift ;;
+      --stack)   stack="$2"; shift 2 ;;
+      --stack=*) stack="${1#*=}"; shift ;;
+      --keep-docs) keep_docs=1; shift ;;
+      --no-register) no_register=1; shift ;;
+      --force)   force=1; shift ;;
+      -h|--help) usage; return 0 ;;
+      -*)        die "未知参数：$1" ;;
+      *)         target="$1"; shift ;;
+    esac
+  done
+
+  if [ ! -f "$TPL_DIR/README.md" ] || [ ! -d "$TPL_DIR/workflows" ]; then
+    die "当前 awf 是项目内副本，只能执行 bootstrap / check / status；新建项目请使用全局技能 agent-workflow-scaffold 的 bin/awf"
+  fi
+
+  mkdir -p "$target"
+  target="$(cd "$target" && pwd)"
+
+  if [ -e "$target/agent-workflow/project.yaml" ] && [ "$force" -ne 1 ]; then
+    die "$target 已存在 agent-workflow，如需覆盖请加 --force"
+  fi
+
+  local base
+  base="$(basename "$target")"
+  [ "$base" = "/" ] && base="project"
+
+  [ -n "$name" ] || name="$base"
+  [ -n "$id" ] || id="$(slug "$name")"
+  [ -n "$id" ] || id="$(slug "$base")"
+  [ -n "$id" ] || id="project"
+  [ -n "$purpose" ] || purpose="$name 项目"
+  [ -n "$stack" ] || stack="$(detect_stack "$target")"
+
+  local verify_pair compile test
+  verify_pair="$(default_verify "$stack")"
+  compile="${verify_pair%%|*}"
+  test="${verify_pair#*|}"
+
+  mkdir -p "$target/agent-workflow/workflows" \
+           "$target/agent-workflow/tasks/dev" \
+           "$target/agent-workflow/tasks/debug" \
+           "$target/agent-workflow/tasks/docs" \
+           "$target/agent-workflow/memory/cache" \
+           "$target/agent-workflow/memory/history" \
+           "$target/agent-workflow/tools" \
+           "$target/agent-workflow/bin" \
+           "$target/agent-workflow/templates"
+
+  if [ "$keep_docs" -eq 1 ] && [ -f "$target/agent-workflow/README.md" ]; then
+    say "skip  已存在，保留：agent-workflow/README.md"
+  else
+    cp "$TPL_DIR/README.md" "$target/agent-workflow/README.md"
+  fi
+  local wf wf_dst
+  for wf in "$TPL_DIR"/workflows/*.md; do
+    wf_dst="$target/agent-workflow/workflows/$(basename "$wf")"
+    if [ "$keep_docs" -eq 1 ] && [ -f "$wf_dst" ]; then
+      say "skip  已存在，保留：agent-workflow/workflows/$(basename "$wf")"
+    else
+      cp "$wf" "$wf_dst"
+    fi
+  done
+  cp "$TPL_DIR/AGENTS.md.tmpl" "$target/agent-workflow/templates/AGENTS.md.tmpl"
+  cp "$KIT_DIR/bin/awf" "$target/agent-workflow/bin/awf"
+  chmod +x "$target/agent-workflow/bin/awf"
+
+  write_task_files "$target/agent-workflow/tasks"
+  write_aux_files "$target"
+
+  P_ID="$id"
+  P_NAME="$name"
+  P_PURPOSE="$purpose"
+  P_ALIASES="$name"
+  P_STACK="$stack"
+  P_GATE="./agent-workflow/check_workflow.sh"
+  P_COMPILE="$compile"
+  P_TEST="$test"
+  P_SCOPES="主工程(.)"
+  P_SERIALIZED="无"
+  P_DIGEST="0"
+
+  if [ ! -f "$target/agent-workflow/project.yaml" ]; then
+    render "$TPL_DIR/project.yaml.tmpl" "$target/agent-workflow/project.yaml"
+  else
+    say "skip  已存在，保留：agent-workflow/project.yaml"
+  fi
+
+  # 从事实文件重新加载：统一空值回退逻辑，并计算入口 digest
+  load_project "$target/agent-workflow/project.yaml"
+  render "$TPL_DIR/AGENTS.md.tmpl" "$target/AGENTS.md.block"
+  write_agents "$target" "$target/AGENTS.md.block"
+  rm -f "$target/AGENTS.md.block"
+
+  if [ ! -f "$target/CLAUDE.md" ]; then
+    cat > "$target/CLAUDE.md" <<'EOF'
+# CLAUDE.md
+
+本仓库的 agent 协作入口是 [AGENTS.md](AGENTS.md)（由 agent-workflow 生成）。
+请按 AGENTS.md 的顺序读取任务账本与工作流；不要在本文件重复定义流程。
+EOF
+  fi
+
+  (
+    cd "$target"
+    ./agent-workflow/bin/awf status >/dev/null
+  )
+
+  say "已生成工作流框架：$target"
+  say ""
+  say "  AGENTS.md                    入口（生成物，在工作流目录之外）"
+  say "  CLAUDE.md                    Claude Code 指针"
+  say "  agent-workflow/"
+  say "  ├── project.yaml             项目事实（唯一输入）"
+  say "  ├── README.md                规范正文"
+  say "  ├── workflows/               dev / debug / docs / review"
+  say "  ├── tasks/                   任务账本（todo/current/done + status）"
+  say "  ├── memory/                  cache / history"
+  say "  ├── tools/                   操作手册"
+  say "  ├── bin/awf                  bootstrap / check / status"
+  say "  └── check_workflow.sh        兼容入口"
+  say ""
+  say "下一步：编辑 agent-workflow/project.yaml，然后运行"
+  say "  ./agent-workflow/bin/awf bootstrap"
+  say ""
+
+  ( cd "$target" && ./agent-workflow/bin/awf check )
+
+  if [ "$no_register" -eq 0 ] && [ "${AWF_NO_REGISTER:-0}" != "1" ]; then
+    if ( cd "$target" && ./agent-workflow/bin/awf register >/dev/null ); then
+      say "已写入全局索引：$AGENTS_HOME/AGENTS.md（可用 awf projects / awf find 检索）"
+    else
+      warn "全局索引写入失败；框架已生成，可稍后运行 ./agent-workflow/bin/awf register"
+    fi
+  else
+    say "已跳过全局索引登记（--no-register）"
+  fi
+}
+
+# ---------------------------------------------------------------- bootstrap
+
+cmd_bootstrap() {
+  local root
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+
+  load_project "agent-workflow/project.yaml"
+  local block=".awf-block.tmp"
+  render "agent-workflow/templates/AGENTS.md.tmpl" "$block"
+  write_agents "$root" "$block"
+  rm -f "$block"
+
+  say "已刷新 AGENTS.md 受控区块（digest: $P_DIGEST）"
+
+  if is_registered; then
+    if write_registration; then
+      say "已刷新全局索引：$P_ID → $PWD"
+    else
+      warn "全局索引刷新失败（不影响本次 bootstrap）"
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------- check
+
+check_current_file() {
+  local f="$1" type="$2"
+  awk -v wf="$type" '
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    function flush(   miss) {
+      if (id == "") return
+      miss = ""
+      if (!st) miss = miss " 状态"
+      if (!ow) miss = miss " Owner"
+      if (!nx) miss = miss " 下一步"
+      if (miss != "") { printf "FAIL  %s [%s] 缺少字段:%s\n", wf, id, miss; bad++ }
+      else printf "ok    %s [%s] 字段完整\n", wf, id
+      id = ""
+    }
+    index($0, "## [") == 1 {
+      flush()
+      line = substr($0, 5)
+      c = index(line, "] ")
+      id = substr(line, 1, c - 1)
+      if (id !~ /^[A-Z]+-[0-9]+$/) id = ""
+      st = 0; ow = 0; nx = 0
+      next
+    }
+    /^### *下一步/ { if (id != "") nx = 1 }
+    {
+      if (id == "") next
+      if (trim($2) == "状态") st = 1
+      else if (trim($2) == "Owner") ow = 1
+    }
+    END { flush(); exit (bad > 0 ? 1 : 0) }
+  ' FS='|' "$f"
+}
+
+cmd_check() {
+  local root fails=0 out f
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
+  cd "$root"
+
+  local required="
+AGENTS.md
+agent-workflow/project.yaml
+agent-workflow/README.md
+agent-workflow/workflows/dev.md
+agent-workflow/workflows/debug.md
+agent-workflow/workflows/docs.md
+agent-workflow/workflows/review.md
+agent-workflow/tasks/status.md
+agent-workflow/templates/AGENTS.md.tmpl
+"
+  for f in $required; do
+    if [ -f "$f" ]; then
+      say "ok    $f"
+    else
+      say "FAIL  缺少 $f"
+      fails=$((fails + 1))
+    fi
+  done
+
+  local actual recorded
+  actual="$(hash_files agent-workflow/project.yaml agent-workflow/templates/AGENTS.md.tmpl)"
+  recorded="$(sed -n 's/.*<!-- awf:begin v[0-9][0-9]* digest:\([0-9a-f]\{8\}\).*/\1/p' AGENTS.md | head -n 1)"
+  if [ "$actual" = "$recorded" ]; then
+    say "ok    AGENTS.md 入口与 project.yaml 同步（digest: $actual）"
+  else
+    say "FAIL  AGENTS.md 入口已过期（记录: ${recorded:-无} / 实际: $actual）"
+    say "      → 运行 ./agent-workflow/bin/awf bootstrap"
+    fails=$((fails + 1))
+  fi
+
+  for f in agent-workflow/tasks/dev/current.md agent-workflow/tasks/debug/current.md agent-workflow/tasks/docs/current.md; do
+    [ -f "$f" ] || continue
+    case "$f" in
+      */dev/*)   out="$(check_current_file "$f" dev)" || true ;;
+      */debug/*) out="$(check_current_file "$f" debug)" || true ;;
+      */docs/*)  out="$(check_current_file "$f" docs)" || true ;;
+    esac
+    if printf '%s' "$out" | grep -q 'FAIL'; then
+      fails=$((fails + 1))
+    fi
+    printf '%s\n' "$out" | grep -v '^$' || true
+  done
+
+  if [ "$fails" -eq 0 ]; then
+    say ""
+    say "全部检查通过"
+  else
+    say ""
+    say "发现 $fails 处问题"
+  fi
+  return "$fails"
+}
+
+# ---------------------------------------------------------------- status
+
+cmd_status() {
+  local root block target f r
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+
+  block="agent-workflow/tasks/status.md.block.tmp"
+  target="agent-workflow/tasks/status.md"
+
+  {
+    printf '> 本区块由 `agent-workflow/bin/awf status` 生成，请勿手改。\n'
+    printf '> 数据来源：`tasks/*/current.md`、`tasks/*/todo.md`、`tasks/*/done.md`。\n\n'
+
+    for type in dev debug docs; do
+      f="agent-workflow/tasks/$type/current.md"
+      [ -f "$f" ] || continue
+      r="$(awk -F'|' -v wf="$type" '
+        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+        function flush() {
+          if (id != "") printf "| %s | %s | %s | %s | %s | %s |\n", wf, id, pri, st, ow, title
+          id = ""; pri = ""; st = ""; ow = ""; title = ""
+        }
+        index($0, "## [") == 1 {
+          flush()
+          line = substr($0, 5)
+          c = index(line, "] ")
+          id = substr(line, 1, c - 1)
+          if (id !~ /^[A-Z]+-[0-9]+$/) { id = ""; next }
+          title = substr(line, c + 2)
+          next
+        }
+        {
+          if (id == "") next
+          if (trim($2) == "优先级") pri = trim($3)
+          else if (trim($2) == "状态") st = trim($3)
+          else if (trim($2) == "Owner") ow = trim($3)
+        }
+        END { flush() }
+      ' "$f")"
+      if [ -n "$r" ]; then
+        if ! grep -q '^## 当前进行中' "$block"; then
+          printf '## 当前进行中\n\n' >> "$block"
+          printf '| 工作流 | 任务ID | 优先级 | 状态 | Owner | 任务 |\n' >> "$block"
+          printf '|--------|--------|--------|------|-------|------|\n' >> "$block"
+        fi
+        printf '%s\n' "$r" >> "$block"
+      fi
+    done
+
+    if ! grep -q '^## 当前进行中' "$block"; then
+      printf '## 当前进行中\n\n（无）\n' >> "$block"
+    fi
+    printf '\n' >> "$block"
+
+    printf '## 待处理\n\n' >> "$block"
+    local todo_rows="" r3
+    for type in dev debug docs; do
+      f="agent-workflow/tasks/$type/todo.md"
+      [ -f "$f" ] || continue
+      r3="$(awk -F'|' -v wf="$type" '
+        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+        function pick_date(   i) {
+          for (i = 2; i < NF; i++) if ($i ~ /^ *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *$/) return trim($i)
+          return trim($(NF - 1))
+        }
+        {
+          id = trim($2)
+          if (id !~ /^[A-Z]+-[0-9]+$/) next
+          printf "| %s | %s | %s | %s | %s |\n", wf, id, trim($3), trim($4), pick_date()
+        }
+      ' "$f")"
+      if [ -n "$r3" ]; then
+        todo_rows="$todo_rows$r3"$'\n'
+      fi
+    done
+    if [ -z "$todo_rows" ]; then
+      printf '（无）\n' >> "$block"
+    else
+      printf '| 工作流 | 任务ID | 优先级 | 描述 | 登记日期 |\n' >> "$block"
+      printf '|--------|--------|--------|------|----------|\n' >> "$block"
+      printf '%s' "$todo_rows" >> "$block"
+    fi
+    printf '\n' >> "$block"
+
+    printf '## 最近完成\n\n' >> "$block"
+    local done_rows="" r2
+    for type in dev debug docs; do
+      f="agent-workflow/tasks/$type/done.md"
+      [ -f "$f" ] || continue
+      r2="$(grep -E '^\| *[A-Z]+-[0-9]+' "$f" | tail -n 8 | awk -F'|' -v wf="$type" '
+        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+        function pick_date(   i) {
+          for (i = 2; i < NF; i++) if ($i ~ /^ *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *$/) return trim($i)
+          return trim($(NF - 1))
+        }
+        { printf "| %s | %s | %s | %s | %s |\n", wf, trim($2), trim($3), trim($4), pick_date() }
+      ')"
+      if [ -n "$r2" ]; then
+        done_rows="$done_rows$r2"$'\n'
+      fi
+    done
+    if [ -z "$done_rows" ]; then
+      printf '（无）\n' >> "$block"
+    else
+      printf '| 工作流 | 任务ID | 优先级 | 描述 | 完成日期 |\n' >> "$block"
+      printf '|--------|--------|--------|------|----------|\n' >> "$block"
+      printf '%s' "$done_rows" | sort -t'|' -k5,5r >> "$block"
+    fi
+
+    printf '\n*最后更新：%s*\n' "$(now)" >> "$block"
+  } > "$block"
+
+  if [ ! -f "$target" ]; then
+    {
+      printf '# 全局状态摘要\n\n'
+      printf '<!-- awf:status:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:status:end -->\n'
+    } > "$target"
+  elif grep -q 'awf:status:begin' "$target"; then
+    awk -v bf="$block" '
+      BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
+      /<!-- awf:status:begin/ { printf "<!-- awf:status:begin -->\n"; printf "%s", blk; skip = 1; next }
+      /<!-- awf:status:end/   { skip = 0; printf "<!-- awf:status:end -->\n"; next }
+      !skip { print }
+    ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+  else
+    {
+      printf '\n<!-- awf:status:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:status:end -->\n'
+    } >> "$target"
+  fi
+
+  rm -f "$block"
+  say "已更新 $target"
+}
+
+# ---------------------------------------------------------------- 全局索引
+
+AGENTS_HOME="${DSH_AGENTS_HOME:-$HOME/.agents}"
+REGISTRY="$AGENTS_HOME/projects.tsv"
+REGISTRY_INDEX="$AGENTS_HOME/AGENTS.md"
+
+trim() {
+  printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+write_registry_index() {
+  local block="$AGENTS_HOME/.projects.block.tmp"
+  mkdir -p "$AGENTS_HOME"
+  {
+    printf '## 项目索引（awf 生成，勿手改）\n\n'
+    printf '| 项目ID | 别名 | 路径 | 入口 |\n'
+    printf '|--------|------|------|------|\n'
+    while IFS='|' read -r rid ralias rpath rentry; do
+      [ -n "$(trim "$rid")" ] || continue
+      case "$(trim "$rid")" in \#*) continue ;; esac
+      printf '| %s | %s | %s | %s |\n' \
+        "$(trim "$rid")" "$(trim "$ralias")" "$(trim "$rpath")" "$(trim "$rentry")"
+    done < "$REGISTRY"
+    printf '\n## 命中后\n\n'
+    printf '1. 切到表中路径，读该仓库的 `AGENTS.md`\n'
+    printf '2. 只读定位可直接进行；要写入请把该目录设为会话工作区\n'
+    printf '3. 路径或别名变化后，在该项目内重跑 `awf register`\n'
+  } > "$block"
+
+  if [ ! -f "$REGISTRY_INDEX" ]; then
+    {
+      printf '# 全局项目索引\n\n'
+      printf '> 由 `awf register` 维护，只放指针，不写项目细节。\n\n'
+      printf '<!-- awf:projects:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:projects:end -->\n'
+    } > "$REGISTRY_INDEX"
+  elif grep -q 'awf:projects:begin' "$REGISTRY_INDEX"; then
+    awk -v bf="$block" '
+      BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
+      /<!-- awf:projects:begin/ { printf "<!-- awf:projects:begin -->\n"; printf "%s", blk; skip = 1; next }
+      /<!-- awf:projects:end/   { skip = 0; printf "<!-- awf:projects:end -->\n"; next }
+      !skip { print }
+    ' "$REGISTRY_INDEX" > "$REGISTRY_INDEX.tmp" && mv "$REGISTRY_INDEX.tmp" "$REGISTRY_INDEX"
+  else
+    {
+      printf '\n<!-- awf:projects:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:projects:end -->\n'
+    } >> "$REGISTRY_INDEX"
+  fi
+  rm -f "$block"
+}
+
+# 使用当前 P_* 与 $PWD；调用前必须已 load_project 且 cd 到项目根
+write_registration() {
+  mkdir -p "$AGENTS_HOME"
+  [ -f "$REGISTRY" ] || : > "$REGISTRY"
+  grep -v -F "$P_ID |" "$REGISTRY" > "$REGISTRY.tmp" || true
+  printf '%s | %s | %s | AGENTS.md\n' "$P_ID" "$P_ALIASES" "$PWD" >> "$REGISTRY.tmp"
+  mv "$REGISTRY.tmp" "$REGISTRY"
+  write_registry_index
+}
+
+is_registered() {
+  [ -f "$REGISTRY" ] && grep -F -q "$P_ID |" "$REGISTRY"
+}
+
+cmd_register() {
+  local root
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+  load_project "agent-workflow/project.yaml"
+
+  write_registration
+  say "已登记：$P_ID → $root"
+  say "全局索引：$REGISTRY_INDEX"
+}
+
+cmd_projects() {
+  [ -f "$REGISTRY" ] || die "尚未登记任何项目（在项目内运行 ./agent-workflow/bin/awf register）"
+  printf '| 项目ID | 别名 | 路径 |\n|--------|------|------|\n'
+  while IFS='|' read -r rid ralias rpath rentry; do
+    [ -n "$(trim "$rid")" ] || continue
+    case "$(trim "$rid")" in \#*) continue ;; esac
+    printf '| %s | %s | %s |\n' "$(trim "$rid")" "$(trim "$ralias")" "$(trim "$rpath")"
+  done < "$REGISTRY"
+}
+
+cmd_find() {
+  local q="${1:-}"
+  [ -n "$q" ] || die "用法：awf find <别名|ID>"
+  [ -f "$REGISTRY" ] || die "尚未登记任何项目"
+  local hits
+  hits="$(grep -i -- "$q" "$REGISTRY" || true)"
+  if [ -z "$hits" ]; then
+    say "未找到：$q"
+    return 1
+  fi
+  printf '%s\n' "$hits" | awk -F'|' '
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    { printf "%s\t%s\n", trim($1), trim($3) }
+  '
+}
+
+# ---------------------------------------------------------------- main
+
+main() {
+  local cmd="${1:-}"
+  [ $# -gt 0 ] && shift || true
+
+  case "$cmd" in
+    init)      cmd_init "$@" ;;
+    bootstrap) cmd_bootstrap ;;
+    check)     cmd_check ;;
+    status)    cmd_status ;;
+    register)  cmd_register ;;
+    projects)  cmd_projects ;;
+    find)      cmd_find "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *) die "未知命令：$cmd（可用：init / bootstrap / check / status）" ;;
+  esac
+}
+
+main "$@"

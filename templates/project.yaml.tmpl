@@ -1,0 +1,23 @@
+# agent-workflow 项目事实（唯一输入）
+#
+# 改完这里运行：./agent-workflow/bin/awf bootstrap
+# 说明：只使用扁平 `key: value`，列表字段写成逗号分隔的单行字符串，
+#       这样无需 YAML 解析器也能被 awf 与任意 shell 稳定读取。
+
+version: {{VERSION}}
+id: {{ID}}
+name: {{NAME}}
+purpose: {{PURPOSE}}
+aliases: {{ALIASES}}
+stack: {{STACK}}
+
+# 校验命令（留空表示暂未配置）
+gate: {{GATE}}
+compile: {{COMPILE}}
+test: {{TEST}}
+
+# 并行切分：格式为 “名称(路径), 名称(路径)”
+scopes: {{SCOPES}}
+
+# 并行时任何单元都不许同时修改的文件或目录
+serialized: {{SERIALIZED}}

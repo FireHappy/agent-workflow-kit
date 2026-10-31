@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# awf-kit 冒烟测试：在临时目录验证 init / check / status / bootstrap / --force
+set -eu
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+export DSH_AGENTS_HOME="$TMP/agents"
+
+PROJ="$TMP/proj"
+mkdir -p "$PROJ"
+
+pass=0
+fail=0
+
+ok() { pass=$((pass + 1)); printf 'ok    %s\n' "$*"; }
+bad() { fail=$((fail + 1)); printf 'FAIL  %s\n' "$*"; }
+
+assert_file() { [ -f "$1" ] && ok "存在 $2" || bad "缺少 $2"; }
+assert_grep() { grep -q "$1" "$2" && ok "$3" || bad "$3"; }
+
+# 1. init
+"$KIT_DIR/bin/awf" init "$PROJ" --name "冒烟项目" --purpose "验证脚手架" >/dev/null
+assert_file "$PROJ/AGENTS.md" "AGENTS.md"
+assert_file "$PROJ/agent-workflow/project.yaml" "project.yaml"
+assert_file "$PROJ/agent-workflow/bin/awf" "bin/awf"
+assert_file "$PROJ/agent-workflow/tasks/status.md" "status.md"
+assert_grep 'awf:begin v1 digest:' "$PROJ/AGENTS.md" "入口含 digest"
+assert_grep '（未配置' "$PROJ/AGENTS.md" "空校验命令有回退提示"
+
+# 2. check 通过
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "check 通过" || bad "check 未通过"
+
+# 3. status 生成
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+assert_grep '## 当前进行中' "$PROJ/agent-workflow/tasks/status.md" "status 含当前进行中"
+
+# 4. 进行中任务缺字段 → check 失败
+cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
+# 正在开发
+
+## [DEV-001] 缺字段
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+EOF
+if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
+  bad "缺字段时 check 应失败"
+else
+  ok "缺字段时 check 失败"
+fi
+
+# 5. 补齐字段并通过
+cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
+# 正在开发
+
+## [DEV-001] 补齐字段
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | agent |
+
+### 下一步
+继续。
+EOF
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "补齐后 check 通过" || bad "补齐后 check 未通过"
+
+# 6. 事实文件变更 → 入口过期 → bootstrap 修复
+sed -i '' 's|^purpose:.*|purpose: 变更后的定位|' "$PROJ/agent-workflow/project.yaml" 2>/dev/null \
+  || sed -i 's|^purpose:.*|purpose: 变更后的定位|' "$PROJ/agent-workflow/project.yaml"
+if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
+  bad "project.yaml 变更后 check 应失败"
+else
+  ok "project.yaml 变更后 check 失败"
+fi
+( cd "$PROJ" && ./agent-workflow/bin/awf bootstrap >/dev/null )
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "bootstrap 后 check 通过" || bad "bootstrap 后 check 未通过"
+assert_grep '变更后的定位' "$PROJ/AGENTS.md" "入口已刷新"
+
+# 7. --force 保留事实文件与任务账本
+"$KIT_DIR/bin/awf" init "$PROJ" --name "改名" --force >/dev/null
+assert_grep 'purpose: 变更后的定位' "$PROJ/agent-workflow/project.yaml" "--force 保留 project.yaml"
+assert_grep 'DEV-001' "$PROJ/agent-workflow/tasks/dev/current.md" "--force 保留任务块"
+assert_grep '变更后的定位' "$PROJ/AGENTS.md" "--force 后入口仍同步"
+
+# 8. 入口外内容不被覆盖
+printf '\n## 团队约定\n- 保留我\n' >> "$PROJ/AGENTS.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf bootstrap >/dev/null )
+assert_grep '保留我' "$PROJ/AGENTS.md" "区块外内容保留"
+assert_grep 'awf:begin' "$PROJ/AGENTS.md" "受控区块仍存在"
+
+# 9. 全局索引：init 自动登记，bootstrap 自愈刷新，--no-register 可跳过
+assert_file "$DSH_AGENTS_HOME/projects.tsv" "projects.tsv"
+assert_grep '冒烟项目' "$DSH_AGENTS_HOME/projects.tsv" "init 自动登记别名"
+assert_grep '冒烟项目' "$DSH_AGENTS_HOME/AGENTS.md" "全局索引含别名"
+( cd "$PROJ" && ./agent-workflow/bin/awf projects | grep -q "冒烟项目" ) && ok "projects 列出项目" || bad "projects 未列出项目"
+( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 | grep -q "$PROJ" ) && ok "find 返回路径" || bad "find 未返回路径"
+( cd "$PROJ" && ./agent-workflow/bin/awf register >/dev/null )
+[ "$(wc -l < "$DSH_AGENTS_HOME/projects.tsv" | tr -d ' ')" = "1" ] && ok "重复登记不产生重复行" || bad "登记出现重复行"
+
+# bootstrap 自愈：把路径改错后刷新
+sed -i '' "s|$PROJ|/wrong/path|" "$DSH_AGENTS_HOME/projects.tsv" 2>/dev/null \
+  || sed -i "s|$PROJ|/wrong/path|" "$DSH_AGENTS_HOME/projects.tsv"
+( cd "$PROJ" && ./agent-workflow/bin/awf bootstrap >/dev/null )
+assert_grep "$PROJ" "$DSH_AGENTS_HOME/projects.tsv" "bootstrap 刷新索引路径"
+
+# --no-register 跳过
+"$KIT_DIR/bin/awf" init "$TMP/proj2" --name "不登记" --no-register >/dev/null
+if grep -q "不登记" "$DSH_AGENTS_HOME/projects.tsv"; then
+  bad "--no-register 仍写入索引"
+else
+  ok "--no-register 不写入索引"
+fi
+
+printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

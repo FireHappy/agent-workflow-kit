@@ -1,0 +1,16 @@
+name: smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run smoke test
+        run: bash test/smoke.sh
+      - name: Check awf help
+        run: ./bin/awf --help >/dev/null
