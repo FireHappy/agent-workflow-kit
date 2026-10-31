@@ -88,6 +88,16 @@ agent-workflow/
 
 先过 G1–G4（工作流 / 工作区 / 可写 / 通道），失败时按 `--headless` 或 `--handoff` 回退。完整流程见 `skills/cross-project-dispatch/SKILL.md` 与 `templates/workflows/cross-project.md`。
 
+## 团队协作（可选）
+
+目标 harness 支持多角色/多会话时，可按 `docs/team-flow.md` 组织三条轨道：docs（撰写 + 独立事实核对）、dev（实现 + 独立复核）、debug（并行假设 + 回归验证）。
+
+- 账本与 commit 始终归主线队长；成员只报告改动与命令结果
+- `awf-dispatch --team` 在任务包尾部附加拆分建议；插件不可用时自动降级为普通会话
+- 纯文案、单文件小修不开团队
+
+本技能不依赖任何团队插件；本节只在目标 harness 具备该能力时生效。
+
 ## 禁止事项
 
 - 不要手写 `AGENTS.md` 或 `tasks/*` 来“绕过”脚本生成：入口会与 `project.yaml` 脱节

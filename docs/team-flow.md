@@ -1,6 +1,6 @@
 # 团队执行流程（AgentTeams 适配层）
 
-> 本文件是**本仓库本地约定**，不进入 `templates/`，也不随 `awf init` 分发。
+> 本文件随 `agent-workflow-scaffold` 技能分发（仓库根即技能目录），但不进入 `templates/`、不随 `awf init` 写进每个新项目——由使用方按需采用。
 > 主规范仍是 `agent-workflow/README.md` 与 `agent-workflow/workflows/*.md`；本文件只规定"什么时候、怎么把主线流程交给团队"。
 > 三条轨道直接对应 `workflows/docs.md`、`workflows/dev.md`、`workflows/debug.md`，不另立规范。
 

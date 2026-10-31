@@ -37,7 +37,7 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 4. 把 sessionId、标题、状态、目标 HEAD 写到 `dispatch/log.md`；
 5. 打印会话信息；后续细节由用户在同一个会话里继续提。
 
-常用参数：`--dry-run`、`--headless`、`--handoff`、`--add-workspace`、`--no-wait`、`--json`。
+常用参数：`--dry-run`、`--headless`、`--handoff`、`--add-workspace`、`--no-wait`、`--json`、`--team`（任务包附加团队拆分建议，目标方自行决定是否拆队）。
 
 手工等价操作：GUI 左侧切到目标工作区 → 新建会话 → 粘贴任务包。效果相同，只是没有自动前置检查与日志。
 

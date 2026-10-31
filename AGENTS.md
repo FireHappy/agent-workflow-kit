@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:1f066d4d -->
+<!-- awf:begin v1 digest:9dfb3f92 -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -36,6 +36,7 @@
 - 可并行单元：生成器与模板(bin/ templates/), 工作流规范(agent-workflow/README.md agent-workflow/workflows/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
 - 共享写点（任何并行单元都不得同时修改）：agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, agent-workflow/workflows/cross-project.md
 - 并行时账本只由主线写；子任务返回结果，由主线合并进 `current.md`
+- 实现与复核尽量由不同会话/角色承担；复核必须独立重跑验证命令，不能只看实现者自述
 
 ## 跨项目
 

@@ -131,6 +131,9 @@
 3. `project.yaml` 的 `serialized` 列出的文件只能由主线修改
 4. 账本（`current.md` / `status.md`）只由主线写，子任务返回结构化结果
 5. 子任务先 `verify/review`，再由主任务 Owner 合流归档
+6. 实现与复核尽量由不同会话/角色承担；复核必须独立重跑验证命令，不接受只读自述
+
+> 当前 harness 支持多角色协作（如 DSH 的 AgentTeams）时，可按 kit 的 `docs/team-flow.md` 三轨流程组织；不支持时忽略，本模板不绑定具体 harness。
 
 ---
 
