@@ -48,3 +48,23 @@
 - 目标 HEAD：d4ac028 chore: 升级工作流框架到 0.2.1
 - 回报节选：## 回报：DEV-007 升级工作流框架到 0.2.1 **状态**：✅ 完成。已用全局新版生成器刷新并本地提交（`d4ac028`），未 push；工作树干净。 **执行方式说明**（AGENTS.md「任务路由」）：本任务为「跑一次生成器 + 校验 + 提交」的机械刷新，串行单调、无并行拆分空间，且有「只用全局 awf 刷新、不要手改生成文件」的硬约束，团队协调成本高于任务本身，故按单会话完成（本会话即目标工作区会话，符合跨项目执行约定）。 **变更文件**（`git diff --stat`，共 11 个，全部为受控生成物 + 账本记录）： | 文件 | 说明 | |------|--…（已截断，完整回报见会话）
 
+## 2026-10-31 19:29 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · DOCS-003 升级工作流框架到 0.3.0（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo01-DOCS-003-workflow-0.3.0.md）
+- 工作区：agent-demo01（181aff53-4218-4074-a910-5d9025047c2f）
+- 会话：session-34aec483-1143-41f5-ba45-d5ed4420fac5（agent-demo01 · DOCS-003 升级工作流框架到 0.3.0）
+- 状态：已发送，未等待回合
+- 目标 HEAD：35b8651 chore: 升级工作流框架到 0.2.1
+- 回到会话：在 GUI 的 `agent-demo01` 工作区打开「agent-demo01 · DOCS-003 升级工作流框架到 0.3.0」（会话 session-34aec483-1143-41f5-ba45-d5ed4420fac5）继续提细节。
+
+## 2026-10-31 19:30 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · DEV-008 升级工作流框架到 0.3.0（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo02-DEV-008-workflow-0.3.0.md）
+- 工作区：agent-demo02（2954372d-7230-4a5f-ad49-993ecd25ff02）
+- 会话：session-613ec35b-5bef-4c95-8628-3561ffda3418（agent-demo02 · DEV-008 升级工作流框架到 0.3.0）
+- 状态：已发送，未等待回合
+- 目标 HEAD：d4ac028 chore: 升级工作流框架到 0.2.1
+- 回到会话：在 GUI 的 `agent-demo02` 工作区打开「agent-demo02 · DEV-008 升级工作流框架到 0.3.0」（会话 session-613ec35b-5bef-4c95-8628-3561ffda3418）继续提细节。
+
