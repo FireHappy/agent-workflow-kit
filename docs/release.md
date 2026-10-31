@@ -80,6 +80,34 @@ printf '0.2.2\n' > VERSION
 - 条目写"行为变化 + 迁移影响"，不贴提交摘要
 - 发布 commit 前 `git diff CHANGELOG.md` 自查一遍
 
+## 3.5 release-prep 快速装配（可选）
+
+本仓库提供一条命令完成「改版本号前」的机械装配，把原先 5 分钟的手工步骤压缩为一次执行。在 kit 仓库根运行：
+
+```sh
+./bin/awf release-prep 0.4.2          # kit 源码入口（实际写入）
+./bin/awf release-prep 0.4.2 --dry-run # 只打印将执行的动作
+```
+
+`./agent-workflow/bin/awf` 是 `init --force` 生成的副本，同样带本命令；在已安装的项目里可用该路径。
+
+它**会做**：
+
+1. `./bin/awf init . --force --no-register` 刷新生成副本，再 `bootstrap` 刷新 `AGENTS.md` digest；
+2. 在 `agent-workflow/tasks/dev/current.md` 写入 `[DEV-XXX] release-prep <版本>` 块（自动取下一个可用 ID），校验通过后归档到 `done.md`；
+3. 把 `VERSION` 改为 `<X.Y.Z>`；把 `CHANGELOG.md` 顶部的 `## [Unreleased]` 改为 `## [<X.Y.Z>] - 今天`（没有 Unreleased 时提示手动处理）；
+4. 跑 `./agent-workflow/check_workflow.sh` 与 `bash test/smoke.sh`，任一失败即停（账本留在 `current.md`）；
+5. 跑 `./agent-workflow/bin/awf status` 刷新 `status.md`；
+6. 打印下一步的 `git add -A && git commit … && git tag -a v<X.Y.Z> … && git push …` 命令与建议 commit 消息。
+
+它**不会做**（铁律）：
+
+- 不自动 `git commit`、`git tag`、`git push`；推送必须由用户明确触发；
+- 不改写历史 CHANGELOG 条目，不替你判断版本位（major/minor/patch）；
+- 不替代 §2 的人工确认（下游项目、tag 风格、发布范围等）。
+
+建议流程：先补好 `CHANGELOG.md` 的 `[Unreleased]` 内容 → 运行 `release-prep` → 检查 `git diff` 与账本 → 按输出命令由人执行 commit/tag/push。
+
 ## 4. 提交与打 tag
 
 ```sh

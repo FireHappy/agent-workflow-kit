@@ -69,6 +69,7 @@
 
 - 检测到团队能力时，对话中的需求默认直接建队执行（automatic），主对话只做澄清、拆分、验收与叫停；三轨 docs / dev / debug 见 `docs/team-flow.md`。
 - 跨项目派发默认建队（派发即建队）：captain=需求方（拆分 / 汇总 / 本仓库账本 / commit），每个目标一个 dispatcher 成员；成员执行 `awf-dispatch <目标> <票据> --wait` 同步等到回合结束，把「成功/失败、目标 commit、check 结果、阻塞原因」回报 captain，由 captain 汇总归档，成员不代写目标仓库。
+- 复核分级：新增功能/小调整走快速车道——必须自带测试进 smoke + 自检门禁，captain 快验即可；只有架构级改动（契约/默认行为/模板结构）才走 reviewer 全量复核（见 `docs/team-flow.md` §3.5）。
 - 派发豁免：单行修改、只读查询、跑一次校验可直接做；建队开销大于任务本身时也可不建队——两种情况都要在回复里说明为何不建队。
 - 团队启动使用 `approval=automatic`（用户已明确授权）：不再 staged 审批；建队后仍贴 3 行计划（目标/成员/验收），发现不对可立即叫停。
 - 跨项目写仍走 `awf-dispatch` 派发给目标项目自己的会话，不由本仓库团队代写目标仓库；默认由 team 内的 dispatcher 成员同步执行并回报（见 `docs/team-flow.md`「派发模式」）。

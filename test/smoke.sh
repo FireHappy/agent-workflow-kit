@@ -98,6 +98,149 @@ if printf '%s\n' "$help_text" | grep -q '\[awf\]'; then
 else
   bad "--help 未说明 [awf] 标题约定"
 fi
+if printf '%s\n' "$help_text" | grep -q '疑似僵尸'; then
+  ok "--help 说明僵尸会话与退出码 4"
+else
+  bad "--help 未说明僵尸会话判定"
+fi
+if printf '%s\n' "$help_text" | grep -q '未落地'; then
+  ok "--help 说明回合结束后的落地检查"
+else
+  bad "--help 未说明落地检查"
+fi
+# 1.4 release-prep：help / 参数校验 / dry-run / 临时目录装配（不碰真实仓库）
+rp_help="$("$PROJ/agent-workflow/bin/awf" release-prep --help 2>&1)"
+if printf '%s\n' "$rp_help" | grep -q 'release-prep <X.Y.Z>'; then
+  ok "release-prep --help 打印用法"
+else
+  bad "release-prep --help 未打印用法"
+fi
+if printf '%s\n' "$rp_help" | grep -q -- '--dry-run'; then
+  ok "release-prep --help 列出 --dry-run"
+else
+  bad "release-prep --help 未列出 --dry-run"
+fi
+if printf '%s\n' "$rp_help" | grep -q '不自动 commit'; then
+  ok "release-prep --help 声明不自动 commit/tag/push"
+else
+  bad "release-prep --help 未声明不自动 commit"
+fi
+
+bad_ver_out=""
+if bad_ver_out="$("$PROJ/agent-workflow/bin/awf" release-prep 1.2 2>&1)"; then
+  bad "release-prep 接受了非法版本号 1.2"
+else
+  ok "release-prep 拒绝非法版本号"
+fi
+if printf '%s\n' "$bad_ver_out" | grep -q 'X.Y.Z'; then
+  ok "release-prep 非法版本号打印用法"
+else
+  bad "release-prep 非法版本号未打印用法"
+fi
+if "$PROJ/agent-workflow/bin/awf" release-prep >/dev/null 2>&1; then
+  bad "release-prep 缺少版本号仍成功"
+else
+  ok "release-prep 缺少版本号退出非 0"
+fi
+
+make_release_fixture() {
+  local dir="$1"
+  mkdir -p "$dir/agent-workflow/tasks/dev" "$dir/bin" "$dir/agent-workflow/bin" "$dir/test"
+  printf 'id: release-test\n' > "$dir/agent-workflow/project.yaml"
+  printf '0.0.1\n' > "$dir/VERSION"
+  {
+    printf '# Changelog\n\n'
+    printf '## [Unreleased]\n\n### Added\n- 待发版条目\n\n'
+    printf '## [0.0.1] - 2026-01-01\n'
+  } > "$dir/CHANGELOG.md"
+  printf '# 正在开发\n' > "$dir/agent-workflow/tasks/dev/current.md"
+  {
+    printf '# 已完成\n\n'
+    printf '| 任务ID | 优先级 | 描述 | 完成日期 |\n'
+    printf '|--------|--------|------|----------|\n'
+    printf '| DEV-007 | P1 | 旧任务 | 2026-10-01 |\n'
+  } > "$dir/agent-workflow/tasks/dev/done.md"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/bin/awf"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/agent-workflow/bin/awf"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/agent-workflow/check_workflow.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/test/smoke.sh"
+  chmod +x "$dir/bin/awf" "$dir/agent-workflow/bin/awf" \
+    "$dir/agent-workflow/check_workflow.sh" "$dir/test/smoke.sh"
+}
+
+REL_DRY="$TMP/release-dry"
+make_release_fixture "$REL_DRY"
+dry_out="$("$PROJ/agent-workflow/bin/awf" release-prep --root "$REL_DRY" 0.4.2 --dry-run 2>&1)"
+if printf '%s\n' "$dry_out" | grep -q 'init . --force --no-register'; then
+  ok "release-prep --dry-run 打印 init 动作"
+else
+  bad "release-prep --dry-run 未打印 init 动作"
+fi
+if printf '%s\n' "$dry_out" | grep -q 'bootstrap'; then
+  ok "release-prep --dry-run 打印 bootstrap 动作"
+else
+  bad "release-prep --dry-run 未打印 bootstrap 动作"
+fi
+if [ "$(cat "$REL_DRY/VERSION")" = "0.0.1" ] \
+  && [ "$(grep -c 'Unreleased' "$REL_DRY/CHANGELOG.md")" = "1" ] \
+  && ! grep -q 'release-prep 0.4.2' "$REL_DRY/agent-workflow/tasks/dev/current.md"; then
+  ok "release-prep --dry-run 不修改文件"
+else
+  bad "release-prep --dry-run 修改了文件"
+fi
+
+REL="$TMP/release-real"
+make_release_fixture "$REL"
+if rel_out="$("$PROJ/agent-workflow/bin/awf" release-prep --root "$REL" 0.4.2 2>&1)"; then
+  ok "release-prep 临时目录装配成功"
+else
+  bad "release-prep 临时目录装配失败：$rel_out"
+fi
+if [ "$(cat "$REL/VERSION")" = "0.4.2" ]; then
+  ok "release-prep 写入 VERSION"
+else
+  bad "release-prep 未写入 VERSION"
+fi
+if grep -q '^## \[0.4.2\] - ' "$REL/CHANGELOG.md" && ! grep -q '^## \[Unreleased\]' "$REL/CHANGELOG.md"; then
+  ok "release-prep 把 Unreleased 替换为版本标题"
+else
+  bad "release-prep 未正确替换 Unreleased"
+fi
+if grep -q 'DEV-008' "$REL/agent-workflow/tasks/dev/done.md" \
+  && grep -q 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/done.md"; then
+  ok "release-prep 自动取下一个 ID 并归档"
+else
+  bad "release-prep 未归档账本或 ID 不正确"
+fi
+if ! grep -q 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/current.md"; then
+  ok "release-prep 归档后清理 current.md"
+else
+  bad "release-prep 归档后仍残留 current.md 块"
+fi
+if printf '%s\n' "$rel_out" | grep -q 'git tag -a v0.4.2' \
+  && printf '%s\n' "$rel_out" | grep -q 'git push origin main v0.4.2' \
+  && printf '%s\n' "$rel_out" | grep -q 'release: v0.4.2（DEV-008）'; then
+  ok "release-prep 打印 commit/tag/push 下一步与建议消息"
+else
+  bad "release-prep 下一步提示不完整"
+fi
+idem_out="$("$PROJ/agent-workflow/bin/awf" release-prep --root "$REL" 0.4.2 2>&1)"
+if [ "$(grep -c 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/done.md")" = "1" ] \
+  && printf '%s\n' "$idem_out" | grep -q '幂等'; then
+  ok "release-prep 重复执行幂等"
+else
+  bad "release-prep 重复执行产生了重复账本"
+fi
+
+# 没有 Unreleased 且没有目标版本：提示手动，不报错
+printf '# Changelog\n' > "$REL/CHANGELOG.md"
+manual_out="$("$PROJ/agent-workflow/bin/awf" release-prep --root "$REL" 0.4.3 2>&1)"
+if printf '%s\n' "$manual_out" | grep -q '手动'; then
+  ok "release-prep 无 Unreleased 时提示手动"
+else
+  bad "release-prep 无 Unreleased 时未提示手动"
+fi
+
 if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
 import contextlib
 import importlib.machinery
@@ -106,7 +249,10 @@ import inspect
 import io
 import json
 import pathlib
+import subprocess
 import sys
+import tempfile
+import time
 
 source = pathlib.Path(sys.argv[1])
 loader = importlib.machinery.SourceFileLoader("awf_dispatch_reuse_under_test", str(source))
@@ -128,11 +274,14 @@ def row(session_id, cwd=str(target), running=False, blank=False, title="",
         "running": running,
         "blank": blank,
         "updatedAt": updated,
-        "projections": {"values": values},
+        "projections": {"values": values, "asOfSeq": 1},
     }
 
 
 assert module.DEFAULT_REUSE is True, "默认必须复用"
+assert module.ZOMBIE_TURN_SECONDS == 5.0, "僵尸判定阈值必须是 5s"
+assert module.LANDING_POLL_SECONDS == 10.0, "落地轮询间隔必须是 10s"
+assert (module.EXIT_OK, module.EXIT_FAIL, module.EXIT_TIMEOUT, module.EXIT_ZOMBIE) == (0, 2, 3, 4)
 assert module.PRESSURE_HINT_LIMIT == 0.9, "压力只作 0.9 提示，不再作为轮换阈值"
 assert module.DEFAULT_IDLE_WAIT == 300, "running 等待默认 300s"
 assert module.MODULE_DEFAULT == "通用", "默认模块必须是「通用」"
@@ -236,9 +385,11 @@ module.time.sleep = lambda _seconds: None  # wait_for_idle 在测试里不真等
 
 
 class FakeDispatchApi:
-    def __init__(self, rows, idle_after=None):
+    def __init__(self, rows, idle_after=None, page=None, mark_updated=False):
         self.rows = rows
         self.idle_after = idle_after
+        self.page = page if page is not None else {"records": []}
+        self.mark_updated = mark_updated
         self.calls = 0
         self.created = []
         self.renamed = []
@@ -250,7 +401,16 @@ class FakeDispatchApi:
             running = self.calls < self.idle_after
             for item in self.rows:
                 item["running"] = running
+        if self.mark_updated:
+            now_ms = int(time.time() * 1000)
+            for item in self.rows:
+                item["updatedAt"] = now_ms
         return self.rows
+
+    def rpc(self, method, params, timeout=30):
+        if method != "session/page":
+            raise module.DispatchError(f"未知 RPC：{method}")
+        return self.page
 
     def create_session(self, workspace_id):
         created = row(f"s-created-{len(self.created) + 1}", title="")
@@ -287,32 +447,46 @@ class VanishApi(FakeDispatchApi):
         return self.rows
 
 
+def preflight_stub(api, sessions=True):
+    def stub(target, args, need_channel):
+        rows = api.sessions() if sessions else []
+        return {
+            "api": api,
+            "workspace": {"title": "w", "workspaceId": "id"},
+            "sessions": rows,
+        }
+    return stub
+
+
+def _args(**overrides):
+    values = dict(
+        session="", reuse=True, module="", title="", wait=False, timeout=600,
+        idle_wait=300, force=False, team=False, json=False, headless=False,
+        handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
+        allow_active=False, apply=False, prune=False, web_url="",
+    )
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
 def run_dispatch(api, task_module, idle_wait=300, force=False, reuse=True,
-                 json_mode=False, expect_error=False):
+                 json_mode=False, expect_error=False, sessions_in_preflight=True):
     logs = []
     output = io.StringIO()
     original = (module.preflight, module.append_log, module.emit)
-    module.preflight = lambda target, args, need_channel: {
-        "api": api,
-        "workspace": {"title": "w", "workspaceId": "id"},
-    }
+    module.preflight = preflight_stub(api, sessions_in_preflight)
     module.append_log = lambda entry: logs.append(entry) or pathlib.Path("/tmp/awf-dispatch-log.md")
     module.emit = lambda message, json_mode=False: None
     text = (
         f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n"
         f"- 模块：{task_module}\n"
     )
-    args = argparse.Namespace(
-        session="", reuse=reuse, module="", title="", wait=False, timeout=600,
-        idle_wait=idle_wait, force=force, team=False, json=json_mode, headless=False,
-        handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
-        allow_active=False, apply=False, prune=False, web_url="",
-    )
+    args = _args(reuse=reuse, idle_wait=idle_wait, force=force, json=json_mode)
     try:
         with contextlib.redirect_stdout(output):
             try:
                 code = module.dispatch_session(
-                    target, pathlib.Path("/tmp/task.md"), text,
+                    target, pathlib.Path("/tmp/TEST-001-task.md"), text,
                     f"{project} · TEST-001", "dev", args,
                 )
             except module.DispatchError as error:
@@ -327,12 +501,224 @@ def run_dispatch(api, task_module, idle_wait=300, force=False, reuse=True,
     return logs, output.getvalue()
 
 
+def run_wait_dispatch(api, task_module, timeout=30.0, landing="commit", landing_calls=None,
+                      repo=None, expect_error=False):
+    logs = []
+    output = io.StringIO()
+    dispatch_target = repo or target
+    original = (module.preflight, module.append_log, module.emit, module.wait_for_landing)
+    module.preflight = preflight_stub(api)
+    module.append_log = lambda entry: logs.append(entry) or pathlib.Path("/tmp/awf-dispatch-log.md")
+    module.emit = lambda message, json_mode=False: None
+
+    def fake_landing(target_arg, task_id, initial_head, remaining):
+        if landing_calls is not None:
+            landing_calls.append(
+                {"task_id": task_id, "initial_head": initial_head, "timeout": remaining}
+            )
+        return landing
+
+    module.wait_for_landing = fake_landing
+    text = (
+        f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n"
+        f"- 模块：{task_module}\n"
+    )
+    args = _args(wait=True, timeout=timeout, json=True)
+    try:
+        with contextlib.redirect_stdout(output):
+            try:
+                code = module.dispatch_session(
+                    dispatch_target, pathlib.Path("/tmp/TEST-001-task.md"), text,
+                    f"{project} · TEST-001", "dev", args,
+                )
+            except module.DispatchError as error:
+                if not expect_error:
+                    raise
+                return str(error), logs, output.getvalue()
+    finally:
+        (module.preflight, module.append_log, module.emit,
+         module.wait_for_landing) = original
+    if expect_error:
+        raise AssertionError("预期派发失败但成功了")
+    return code, logs, output.getvalue()
+
+
+# --- 0.4.2 可靠性：回合耗时 / 活动证据 / 落地判定（纯函数 + mock） ---
+prompt_ms = int(time.time() * 1000)
+fast = FakeApi([[row("s-awf", updated=prompt_ms + 1)]])
+fast_row, fast_seconds = module.wait_for_turn(fast, "s-awf", prompt_ms, timeout=0.2, json_mode=True)
+assert fast_row is not None and fast_seconds is not None and fast_seconds < 5, fast_seconds
+
+observed = FakeApi([[row("s-awf", running=True)], [row("s-awf", updated=prompt_ms + 1)]])
+observed_row, observed_seconds = module.wait_for_turn(
+    observed, "s-awf", prompt_ms, timeout=0.2, json_mode=True)
+assert observed_row is not None and observed_seconds is not None and observed_seconds >= 0
+
+
+class PageApi:
+    def __init__(self, page):
+        self.page = page
+
+    def rpc(self, method, params, timeout=30):
+        return self.page
+
+
+class BrokenPageApi:
+    def rpc(self, method, params, timeout=30):
+        raise module.DispatchError("page 不可用")
+
+
+def activity_row():
+    value = row("s-act")
+    value["projections"]["asOfSeq"] = 1
+    return value
+
+
+def event(kind, data, seq=1, stamp=None):
+    return {"event": {"type": kind, "seq": seq, "time": stamp or prompt_ms, "data": data}}
+
+
+empty_activity = module.turn_activity(PageApi({"records": []}), activity_row())
+assert empty_activity["available"] and not empty_activity["has_output"] and not empty_activity["has_tool"]
+assert empty_activity["turn_ended"] is False
+
+text_activity = module.turn_activity(PageApi({"records": [
+    event("turn/end", {"turn": 1}, seq=3, stamp=prompt_ms + 2),
+    event("assistant/message",
+          {"turn": 1, "message": {"content": [{"type": "text", "text": "完成"}]}},
+          seq=2, stamp=prompt_ms + 1),
+]}), activity_row())
+assert text_activity["has_output"] and text_activity["text"] == "完成"
+assert text_activity["turn_ended"] is True
+
+tool_activity = module.turn_activity(PageApi({"records": [
+    event("turn/end", {"turn": 1}, seq=3, stamp=prompt_ms + 2),
+    event("tool/call", {"turn": 1, "name": "bash"}, seq=2, stamp=prompt_ms + 1),
+]}), activity_row())
+assert tool_activity["has_tool"] and not tool_activity["has_output"]
+assert tool_activity["turn_ended"] is True
+
+# 历史回合的文本/工具调用不能算到本回合（否则僵尸会被历史掩盖）
+history_activity = module.turn_activity(PageApi({"records": [
+    event("assistant/message",
+          {"turn": 1, "message": {"content": [{"type": "text", "text": "上一回合"}]}},
+          seq=2, stamp=prompt_ms - 3000),
+    event("tool/call", {"turn": 1, "name": "bash"}, seq=3, stamp=prompt_ms - 2000),
+    event("turn/end", {"turn": 2}, seq=5, stamp=prompt_ms + 1),
+]}), activity_row())
+assert not history_activity["has_output"] and not history_activity["has_tool"], history_activity
+unreadable = module.turn_activity(BrokenPageApi(), activity_row())
+assert unreadable["available"] is False, "读不到记录时不能判僵尸"
+
+orig_sha, orig_ledger = module.git_head_sha, module.ledger_has_id
+try:
+    heads = iter(["aaa", "aaa", "bbb"])
+    module.git_head_sha = lambda target: next(heads)
+    module.ledger_has_id = lambda target, task_id: False
+    assert module.wait_for_landing(
+        target, "TEST-001", "aaa", timeout=0.5, interval=0.01) == "commit"
+
+    module.git_head_sha = lambda target: "aaa"
+    module.ledger_has_id = lambda target, task_id: task_id == "TEST-001"
+    assert module.wait_for_landing(
+        target, "TEST-001", "aaa", timeout=0.5, interval=0.01) == "done"
+
+    module.ledger_has_id = lambda target, task_id: False
+    assert module.wait_for_landing(
+        target, "TEST-001", "aaa", timeout=0.05, interval=0.01) is None
+
+    # 轮询中途读取失败（None）不能当作 HEAD 变化
+    module.git_head_sha = lambda target: None
+    assert module.wait_for_landing(
+        target, "TEST-001", "aaa", timeout=0.05, interval=0.01) is None
+    failed_heads = iter([None, None, "bbb"])
+    module.git_head_sha = lambda target: next(failed_heads)
+    assert module.wait_for_landing(
+        target, "TEST-001", "aaa", timeout=0.5, interval=0.01) == "commit"
+
+    # 空仓库：初始 ""，首次 commit 后应正常判 landed
+    empty_heads = iter(["", "", "abc"])
+    module.git_head_sha = lambda target: next(empty_heads)
+    assert module.wait_for_landing(
+        target, "TEST-001", "", timeout=0.5, interval=0.01) == "commit"
+
+    # 初始 HEAD 不可用（None）：只能等归档，不能靠后续成功推断 commit
+    module.git_head_sha = lambda target: "abc"
+    assert module.wait_for_landing(
+        target, "TEST-001", None, timeout=0.05, interval=0.01) is None
+finally:
+    module.git_head_sha, module.ledger_has_id = orig_sha, orig_ledger
+
+
+TEXT_PAGE = {"records": [
+    {"event": {"type": "assistant/message", "seq": 2, "time": 4102444800000,
+               "data": {"turn": 1,
+                        "message": {"content": [{"type": "text", "text": "已完成并提交"}]}}}},
+    {"event": {"type": "turn/end", "seq": 3, "time": 4102444800001,
+               "data": {"turn": 1}}},
+]}
+
+# git_head_sha 三态：空仓库 ""、正常 sha、读取失败 None
+with tempfile.TemporaryDirectory() as tmp:
+    repo = pathlib.Path(tmp)
+    assert module.git_head_sha(repo) is None, "非 git 目录必须返回 None"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    assert module.git_head_sha(repo) == "", "空仓库（无 commit）必须返回空串"
+    (repo / "a.txt").write_text("a", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.email=smoke@test",
+         "-c", "user.name=smoke", "commit", "-qm", "init"],
+        check=True,
+    )
+    sha = module.git_head_sha(repo)
+    assert isinstance(sha, str) and len(sha) == 40, sha
+    assert module.wait_for_landing(
+        repo, "TEST-001", "", timeout=0.1, interval=0.01) == "commit"
+    assert module.git_head_sha(repo / "missing") is None
+
+
+# 初始 HEAD 读取失败：git 仓库必须明确报错，且不发送任务
+with tempfile.TemporaryDirectory() as tmp:
+    broken_repo = pathlib.Path(tmp)
+    (broken_repo / ".git").mkdir()
+    broken_api = FakeDispatchApi(
+        [row("s-broken", title=title)], mark_updated=True, page=TEXT_PAGE)
+    real_sha = module.git_head_sha
+    module.git_head_sha = lambda target: None
+    try:
+        broken_msg, _, _ = run_wait_dispatch(
+            broken_api, "工作流", repo=broken_repo, expect_error=True)
+    finally:
+        module.git_head_sha = real_sha
+    assert "初始 HEAD" in broken_msg and "落地判定不可靠" in broken_msg, broken_msg
+    assert broken_api.prompts == [], "初始 HEAD 失败时不得发送任务"
+
+
+# 目标不是 git 仓库：退回仅以 done.md 判定，不因无法读 HEAD 而中断
+with tempfile.TemporaryDirectory() as tmp:
+    plain_dir = pathlib.Path(tmp)
+    plain_api = FakeDispatchApi(
+        [row("s-plain", title=title)], mark_updated=True, page=TEXT_PAGE)
+    plain_calls = []
+    real_sha = module.git_head_sha
+    module.git_head_sha = lambda target: None
+    try:
+        plain_code, _, _ = run_wait_dispatch(
+            plain_api, "工作流", landing="done", landing_calls=plain_calls, repo=plain_dir)
+    finally:
+        module.git_head_sha = real_sha
+    assert plain_code == 0, plain_code
+    assert plain_calls and plain_calls[0]["initial_head"] is None, plain_calls
+
+
 # 模块相同 → 复用，不新建
 same_api = FakeDispatchApi([row("s-same", title=title)])
 logs, _ = run_dispatch(same_api, "工作流")
 assert same_api.created == [], "同模块应复用，不新建会话"
 assert same_api.prompts and same_api.prompts[0][0] == "s-same", same_api.prompts
 assert "会话来源：复用" in logs[0]
+assert same_api.calls == 1, f"G4 探针与复用查找应合并为一次 session/list，实际 {same_api.calls} 次"
 
 # 模块不同 → 不复用，新建本模块会话并改名
 other_api = FakeDispatchApi([row("s-doc", title=module.awf_session_title(project, "文档"))])
@@ -365,9 +751,10 @@ assert running_api.prompts and running_api.prompts[0][0] == "s-same", running_ap
 
 # --new 不碰 session/list：mock sessions() 抛错也应成功（不应报 G4 / 复用检查失败）
 new_api = NoListApi([row("s-same", title=title)])
-logs, _ = run_dispatch(new_api, "工作流", reuse=False)
+logs, _ = run_dispatch(new_api, "工作流", reuse=False, sessions_in_preflight=False)
 assert new_api.created == ["s-created-1"], new_api.created
 assert new_api.prompts and new_api.prompts[0][0] == "s-created-1", new_api.prompts
+assert new_api.calls == 0, "显式 --new 不应调用 session/list"
 assert "会话来源：新建" in logs[0]
 
 # 自动路径的同名保护仍按原逻辑 gated：自动新建遇同名会话要 --force；--new 跳过
@@ -397,6 +784,44 @@ gone_msg = run_dispatch(
 assert "消失" in gone_msg and "重新派发" in gone_msg, gone_msg
 assert "超时" not in gone_msg, gone_msg
 
+
+
+# --- 0.4.2 可靠性：--wait 僵尸 / 落地 / 未落地（dispatch_session 全流程 mock） ---
+
+ZOMBIE_PAGE = {"records": [{"event": {
+    "type": "turn/end", "seq": 2, "time": 4102444800000, "data": {"turn": 1},
+}}]}
+zombie_calls = []
+zombie_api = FakeDispatchApi(
+    [row("s-zombie", title=title)], mark_updated=True, page=ZOMBIE_PAGE)
+zombie_code, zombie_logs, zombie_out = run_wait_dispatch(
+    zombie_api, "工作流", landing="commit", landing_calls=zombie_calls)
+zombie_payload = json.loads(zombie_out)
+assert zombie_code == module.EXIT_ZOMBIE == 4, zombie_code
+assert zombie_payload["zombie"] is True and zombie_payload["sessionId"] == "s-zombie"
+assert "僵尸" in zombie_payload["message"] and "--new" in zombie_payload["message"]
+assert "僵尸" in zombie_logs[0]
+assert zombie_calls == [], "僵尸判定优先于落地轮询"
+
+landing_calls = []
+ok_api = FakeDispatchApi([row("s-ok", title=title)], mark_updated=True, page=TEXT_PAGE)
+ok_code, ok_logs, ok_out = run_wait_dispatch(
+    ok_api, "工作流", landing="commit", landing_calls=landing_calls)
+ok_payload = json.loads(ok_out)
+assert ok_code == module.EXIT_OK == 0, ok_code
+assert ok_payload["status"] == "completed" and ok_payload["landed"] == "commit"
+assert ok_payload["final"] == "已完成并提交"
+assert "完成（已落地：commit）" in ok_logs[0]
+assert landing_calls and landing_calls[0]["task_id"] == "TEST-001"
+
+miss_api = FakeDispatchApi([row("s-miss", title=title)], mark_updated=True, page=TEXT_PAGE)
+miss_code, miss_logs, miss_out = run_wait_dispatch(miss_api, "工作流", landing=None)
+miss_payload = json.loads(miss_out)
+assert miss_code == module.EXIT_TIMEOUT == 3, miss_code
+assert miss_payload["status"] == "not_landed" and miss_payload["landed"] is False
+assert "未落地" in miss_payload["message"] and "--force" in miss_payload["message"]
+assert "未落地" in miss_logs[0]
+
 # 日志记录复用/新建、模块；--session 来源单独标注；headless 不写
 base = dict(
     alias="proj", target=target, title="任务", session_id="s-awf",
@@ -417,7 +842,7 @@ for needle in ("args.module", "resolve_module(", "args.reuse", "args.session",
                "select_reuse_session(", "wait_for_idle(", "args.idle_wait",
                "reuse_rename_needed(", "api.rename(session_id, session_name)",
                "--new", "pressure_hint(", "SESSION_GONE", "renamed = True",
-               "if args.reuse:"):
+               "if args.reuse:", "turn_activity(", "wait_for_landing(", "git_head_sha(", "EXIT_ZOMBIE"):
     assert needle in session_src, f"dispatch_session 缺少 {needle}"
 
 main_src = inspect.getsource(module.main)

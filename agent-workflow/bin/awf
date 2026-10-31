@@ -69,6 +69,10 @@ awf — agent workflow framework
   awf find <别名|ID>
       按别名或 ID 查找项目路径。
 
+  awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
+      一键发版装配：刷新生成副本与 AGENTS 入口、写账本、改 VERSION/CHANGELOG、
+      跑校验并归档；只打印下一步 git 命令，不自动 commit/tag/push。
+
   awf-dispatch <别名|目录> <任务文件>
       跨项目派发（DSH 会话适配）：检查目标工作流/工作区后，在目标工作区创建会话执行。
       另见 docs/dispatch.md 与 agent-workflow/workflows/cross-project.md。
@@ -822,6 +826,238 @@ cmd_status() {
   say "已更新 $target"
 }
 
+# ---------------------------------------------------------------- 发版装配
+
+release_usage() {
+  cat <<'EOF'
+用法：awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
+
+一键发版装配（在 kit 仓库根运行）：
+  1. ./bin/awf init . --force --no-register + bootstrap 刷新生成副本与 AGENTS 入口
+  2. 在 agent-workflow/tasks/dev/current.md 写入 release-prep 任务块
+  3. 改 VERSION；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
+  4. 跑 ./agent-workflow/check_workflow.sh 与 bash test/smoke.sh
+  5. ./agent-workflow/bin/awf status 刷新 status.md，并把任务块归档到 done.md
+  6. 打印下一步 git add/commit/tag/push 命令与建议 commit 消息
+
+--dry-run   只打印将执行的动作，不改文件、不跑命令
+说明：本命令不自动 commit / tag / push；推送必须由用户明确触发。
+EOF
+}
+
+release_version_ok() {
+  case "$1" in
+    *[!0-9.]*|.*|*.|*..*|"") return 1 ;;
+  esac
+  printf '%s' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+}
+
+release_next_dev_id() {
+  local max
+  max="$(cat "$ROOT"/agent-workflow/tasks/dev/*.md 2>/dev/null \
+    | grep -o 'DEV-[0-9][0-9]*' \
+    | sed 's/DEV-//; s/^0*//' \
+    | sort -n | tail -n 1 || true)"
+  [ -n "$max" ] || max=0
+  printf 'DEV-%03d' "$((max + 1))"
+}
+
+release_current_id() {
+  [ -f "$CURRENT" ] || return 0
+  awk -v ver="$VERSION" '
+    index($0, "## [") == 1 && index($0, "release-prep " ver) > 0 {
+      line = substr($0, 5); c = index(line, "] ")
+      if (c > 0) { print substr(line, 1, c - 1); exit }
+    }
+  ' "$CURRENT"
+}
+
+release_done_id() {
+  [ -f "$DONE" ] || return 0
+  awk -F'|' -v ver="$VERSION" '
+    index($0, "release-prep " ver) > 0 && $2 ~ /DEV-/ {
+      id = $2; gsub(/^[ \t]+|[ \t]+$/, "", id); print id; exit
+    }
+  ' "$DONE"
+}
+
+release_write_current() {
+  if [ ! -f "$CURRENT" ]; then
+    printf '# 正在开发\n\n' > "$CURRENT"
+  fi
+  if grep -q '（暂无进行中任务）' "$CURRENT"; then
+    grep -v '（暂无进行中任务）' "$CURRENT" > "$CURRENT.tmp" && mv "$CURRENT.tmp" "$CURRENT"
+  fi
+  if [ -n "$(release_current_id)" ]; then
+    say "账本：复用当前未完成的 $TASK_ID 块"
+    return 0
+  fi
+  {
+    printf '\n## [%s] release-prep %s\n\n' "$TASK_ID" "$VERSION"
+    printf '| 字段 | 内容 |\n|------|------|\n'
+    printf '| 优先级 | P1 |\n'
+    printf '| 状态 | active |\n'
+    printf '| Owner | agent |\n'
+    printf '| 协作模式 | single |\n'
+    printf '| 来源任务 | 用户直接触发 |\n'
+    printf '| 修改范围 | VERSION / CHANGELOG.md / 生成副本 / 账本 |\n'
+    printf '| 分支/工作区 | N/A |\n'
+    printf '| 依赖 | 无 |\n'
+    printf '| 最近更新 | %s |\n\n' "$(today)"
+    printf '### 目标\n一键发版装配 %s。\n\n' "$VERSION"
+    printf '### 验收标准\n- [ ] ./agent-workflow/check_workflow.sh 通过\n- [ ] bash test/smoke.sh 通过\n\n'
+    printf '### 下一步\n执行 release-prep 打印的 git add/commit/tag/push 命令（由人触发）。\n'
+  } >> "$CURRENT"
+  say "账本：$CURRENT 写入 $TASK_ID（release-prep $VERSION）"
+}
+
+release_archive() {
+  if [ -z "$(release_done_id)" ]; then
+    if [ ! -f "$DONE" ]; then
+      printf '# 已完成\n\n| 任务ID | 优先级 | 描述 | 完成日期 |\n|--------|--------|------|----------|\n' > "$DONE"
+    fi
+    printf '| %s | P1 | release-prep %s：一键发版装配 | %s |\n' \
+      "$TASK_ID" "$VERSION" "$(today)" >> "$DONE"
+    say "账本：已归档 $TASK_ID 到 $DONE"
+  else
+    say "账本：$DONE 已有 release-prep $VERSION 记录（幂等跳过）"
+  fi
+  if [ -f "$CURRENT" ]; then
+    awk -v id="$TASK_ID" '
+      $0 ~ "^## \\[" id "\\]" { skip = 1; next }
+      skip && /^## \[/ { skip = 0 }
+      !skip { print }
+    ' "$CURRENT" > "$CURRENT.tmp" && mv "$CURRENT.tmp" "$CURRENT"
+  fi
+}
+
+release_run() {
+  say "+ $*"
+  ( cd "$ROOT" && "$@" ) || die "步骤失败：$*"
+}
+
+cmd_release_prep() {
+  local version="" root="" dry_run=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --root)
+        [ $# -ge 2 ] || { release_usage >&2; die "缺少 --root 的目录参数"; }
+        root="$2"; shift 2 ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) release_usage; return 0 ;;
+      --*) release_usage >&2; die "未知选项：$1" ;;
+      *)
+        [ -z "$version" ] || { release_usage >&2; die "只能指定一个版本号"; }
+        version="$1"; shift ;;
+    esac
+  done
+
+  if [ -z "$version" ]; then
+    release_usage >&2
+    die "缺少版本号（用法：awf release-prep <X.Y.Z>）"
+  fi
+  if ! release_version_ok "$version"; then
+    release_usage >&2
+    die "版本号格式错误：$version（应为 X.Y.Z）"
+  fi
+  VERSION="$version"
+
+  if [ -n "$root" ]; then
+    [ -d "$root" ] || die "目录不存在：$root"
+    ROOT="$(cd "$root" && pwd)"
+  else
+    ROOT="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  fi
+  [ -f "$ROOT/agent-workflow/project.yaml" ] || die "不是 agent-workflow 项目：$ROOT"
+  CURRENT="$ROOT/agent-workflow/tasks/dev/current.md"
+  DONE="$ROOT/agent-workflow/tasks/dev/done.md"
+
+  TASK_ID="$(release_done_id)"
+  if [ -z "$TASK_ID" ]; then
+    TASK_ID="$(release_current_id)"
+  fi
+  if [ -z "$TASK_ID" ]; then
+    TASK_ID="$(release_next_dev_id)"
+  fi
+
+  if [ "$dry_run" -eq 1 ]; then
+    say "[dry-run] cd $ROOT"
+    say "[dry-run] ./bin/awf init . --force --no-register"
+    say "[dry-run] ./bin/awf bootstrap"
+    if [ -n "$(release_done_id)" ]; then
+      say "[dry-run] 账本：release-prep $version 已归档（$TASK_ID），跳过写入"
+    else
+      say "[dry-run] 账本：写 $CURRENT 块 [$TASK_ID] release-prep $version，校验后归档到 $DONE"
+    fi
+    say "[dry-run] 写 VERSION=$version"
+    if [ -f "$ROOT/CHANGELOG.md" ] && grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
+      say "[dry-run] CHANGELOG: ## [Unreleased] → ## [$version] - $(today)"
+    else
+      say "[dry-run] CHANGELOG: 未找到 ## [Unreleased]，将提示手动处理"
+    fi
+    say "[dry-run] ./agent-workflow/check_workflow.sh"
+    say "[dry-run] bash test/smoke.sh"
+    say "[dry-run] 归档任务块到 done.md"
+    say "[dry-run] ./agent-workflow/bin/awf status"
+    say "[dry-run] 下一步（不会执行）：git add -A && git commit -m \"release: v$version（$TASK_ID）\" && git tag -a v$version -m \"v$version\" && git push origin main v$version"
+    return 0
+  fi
+
+  say "== release-prep $version（$TASK_ID）=="
+
+  # a. 刷新生成副本与 AGENTS 入口
+  release_run "$ROOT/bin/awf" init . --force --no-register
+  release_run "$ROOT/bin/awf" bootstrap
+
+  # b. 账本（current.md；校验通过后归档）
+  if [ -n "$(release_done_id)" ]; then
+    say "账本：release-prep $version 已归档（$TASK_ID），跳过写入"
+  else
+    release_write_current
+  fi
+
+  # c. 版本与 CHANGELOG
+  if [ ! -f "$ROOT/CHANGELOG.md" ]; then
+    die "缺少 CHANGELOG.md，无法更新版本条目（请手动补）"
+  fi
+  printf '%s\n' "$version" > "$ROOT/VERSION"
+  say "已写 VERSION=$version"
+  if grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
+    awk -v ver="$version" -v day="$(today)" '
+      !done && /^## \[Unreleased\]/ {
+        print "## [" ver "] - " day
+        done = 1
+        next
+      }
+      { print }
+    ' "$ROOT/CHANGELOG.md" > "$ROOT/CHANGELOG.md.tmp" && mv "$ROOT/CHANGELOG.md.tmp" "$ROOT/CHANGELOG.md"
+    say "CHANGELOG：## [Unreleased] → ## [$version] - $(today)"
+  elif grep -q "^## \[$version\]" "$ROOT/CHANGELOG.md"; then
+    say "CHANGELOG：已有 ## [$version] 条目（幂等跳过）"
+  else
+    warn "CHANGELOG 没有 ## [Unreleased]，也没有 ## [$version]；请手动补版本条目"
+  fi
+
+  # d. 校验（失败即停，账本保留在 current.md）
+  release_run ./agent-workflow/check_workflow.sh
+  release_run bash test/smoke.sh
+
+  # e. 先归档再刷新 status，确保 status.md 反映最终状态
+  release_archive
+  release_run ./agent-workflow/bin/awf status
+
+  # f. 下一步（只提示，不执行）
+  say ""
+  say "下一步（未自动执行；push 需用户明确触发）："
+  say "  git add -A"
+  say "  git commit -m \"release: v$version（$TASK_ID）\""
+  say "  git tag -a v$version -m \"v$version\""
+  say "  git push origin main v$version"
+  say ""
+  say "建议 commit 消息：release: v$version（$TASK_ID）"
+  say "一键命令：git add -A && git commit -m \"release: v$version（$TASK_ID）\" && git tag -a v$version -m \"v$version\" && git push origin main v$version"
+}
+
 # ---------------------------------------------------------------- 全局索引
 
 AGENTS_HOME="${DSH_AGENTS_HOME:-$HOME/.agents}"
@@ -941,8 +1177,9 @@ main() {
     register)  cmd_register ;;
     projects)  cmd_projects ;;
     find)      cmd_find "$@" ;;
+    release-prep) cmd_release_prep "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status）" ;;
+    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / release-prep）" ;;
   esac
 }
 

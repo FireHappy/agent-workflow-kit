@@ -69,6 +69,15 @@ SESSION_TITLE_LIMIT = 40
 MODULE_DEFAULT = "通用"
 # wait_for_idle 的返回值：会话在轮询中消失/被归档，与「等待超时」区分。
 SESSION_GONE = object()
+# 无进展快失败：回合结束且耗时低于该值、又没有任何输出/工具调用 → 疑似僵尸会话。
+ZOMBIE_TURN_SECONDS = 5.0
+# 回合结束后的落地轮询间隔（等目标 commit 或归档）。
+LANDING_POLL_SECONDS = 10.0
+# 退出码：0 成功；2 前置门/派发失败；3 等待或落地超时；4 疑似僵尸会话。
+EXIT_OK = 0
+EXIT_FAIL = 2
+EXIT_TIMEOUT = 3
+EXIT_ZOMBIE = 4
 DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
 
@@ -468,11 +477,15 @@ def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = Fa
     return prompt
 
 
-def find_session(api: DshApi, session_id: str):
-    for row in api.sessions():
+def find_session_in(rows, session_id: str):
+    for row in rows or []:
         if row.get("sessionId") == session_id:
             return row
     return None
+
+
+def find_session(api: DshApi, session_id: str):
+    return find_session_in(api.sessions(), session_id)
 
 
 def session_title(row: dict) -> str:
@@ -596,7 +609,13 @@ def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = 
 
 
 def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, json_mode: bool):
+    """轮询到回合结束；返回 (会话行, 回合耗时秒) 或 (None, None)。
+
+    耗时优先用首次观测到 running 的时刻；瞬时回合可能一次都没观测到 running，
+    此时用 prompt 发送时刻近似（因此僵尸判定阈值只用于「即时结束」）。
+    """
     started = False
+    started_at = None
     deadline = time.time() + timeout
     last_note = 0
     while time.time() < deadline:
@@ -605,16 +624,21 @@ def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, js
             running = bool(row.get("running"))
             if running:
                 started = True
+                if started_at is None:
+                    started_at = time.time()
             elif started or (not row.get("blank") and (row.get("updatedAt") or 0) >= prompt_ms):
-                return row
+                if started_at is None:
+                    started_at = prompt_ms / 1000.0
+                return row, max(0.0, time.time() - started_at)
         if not json_mode and time.time() - last_note > 15:
             last_note = time.time()
             print("  … 等待目标 agent 完成（会话保留，Ctrl-C 不影响执行）", file=sys.stderr)
         time.sleep(3)
-    return None
+    return None, None
 
 
-def latest_assistant(api: DshApi, row: dict):
+def session_records(api: DshApi, row: dict):
+    """读取会话消息记录；拿不到（无 asOfSeq / RPC 失败）返回 None。"""
     projections = row.get("projections") or {}
     through = projections.get("asOfSeq")
     if not isinstance(through, int):
@@ -633,9 +657,15 @@ def latest_assistant(api: DshApi, row: dict):
         )
     except DispatchError:
         return None
+    return page.get("records", [])
 
+
+def latest_assistant(api: DshApi, row: dict):
+    records = session_records(api, row)
+    if records is None:
+        return None
     texts = []
-    for record in page.get("records", []):
+    for record in records:
         event = record.get("event") or {}
         if event.get("type") != "assistant/message":
             continue
@@ -644,6 +674,95 @@ def latest_assistant(api: DshApi, row: dict):
             if part.get("type") == "text" and part.get("text"):
                 texts.append(part["text"])
     return texts[-1] if texts else None
+
+
+def turn_activity(api: DshApi, row: dict, since_ms: int = 0) -> dict:
+    """统计「本回合」的活动证据：assistant 文本输出 / 工具调用。
+
+    优先用事件 time 过滤 prompt 之后产生的事件，避免把会话历史当成新回合产出；
+    事件没有时间戳时，退回用最后一个 turn/end 的 turn 号过滤。
+    available=False 表示读不到记录（不能据此判僵尸）。
+    """
+    records = session_records(api, row)
+    if records is None:
+        return {
+            "available": False,
+            "has_output": False,
+            "has_tool": False,
+            "turn_ended": False,
+            "text": None,
+        }
+
+    current_turn = None
+    turn_ended = False
+    for record in records:
+        event = record.get("event") or {}
+        if event.get("type") != "turn/end":
+            continue
+        data = event.get("data") or {}
+        turn = data.get("turn")
+        if isinstance(turn, int):
+            current_turn = turn
+            stamp = event.get("time")
+            if not since_ms or not isinstance(stamp, int):
+                turn_ended = True
+            elif stamp >= since_ms:
+                turn_ended = True
+
+    texts = []
+    has_tool = False
+    for record in records:
+        event = record.get("event") or {}
+        data = event.get("data") or {}
+        event_type = str(event.get("type") or "").lower()
+        stamp = event.get("time")
+        if since_ms and isinstance(stamp, int):
+            # 事件时间最可靠：只统计 prompt 之后产生的事件（历史回合不参与）。
+            if stamp < since_ms:
+                continue
+        elif current_turn is not None and data.get("turn") != current_turn:
+            continue
+        if "tool" in event_type:
+            has_tool = True
+        if event_type == "assistant/message":
+            message = data.get("message") or {}
+            for part in message.get("content") or []:
+                part_type = str(part.get("type") or "").lower()
+                if part_type == "text" and part.get("text"):
+                    texts.append(part["text"])
+                elif "tool" in part_type:
+                    has_tool = True
+    return {
+        "available": True,
+        "has_output": bool(texts),
+        "has_tool": has_tool,
+        "turn_ended": turn_ended,
+        "text": texts[-1] if texts else None,
+    }
+
+
+def wait_for_landing(target: Path, task_id: str, initial_head, timeout: float,
+                     interval: float = LANDING_POLL_SECONDS):
+    """回合结束后等落地：目标 HEAD 变化（commit）或账本 done.md 出现任务 ID（归档）。
+
+    initial_head 为 None 表示不比较 HEAD（目标非 git 仓库，仅等归档）；
+    轮询中的读取失败（None）只跳过本次，不能当作 HEAD 变化。
+    返回 "commit" / "done" / None（超时未落地）。
+    """
+    deadline = time.time() + max(0.0, timeout)
+    while True:
+        current_head = git_head_sha(target)
+        if (
+            initial_head is not None
+            and current_head is not None
+            and current_head != initial_head
+        ):
+            return "commit"
+        if task_id and ledger_has_id(target, task_id):
+            return "done"
+        if time.time() >= deadline:
+            return None
+        time.sleep(max(0.0, min(interval, deadline - time.time())))
 
 
 # ---------------------------------------------------------------- 日志
@@ -669,6 +788,27 @@ def git_head(target: Path) -> str:
         ).strip()
     except Exception:
         return "N/A"
+
+
+def git_head_sha(target: Path):
+    """落地判定用：HEAD 的 commit sha。
+
+    空仓库（尚无 commit）返回空串 ""；读取失败（非 git、仓库不可读等）
+    返回 None，两者必须严格区分，避免把读取失败误判成「HEAD 变了」。
+    """
+    try:
+        proc = run_git(["git", "-C", str(target), "rev-parse", "HEAD"])
+        if proc.returncode == 0:
+            return proc.stdout.strip() or None
+        # rev-parse HEAD 失败：只有「仓库可读但没有任何 commit」才算空仓库。
+        repo = run_git(["git", "-C", str(target), "rev-parse", "--git-dir"])
+        if repo.returncode == 0:
+            count = run_git(["git", "-C", str(target), "rev-list", "--all", "--count"])
+            if count.returncode == 0 and count.stdout.strip() == "0":
+                return ""
+        return None
+    except OSError:
+        return None
 
 
 def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
@@ -1003,6 +1143,7 @@ def preflight(target: Path, args, need_channel: bool):
         "active": check_active(target, args.allow_active),
         "workspace": None,
         "api": None,
+        "sessions": None,
     }
     emit(f"G3 可写：ok（{result['git']}；{result['active']}）", args.json)
 
@@ -1012,7 +1153,9 @@ def preflight(target: Path, args, need_channel: bool):
 
     try:
         api = DshApi(args.web_url)
-        api.sessions()  # 认证/连通性探针
+        # G4 认证/连通性探针；同时缓存这次 session/list，复用查找直接用它，
+        # 不再在 dispatch_session 里重复拉一次。
+        rows = api.sessions()
     except DispatchError as error:
         if args.add_workspace:
             raise
@@ -1033,6 +1176,7 @@ def preflight(target: Path, args, need_channel: bool):
 
     result["workspace"] = workspace
     result["api"] = api
+    result["sessions"] = rows
     emit(f"G2 工作区：ok（{workspace.get('title')} / {workspace.get('workspaceId')}）", args.json)
     emit(f"G4 通道：ok（{api.base}）", args.json)
     return result
@@ -1043,10 +1187,24 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     api = state["api"]
     workspace = state["workspace"]
 
+    # 落地基线必须在发送前读取；读取失败时区分「目标非 git」与「仓库不可读」。
+    initial_head = None
+    if args.wait:
+        initial_head = git_head_sha(target)
+        if initial_head is None:
+            if (target / ".git").exists() or is_git_repo(target):
+                raise DispatchError(
+                    f"无法读取目标仓库初始 HEAD（{target}），落地判定不可靠；"
+                    "确认仓库可读（git -C <target> rev-parse HEAD）后重试，"
+                    "或去掉 --wait 仅发送任务"
+                )
+            emit("提示：目标不是 git 仓库，--wait 落地判定仅看 done.md 归档", args.json)
+
     # 会话标题约定：`[awf] <项目名> · <模块名>`；模块来自 --module / 票据「模块：」/ 默认「通用」。
     module = resolve_module(text, args.module)
     session_name = args.title or awf_session_title(target.name, module)
-    rows = None
+    # G4 探针已在 preflight 拉过 session/list，这里直接复用，避免重复调用。
+    rows = state.get("sessions") or []
     row = None
     session_id = None
     source = None
@@ -1057,13 +1215,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     emit(f"模块：{module}（会话标题 {session_name}）", args.json)
 
     if args.session:
-        try:
-            row = find_session(api, args.session)
-        except DispatchError as error:
-            raise DispatchError(
-                f"G4 通道失败：--session 查询时 session/list 失败（{error}）；"
-                "稍后重试，或用 --headless / --handoff"
-            )
+        row = find_session_in(rows, args.session)
         if row is None:
             raise DispatchError(
                 f"--session 指定的会话不存在：{args.session}；"
@@ -1078,13 +1230,6 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         reused = True
         source = "复用（--session 指定）"
     elif args.reuse:
-        try:
-            rows = api.sessions()
-        except DispatchError as error:
-            raise DispatchError(
-                f"G4 通道失败：复用前 session/list 失败（{error}）；"
-                "加 --new 跳过复用检查，或用 --headless / --handoff"
-            )
         row = select_reuse_session(rows, target, module)
         if row is not None:
             session_id = row["sessionId"]
@@ -1114,7 +1259,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         source = "新建"
     else:
         # 复用路径：先确认会话存在；运行中的会话等它空闲，绝不静默改成新建。
-        row = find_session(api, session_id)
+        # 预检刚拉过列表，先用快照；快照里没有才重新查（正常不会发生）。
+        row = find_session_in(rows, session_id) or find_session(api, session_id)
         if row is None:
             raise DispatchError(
                 f"复用会话在等待前消失了：{session_id}；会话不可恢复，请重新派发（或用 --new 新建）"
@@ -1151,6 +1297,10 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             except DispatchError as error:
                 emit(f"提示：复用会话改名失败（继续发送任务）：{error}", args.json)
 
+    task_id = ticket_task_id(task.name)
+    if not task_id:
+        match = TICKET_ID_RE.search(text or "")
+        task_id = match.group(0) if match else ""
     prompt_ms = int(time.time() * 1000)
     try:
         api.prompt(
@@ -1210,17 +1360,144 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         return 0
 
     emit("任务已受理；等待目标 agent 完成…", args.json)
-    row = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json)
-    final_text = latest_assistant(api, row) if row else None
-    status = "完成" if row else f"超时（>{args.timeout}s，会话仍在运行）"
+    wait_started = time.time()
+    row, turn_seconds = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json)
     final_title = session_name if renamed else (session_title(row or {}) or shown_title)
+    head = git_head(target)
+
+    if row is None:
+        status = f"超时（>{args.timeout}s，会话仍在运行）"
+        entry = log_entry(target.name, target, title, session_id, final_title,
+                          workspace, status, "", task,
+                          reused=source, session_note=session_note, module=module)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "module": module,
+            "sessionTitle": final_title,
+            "reused": reused,
+            "source": source,
+            "workspace": workspace,
+            "status": "timeout",
+            "waited": True,
+            "head": head,
+            "turnSeconds": turn_seconds,
+            "zombie": False,
+            "landed": None,
+            "final": None,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(f"目标 HEAD：{head}")
+            print(f"\n已记录：{log_path}")
+        return EXIT_TIMEOUT
+
+    # 无进展快失败：回合很快结束、又没有任何输出/工具调用 → 僵尸会话，不再空等落地。
+    activity = turn_activity(api, row, prompt_ms)
+    zombie = (
+        activity["available"]
+        and activity["turn_ended"]
+        and turn_seconds is not None
+        and turn_seconds < ZOMBIE_TURN_SECONDS
+        and not activity["has_output"]
+        and not activity["has_tool"]
+    )
+    final_text = activity["text"]
+    if zombie:
+        status = "会话疑似僵尸（回合即时结束且零输出）"
+        message = "会话疑似僵尸（回合即时结束且零输出），请用 --new 重派或在 GUI 重开会话"
+        entry = log_entry(target.name, target, title, session_id, final_title,
+                          workspace, status, "", task,
+                          reused=source, session_note=session_note, module=module)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "module": module,
+            "sessionTitle": final_title,
+            "reused": reused,
+            "source": source,
+            "workspace": workspace,
+            "status": "zombie",
+            "waited": True,
+            "head": head,
+            "turnSeconds": turn_seconds,
+            "zombie": True,
+            "landed": None,
+            "final": None,
+            "message": message,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(f"会话：{session_id}")
+            print(message, file=sys.stderr)
+            print(f"\n已记录：{log_path}")
+        return EXIT_ZOMBIE
+
+    # 回合结束 ≠ 完成：再等目标把改动落地（本地 commit）或归档账本（done.md 含任务 ID）。
+    remaining = max(0.0, args.timeout - (time.time() - wait_started))
+    landed = wait_for_landing(target, task_id, initial_head, remaining)
+    head = git_head(target)
+    if not landed:
+        status = "回合已结束但任务未落地（无 commit/未归档）"
+        message = (
+            "回合已结束但任务未落地（无 commit/未归档）：可能还在等内部复核，"
+            "可重新派发（--force 同名）或 --session 续跑"
+        )
+        entry = log_entry(target.name, target, title, session_id, final_title,
+                          workspace, status, final_text or "", task,
+                          reused=source, session_note=session_note, module=module)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "module": module,
+            "sessionTitle": final_title,
+            "reused": reused,
+            "source": source,
+            "workspace": workspace,
+            "status": "not_landed",
+            "waited": True,
+            "head": head,
+            "turnSeconds": turn_seconds,
+            "zombie": False,
+            "landed": False,
+            "final": final_text,
+            "message": message,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(message, file=sys.stderr)
+            print(f"目标 HEAD：{head}")
+            if final_text:
+                print(f"\n--- 目标 agent 回报（节选）---\n{final_text.strip()[:900]}")
+            print(f"\n已记录：{log_path}")
+        return EXIT_TIMEOUT
+
+    status = "完成（已落地：commit）" if landed == "commit" else "完成（已落地：归档）"
     entry = log_entry(target.name, target, title, session_id, final_title,
                       workspace, status, final_text or "", task,
                       reused=source, session_note=session_note, module=module)
     log_path = append_log(entry)
 
     payload = {
-        "ok": bool(row),
+        "ok": True,
         "mode": "session",
         "sessionId": session_id,
         "title": title,
@@ -1229,9 +1506,12 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         "reused": reused,
         "source": source,
         "workspace": workspace,
-        "status": "completed" if row else "timeout",
+        "status": "completed",
         "waited": True,
-        "head": git_head(target),
+        "head": head,
+        "turnSeconds": turn_seconds,
+        "zombie": False,
+        "landed": landed,
         "final": final_text,
         "log": str(log_path),
     }
@@ -1239,7 +1519,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         print(json.dumps(payload, ensure_ascii=False))
     else:
         print(f"状态：{status}")
-        print(f"目标 HEAD：{git_head(target)}")
+        print(f"目标 HEAD：{head}")
         if final_text:
             excerpt = final_text.strip()
             if len(excerpt) > 900:
@@ -1248,7 +1528,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             print(excerpt)
         print(f"\n已记录：{log_path}")
         print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{final_title}」继续提细节。")
-    return 0 if row else 3
+    return EXIT_OK
 
 
 def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
@@ -1431,13 +1711,19 @@ def main(argv=None) -> int:
             "\n默认异步：复用/创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
             "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
             "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
+            "\n--wait 可靠性：\n"
+            "        回合结束后还要等落地：目标 HEAD 发生变化（commit）或账本 done.md 出现任务 ID（归档）\n"
+            "        才算完成；超时未落地返回 3，并提示可重新派发（--force 同名）或 --session 续跑。\n"
+            "        回合 <5s 且零 assistant 输出、零工具调用 → 疑似僵尸会话（常见于复用旧会话），\n"
+            "        立即返回 4，提示用 --new 重派或在 GUI 重开会话；不会空转到 --timeout。\n"
             "\n--headless：默认同样不等待（后台启动、立即返回输出文件路径）；\n"
             "        加 --wait 才同步等待进程结束。--handoff 只生成交接单，本身不执行回合。\n"
             "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
             "        先拆 2–3 个可并行子任务、声明依赖、队长汇总；插件不可用时目标 agent\n"
             "        忽略该节，按普通会话完成。缺省不追加，任务包与旧版一致。\n"
-            "\n退出码：0 成功（未等待时表示已发送）；2 前置门或派发失败；\n"
-            "        3 --wait 超时或 headless 进程返回非零（会话保留 / 进程可能仍在后台）；1 未预期异常。\n"
+            "\n退出码：0 成功（--wait 时回合已结束且已落地；未等待时表示已发送）；\n"
+            "        2 前置门或派发失败；3 --wait 超时（回合未结束或已结束但未落地）；\n"
+            "        4 疑似僵尸会话（回合即时结束且零输出）；1 未预期异常。\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1497,7 +1783,7 @@ def main(argv=None) -> int:
         "--timeout",
         type=int,
         default=DEFAULT_TIMEOUT,
-        help="等待回合完成秒数（仅 --wait 生效，默认 600）",
+        help="回合等待 + 落地等待的总秒数（仅 --wait 生效，默认 600）",
     )
     wait_group = parser.add_mutually_exclusive_group()
     wait_group.add_argument(

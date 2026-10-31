@@ -1,3 +1,19 @@
+## [0.4.2] - 2026-10-31
+
+### Added
+- `awf-dispatch` 无进展快失败：回合 <5s 且零输出/零工具调用判为僵尸会话，立即以退出码 4 结束并建议 `--new`，不再空转到超时
+- `awf-dispatch` 等落地：回合结束后轮询目标 HEAD / 账本 done.md，提交或归档才返回 0；超时才返回 3 并区分「回合已结束但任务未落地」
+- `awf release-prep <X.Y.Z>`：一键发版装配（init/bootstrap + 账本登记归档 + VERSION/CHANGELOG + check/smoke + status），不自动 git 写操作
+- 两级复核策略（docs/team-flow.md §3.5）：新增功能/小调整走快速车道（自带测试 + captain 快验），架构级才走 reviewer 全量复核
+
+### Changed
+- `session/list` 拉取合并为一次（G4 探针与复用查找共用缓存）
+- 机械/可验证任务（升级、同步、拷贝）默认直做，不重复派生子任务复核
+
+### Fixed
+- `git_head_sha` 失败语义：git 读取失败返回 None、空仓库返回 ""，落地判定只比较有效 SHA，避免把读取失败误判为"已提交"
+- 等待空闲时会话消失与超时分开报错
+
 # Changelog
 
 本仓库遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)：

@@ -55,7 +55,7 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 
 1. 跑 G1–G4，并打印前置换结果；
 2. **默认按「项目 + 模块」复用**目标工作区里的常驻会话（标题精确等于 `[awf] <项目> · <模块>`），不每次新建；没有匹配到本模块会话时才新建，标题同样用规范格式；
-3. 发送任务包后立即返回会话 ID；加 `--wait` 才轮询到回合结束（`--timeout` 仅对 `--wait` 生效）；
+3. 发送任务包后立即返回会话 ID；加 `--wait` 才轮询到回合结束并确认落地（`--timeout` 同时约束回合等待与落地等待）；
 4. 把 sessionId、标题、模块、会话来源（复用/新建）、状态、目标 HEAD 写到 `dispatch/log.md`；未等待时状态为「已发送，未等待回合」，并写明回到 GUI 会话的方式；
 5. 打印会话信息；后续细节由用户在同一个会话里继续提。
 
@@ -71,8 +71,8 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 
 | 参数 | 作用 |
 |---|---|
-| `--wait` | 等待回合结束并打印回报；**团队派发默认加**（脚本默认不等待） |
-| `--timeout N` | 等待秒数，仅 `--wait` 生效（默认 600） |
+| `--wait` | 等待回合结束**并确认落地**（目标 commit 或账本归档）；**团队派发默认加**（脚本默认不等待） |
+| `--timeout N` | 回合等待 + 落地等待的总秒数，仅 `--wait` 生效（默认 600） |
 | `--no-wait` | 默认行为的兼容别名，与 `--wait` 互斥 |
 | `--reuse` | 默认行为：按「项目 + 模块」复用目标工作区已有的常驻会话 |
 | `--new` | 强制新建会话（隔离/调试）；与 `--reuse` 互斥 |
@@ -142,13 +142,23 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 3. captain 记录：会话 ID、任务文件、状态、目标 HEAD、时间。
 4. 用户后续细节优先回到同一会话；只有新目标或新任务才重新派发。
 
+## 僵尸会话与无进展
+
+复用旧会话时可能遇到「僵尸会话」：回合 16–21ms 即时结束，零 assistant 输出、零工具调用，但脚本会一直等到 `--timeout`。派发器对 `--wait` 增加两类可靠性判定：
+
+1. **无进展快失败（退出码 4）**：回合耗时 <5s 且零输出、零工具调用 → 立即返回 4，文案「会话疑似僵尸（回合即时结束且零输出），请用 --new 重派或在 GUI 重开会话」。`--json` 的 `zombie`、`turnSeconds`、`sessionId` 与日志状态都会标明。
+2. **等落地（回合结束 ≠ 完成）**：正常回合结束后每 10s 检查目标 `git rev-parse HEAD` 是否变化（commit）或账本 `agent-workflow/tasks/<type>/done.md` 是否出现任务 ID（归档）；超时返回 3，状态「回合已结束但任务未落地」，不要当成功。可重新派发（同名 `--force`）或 `--session` 续跑。
+
+僵尸判定优先于落地：不要在僵尸会话上继续空等；先 `--new`（或 GUI 重开），再按正常流程验证。
+
 ## 失败处理
 
 - `workspace-missing`：在 GUI 添加工作区，或 `--add-workspace`；不要用 `cwd` 绕过。
 - `workflow-missing`：先 `awf init` / 补齐 `agent-workflow/`。
 - `writer-held` / `session/conflict`：目标会话被 GUI 占用或同目录写者冲突；切走/等待后重试。
 - `auth-required` / `connection refused`：重开 GUI URL；或 `--headless`。
-- 回合超时（退出码 3）：会话保留，不要杀掉；回 GUI 看进度，由 captain 决定加大 `--timeout` 重派（`--force`）、改派或降级。
+- 回合超时或未落地（退出码 3）：会话保留，不要杀掉；回 GUI 看进度，由 captain 决定加大 `--timeout` 重派（`--force`）、`--session` 续跑、改派或降级。
+- 疑似僵尸会话（退出码 4）：用 `--new` 重派或在 GUI 重开会话，不要继续续跑同一会话。
 
 ## 安全
 
