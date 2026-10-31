@@ -1,0 +1,23 @@
+# agent-workflow 项目事实（唯一输入）
+#
+# 改完这里运行：./agent-workflow/bin/awf bootstrap
+# 说明：只使用扁平 `key: value`，列表字段写成逗号分隔的单行字符串，
+#       这样无需 YAML 解析器也能被 awf 与任意 shell 稳定读取。
+
+version: 1
+id: agent-workflow-kit
+name: agent-workflow-kit
+purpose: 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
+aliases: agent-workflow-kit
+stack: generic
+
+# 校验命令（留空表示暂未配置）
+gate: ./agent-workflow/check_workflow.sh
+compile: bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh
+test: bash test/smoke.sh
+
+# 并行切分：格式为 “名称(路径), 名称(路径)”
+scopes: 生成器与模板(bin/ templates/), 测试与CI(test/ .github/), 文档(docs/ README.md SKILL.md prompt.md)
+
+# 并行时任何单元都不许同时修改的文件或目录
+serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf
