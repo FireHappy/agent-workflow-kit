@@ -42,7 +42,7 @@
 
 ## 执行：会话优先
 
-DSH 下用 `awf-dispatch`：
+DSH 下用 `awf-dispatch`（**默认异步**：创建会话并发送任务后立即返回会话 ID，不阻塞调度方）：
 
 ```sh
 ./agent-workflow/bin/awf-dispatch <别名|目录> dispatch/tasks/<ID>-<slug>.md
@@ -52,9 +52,17 @@ DSH 下用 `awf-dispatch`：
 
 1. 跑 G1–G4 前置检查（G2 读 `$DSH_HOME/storages/workspace.json`，G4 读 `$DSH_WEB_URL` 与本地 GUI 认证）
 2. 在目标工作区创建会话，标题设为 `<别名> · <任务标题>`
-3. 发送任务包并等待回合结束（`--no-wait` 可只受理）
-4. 把 `sessionId`、标题、状态、目标 HEAD 记录到 `dispatch/log.md`
+3. 发送任务包后立即返回；加 `--wait` 才等待回合结束（`--timeout` 仅对 `--wait` 生效）
+4. 记日志：未等待时状态为「已发送，未等待回合」，并写明如何回到 GUI 会话
 5. 打印会话信息；**后续细节由用户在同一个会话里继续提**
+
+需要本次回合结果时显式等待：
+
+```sh
+./agent-workflow/bin/awf-dispatch <别名|目录> dispatch/tasks/<ID>-<slug>.md --wait --timeout 900
+```
+
+> 默认不等待时，调度方只确认「任务已发送」；目标 agent 的最终回报稍后回到 GUI 会话查看，日志里记有会话 ID 与打开方式。`--no-wait` 是默认行为的兼容别名（与 `--wait` 互斥）。
 
 手工等价操作：GUI 左侧切到目标工作区 → 新建会话 → 粘贴任务包。效果相同，只是没有自动前置检查与日志。
 
@@ -72,7 +80,7 @@ DSH 下用 `awf-dispatch`：
 
 | 情况 | 回退 | 代价 |
 |---|---|---|
-| GUI 未运行 / 认证失效 | `awf-dispatch --headless`（需用户同意） | 会话不在 GUI 工作区，用户不能直接续聊 |
+| GUI 未运行 / 认证失效 | `awf-dispatch --headless`（需用户同意） | 默认后台启动并立即返回输出路径（`--wait` 才同步等待）；会话不在 GUI 工作区，用户不能直接续聊 |
 | 无法创建会话 | `awf-dispatch --handoff` | 只生成交接单，需用户手工在目标会话执行 |
 | 目标未登记工作区 | `--add-workspace` 或 GUI 添加 | 否则会话落在 Ungrouped，用户找不到 |
 | 目标无工作流 | 先 `awf init`，再派发 | 不要跳过 G1 |
@@ -106,7 +114,7 @@ DSH 下用 `awf-dispatch`：
 - `workflow-missing`：先 `awf init` / 补齐 `agent-workflow/`。
 - `writer-held` / `session/conflict`：目标会话被 GUI 占用或同目录写者冲突；切走/等待后重试。
 - `auth-required` / `connection refused`：重开 GUI URL；或 `--headless`。
-- 回合超时：会话保留，不要杀掉；在 GUI 查看进度，必要时 `--no-wait` 重新派发新任务。
+- 回合超时：会话保留，不要杀掉；在 GUI 查看进度。默认派发本身不等待（`--no-wait` 是默认行为的兼容别名），需要重派时直接重新派发并加 `--force`。
 
 ---
 
@@ -114,6 +122,7 @@ DSH 下用 `awf-dispatch`：
 
 - [ ] G1–G4 全过
 - [ ] 任务包含验证命令和回报契约
+- [ ] 清楚本回合是否加 `--wait`（默认异步，「已发送」不等于「已完成」）
 - [ ] 会话在目标工作区（不是 Ungrouped）
 - [ ] 目标 agent 自己写账本
 - [ ] 只本地 commit，未 push

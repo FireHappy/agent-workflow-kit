@@ -7,11 +7,12 @@
   G3 目标没有已跟踪改动 / 其他 active 任务
   G4 DSH GUI 与会话通道可用
 
-全过时在目标工作区创建正式会话，发送任务并等待回合结束；
-会话留在 GUI 里，用户可以在同一个会话继续提细节。
+全过时在目标工作区创建正式会话，发送任务后立即返回（默认异步，不等待回合）；
+需要本回合结果时加 --wait。会话留在 GUI 里，用户可以在同一个会话继续提细节。
 
 用法：
   ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
+  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
   ./agent-workflow/bin/awf-dispatch demo02 task.md --headless
   ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
@@ -42,6 +43,8 @@ from pathlib import Path
 
 DEFAULT_WEB_URL = "http://127.0.0.1:51439"
 DEFAULT_TIMEOUT = 600
+# 默认异步：只创建会话并发送任务，立即返回；显式 --wait 才等待回合结束。
+DEFAULT_WAIT = False
 DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
 
@@ -508,7 +511,8 @@ def git_head(target: Path) -> str:
 
 
 def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
-              workspace: dict, status: str, final_text: str, task: Path) -> str:
+              workspace: dict, status: str, final_text: str, task: Path,
+              next_step: str = "") -> str:
     flat = re.sub(r"\s+", " ", final_text or "").strip()
     excerpt = flat[:300] + ("…（已截断，完整回报见会话）" if len(flat) > 300 else "")
     workspace_title = (workspace or {}).get("title", "未知工作区")
@@ -521,6 +525,7 @@ def log_entry(alias: str, target: Path, title: str, session_id: str, session_tit
         f"- 会话：{session_id}（{session_title_value or title}）\n"
         f"- 状态：{status}\n"
         f"- 目标 HEAD：{git_head(target)}\n"
+        + (f"- 回到会话：{next_step}\n" if next_step else "")
         + (f"- 回报节选：{excerpt}\n" if excerpt else "")
     )
 
@@ -599,11 +604,17 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
 
     emit(f"已创建会话：{session_id}（{title}）", args.json)
     emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
-    emit("任务已受理；等待目标 agent 完成…", args.json)
 
-    if args.no_wait:
-        entry = log_entry(target.name, target, title, session_id, title, workspace,
-                          "已受理（未等待）", "", task)
+    if not args.wait:
+        emit("任务已发送，未等待回合（默认异步；加 --wait 等待回合结束）", args.json)
+        entry = log_entry(
+            target.name, target, title, session_id, title, workspace,
+            "已发送，未等待回合", "", task,
+            next_step=(
+                f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{title}」"
+                f"（会话 {session_id}）继续提细节。"
+            ),
+        )
         log_path = append_log(entry)
         payload = {
             "ok": True,
@@ -612,6 +623,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             "title": title,
             "workspace": workspace,
             "status": "accepted",
+            "waited": False,
             "log": str(log_path),
         }
         if args.json:
@@ -621,6 +633,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{title}」继续提细节。")
         return 0
 
+    emit("任务已受理；等待目标 agent 完成…", args.json)
     row = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json)
     final_text = latest_assistant(api, row) if row else None
     status = "完成" if row else f"超时（>{args.timeout}s，会话仍在运行）"
@@ -635,6 +648,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         "title": title,
         "workspace": workspace,
         "status": "completed" if row else "timeout",
+        "waited": True,
         "head": git_head(target),
         "final": final_text,
         "log": str(log_path),
@@ -656,7 +670,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
 
 
 def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
-    state = preflight(target, args, need_channel=False)
+    preflight(target, args, need_channel=False)
     dsh = os.environ.get("DSH_BIN") or DEFAULT_DSH
     if not Path(dsh).exists():
         found = shutil.which("dsh")
@@ -665,25 +679,100 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
         dsh = found
 
     emit("模式：headless（会话不会出现在 GUI 工作区，用户无法直接续聊）", args.json)
-    proc = subprocess.run(
-        [dsh, "--profile", "headless", "-"],
-        cwd=str(target),
-        input=text,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=args.timeout,
+
+    outdir = Path.cwd() / "dispatch/headless"
+    outdir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_path = outdir / f"{stamp}-{target.name}-{uuid.uuid4().hex[:6]}.log"
+
+    def start_headless() -> subprocess.Popen:
+        # stdin 复用任务文件、输出写日志文件；start_new_session 让子进程脱离当前会话。
+        with task.open("rb") as stdin_handle, out_path.open("ab") as out_handle:
+            return subprocess.Popen(
+                [dsh, "--profile", "headless", "-"],
+                cwd=str(target),
+                stdin=stdin_handle,
+                stdout=out_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+    if not args.wait:
+        proc = start_headless()
+        status = "已发送，未等待回合"
+        entry = log_entry(
+            target.name, target, title, "-", title, {"title": "headless"},
+            status, "", task,
+            next_step=(
+                f"headless 进程 PID {proc.pid}，输出实时写入 {out_path}；"
+                "该模式没有 GUI 会话，结束后查看输出文件。"
+            ),
+        )
+        log_path = append_log(entry)
+        payload = {
+            "ok": True,
+            "mode": "headless",
+            "status": "accepted",
+            "waited": False,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：已发送，未等待回合（PID {proc.pid}）")
+            print(f"输出：{out_path}")
+            print(f"已记录：{log_path}")
+        return 0
+
+    proc = start_headless()
+    try:
+        returncode = proc.wait(timeout=args.timeout)
+    except subprocess.TimeoutExpired:
+        status = f"超时（>{args.timeout}s，进程仍在后台运行）"
+        entry = log_entry(
+            target.name, target, title, "-", title, {"title": "headless"},
+            status, "", task,
+            next_step=(
+                f"headless 进程 PID {proc.pid} 仍在后台运行，输出实时写入 {out_path}；"
+                f"需要终止请执行 kill {proc.pid}。"
+            ),
+        )
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "headless",
+            "status": "timeout",
+            "waited": True,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(f"进程仍在后台运行（PID {proc.pid}），输出实时写入 {out_path}；需要终止：kill {proc.pid}")
+            print(f"已记录：{log_path}")
+        return 3
+
+    final_text = (
+        out_path.read_text(encoding="utf-8", errors="replace").strip()
+        if out_path.is_file()
+        else ""
     )
-    final_text = proc.stdout.strip()
-    status = "完成" if proc.returncode == 0 else f"失败（exit {proc.returncode}）"
+    status = "完成" if returncode == 0 else f"失败（exit {returncode}）"
     entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
                       status, final_text, task)
     log_path = append_log(entry)
     payload = {
-        "ok": proc.returncode == 0,
+        "ok": returncode == 0,
         "mode": "headless",
         "status": status,
+        "waited": True,
+        "pid": proc.pid,
+        "output": str(out_path),
         "head": git_head(target),
         "final": final_text,
         "log": str(log_path),
@@ -693,8 +782,9 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
     else:
         print(f"状态：{status}")
         print(final_text)
+        print(f"输出：{out_path}")
         print(f"已记录：{log_path}")
-    return 0 if proc.returncode == 0 else 3
+    return 0 if returncode == 0 else 3
 
 
 def dispatch_handoff(target: Path, task: Path, text: str, title: str, args):
@@ -720,18 +810,28 @@ def dispatch_handoff(target: Path, task: Path, text: str, title: str, args):
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="awf-dispatch",
-        description="跨项目派发：先检查目标工作流与工作区，再在目标工作区创建会话执行。",
+        description=(
+            "跨项目派发：先检查目标工作流与工作区，再在目标工作区创建会话执行。"
+            "默认只发送任务、立即返回会话 ID（不等待回合）；加 --wait 才等待回合结束。"
+        ),
         epilog=(
             "示例：\n"
-            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md            # 默认异步：只发送\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait     # 等待回合结束\n"
             "  awf-dispatch demo02 task.md --dry-run\n"
             "  awf-dispatch demo02 task.md --headless\n"
             "  awf-dispatch demo02 task.md --handoff\n"
             "  awf-dispatch demo02 task.md --team\n"
+            "\n默认异步：创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
+            "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
+            "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录回到 GUI 会话的方式。\n"
+            "\n--headless：默认同样不等待（后台启动、立即返回输出文件路径）；\n"
+            "        加 --wait 才同步等待进程结束。--handoff 只生成交接单，本身不执行回合。\n"
             "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
             "        先拆 2–3 个可并行子任务、声明依赖、队长汇总；插件不可用时目标 agent\n"
             "        忽略该节，按普通会话完成。缺省不追加，任务包与旧版一致。\n"
-            "\n退出码：0 成功；2 前置门或派发失败；1 未预期异常。\n"
+            "\n退出码：0 成功（未等待时表示已发送）；2 前置门或派发失败；\n"
+            "        3 --wait 超时或 headless 进程返回非零（会话保留 / 进程可能仍在后台）；1 未预期异常。\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -747,8 +847,26 @@ def main(argv=None) -> int:
         help="在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议",
     )
     parser.add_argument("--add-workspace", action="store_true", help="目标未登记工作区时自动登记")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="等待回合完成秒数（默认 600）")
-    parser.add_argument("--no-wait", action="store_true", help="只发送任务，不等待回合完成")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help="等待回合完成秒数（仅 --wait 生效，默认 600）",
+    )
+    wait_group = parser.add_mutually_exclusive_group()
+    wait_group.add_argument(
+        "--wait",
+        dest="wait",
+        action="store_true",
+        default=DEFAULT_WAIT,
+        help="等待回合结束并打印回报；默认不等待（发送后立即返回会话 ID）",
+    )
+    wait_group.add_argument(
+        "--no-wait",
+        dest="wait",
+        action="store_false",
+        help="兼容别名：等价于默认行为（只发送，不等待回合）",
+    )
     parser.add_argument("--force", action="store_true", help="允许同名会话重复派发")
     parser.add_argument("--allow-dirty", action="store_true", help="允许目标有已跟踪改动")
     parser.add_argument("--allow-active", action="store_true", help="允许目标已有 active 任务")

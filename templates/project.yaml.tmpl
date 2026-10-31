@@ -21,3 +21,12 @@ scopes: {{SCOPES}}
 
 # 并行时任何单元都不许同时修改的文件或目录
 serialized: {{SERIALIZED}}
+
+# 发版落点（可选键：不写某个键即回退到默认值；流程见 agent-workflow/workflows/release.md）
+# version_file: 版本号所在文件，单行 semver；默认 VERSION。
+#               语言生态有原生版本字段（package.json / pyproject.toml / Cargo.toml）时指向它，只改一处。
+# changelog:    变更记录文件；默认 CHANGELOG.md。
+# tag_prefix:   发版 tag 前缀；默认 v（tag 形如 v1.2.3）。
+version_file: VERSION
+changelog: CHANGELOG.md
+tag_prefix: v

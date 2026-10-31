@@ -28,3 +28,23 @@
 - 目标 HEAD：f418d5d chore: DEV-006 忽略并清理 Python 缓存
 - 回报节选：DEV-006 已完成并归档（提交后终态 `git status --short` 为空，无 push）。按任务文件要求回报： --- ## 状态 ✅ 已完成（active → review → 归档 done.md，本地 commit；未 push） ## 变更文件 - 新建 `.gitignore`：忽略 `__pycache__/`、`*.pyc` - 删除 `calc/__pycache__/`（生成物，未跟踪；删除后未入索引） - 账本：`agent-workflow/tasks/dev/current.md`（DEV-006 任务块，已随归档还原）、`agent-workflow/
 
+## 2026-10-31 19:09 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · DOCS-002 升级工作流框架到 0.2.1（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo01-DOCS-002-workflow-0.2.1.md）
+- 工作区：agent-demo01（181aff53-4218-4074-a910-5d9025047c2f）
+- 会话：session-6a8c6450-a5ef-4bf5-a41b-c444c91a423f（agent-demo01 · DOCS-002 升级工作流框架到 0.2.1）
+- 状态：完成
+- 目标 HEAD：35b8651 chore: 升级工作流框架到 0.2.1
+- 回报节选：DOCS-002 完成，全部验收通过。以下按任务文件要求的回报格式汇报。 --- ## DOCS-002 升级工作流框架到 0.2.1 — 回报 ### 状态 ✅ **完成**（无阻塞）。用全局技能 `~/.dsh/skills/agent-workflow-scaffold/bin/awf init . --force` 刷新工作流，未手改任何生成文件；project.yaml 的 id/name/aliases 原样保留（init 输出 `skip 已存在，保留：agent-workflow/project.yaml`）；tasks/、tools/、memory/ 既有内容未动（仅 sta…（已截断，完整回报见会话）
+
+## 2026-10-31 19:12 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · DEV-007 升级工作流框架到 0.2.1（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo02-DEV-007-workflow-0.2.1.md）
+- 工作区：agent-demo02（2954372d-7230-4a5f-ad49-993ecd25ff02）
+- 会话：session-8f8aad52-8ac4-4a99-81d6-d51bb11dcfe4（agent-demo02 · DEV-007 升级工作流框架到 0.2.1）
+- 状态：完成
+- 目标 HEAD：d4ac028 chore: 升级工作流框架到 0.2.1
+- 回报节选：## 回报：DEV-007 升级工作流框架到 0.2.1 **状态**：✅ 完成。已用全局新版生成器刷新并本地提交（`d4ac028`），未 push；工作树干净。 **执行方式说明**（AGENTS.md「任务路由」）：本任务为「跑一次生成器 + 校验 + 提交」的机械刷新，串行单调、无并行拆分空间，且有「只用全局 awf 刷新、不要手改生成文件」的硬约束，团队协调成本高于任务本身，故按单会话完成（本会话即目标工作区会话，符合跨项目执行约定）。 **变更文件**（`git diff --stat`，共 11 个，全部为受控生成物 + 账本记录）： | 文件 | 说明 | |------|--…（已截断，完整回报见会话）
+

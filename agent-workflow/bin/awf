@@ -521,7 +521,7 @@ EOF
   say "  agent-workflow/"
   say "  ├── project.yaml             项目事实（唯一输入）"
   say "  ├── README.md                规范正文"
-  say "  ├── workflows/               dev / debug / docs / review / cross-project"
+  say "  ├── workflows/               dev / debug / docs / review / cross-project / release"
   say "  ├── tasks/                   任务账本（todo/current/done + status）"
   say "  ├── memory/                  cache / history"
   say "  ├── tools/                   操作手册"
@@ -626,6 +626,7 @@ agent-workflow/workflows/debug.md
 agent-workflow/workflows/docs.md
 agent-workflow/workflows/review.md
 agent-workflow/workflows/cross-project.md
+agent-workflow/workflows/release.md
 agent-workflow/tasks/status.md
 agent-workflow/templates/AGENTS.md.tmpl
 "

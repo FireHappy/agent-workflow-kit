@@ -42,6 +42,7 @@
    - 文档撰写 → `workflows/docs.md`
    - 开发完成待审 → `workflows/review.md`
    - 跨项目派发 → `workflows/cross-project.md`
+   - 发版 / 版本号 / tag / CHANGELOG → `workflows/release.md`
 3. 有进行中任务则读对应 `tasks/<type>/current.md`
 4. 判断下一动作：恢复自己的任务 → 认领无 Owner 的高优先级任务 → 提议开始最优先待办
 
@@ -51,7 +52,7 @@
 
 ## 任务模型
 
-工作流类型：`dev`（功能/重构/优化）、`debug`（异常排查）、`docs`（文档/分析）、`review`（dev 的审查子流程）。`cross-project` 是路由流程，不新增任务类型；任务仍落在目标项目的 `dev` / `debug` / `docs`。
+工作流类型：`dev`（功能/重构/优化）、`debug`（异常排查）、`docs`（文档/分析）、`review`（dev 的审查子流程）。`cross-project` 与 `release` 是流程文件，不新增任务类型；`cross-project` 任务仍落在目标项目的 `dev` / `debug` / `docs`，`release` 发版本身按 `dev` 认领（见 `workflows/release.md`）。
 
 状态：`active`（执行中）、`blocked`（阻塞）、`review`（待审）、`verify`（待构建/测试/人工验证）、`handoff`（等待接手）。
 

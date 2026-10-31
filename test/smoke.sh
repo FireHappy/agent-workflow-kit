@@ -28,6 +28,7 @@ assert_file "$PROJ/agent-workflow/tasks/status.md" "status.md"
 assert_grep 'awf:begin v1 digest:' "$PROJ/AGENTS.md" "入口含 digest"
 assert_grep '（未配置' "$PROJ/AGENTS.md" "空校验命令有回退提示"
 assert_file "$PROJ/agent-workflow/workflows/cross-project.md" "cross-project 工作流"
+assert_file "$PROJ/agent-workflow/workflows/release.md" "release 工作流"
 assert_file "$PROJ/agent-workflow/bin/awf-dispatch" "awf-dispatch"
 assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
 
@@ -44,7 +45,25 @@ else
   bad "--help 未说明 AgentTeams 语义"
 fi
 
-# 直接用 importlib 加载源脚本，断言 build_prompt 的 --team 注入与缺省行为
+# 1.2 默认异步：--help 含 --wait / --no-wait 兼容别名，并写清默认不等待
+help_text="$("$PROJ/agent-workflow/bin/awf-dispatch" --help 2>&1)"
+if printf '%s\n' "$help_text" | grep -Eq -- '(^|[[:space:]])--wait([[:space:]]|$)'; then
+  ok "--help 列出 --wait"
+else
+  bad "--help 未列出 --wait"
+fi
+if printf '%s\n' "$help_text" | grep -q -- '--no-wait'; then
+  ok "--help 保留 --no-wait 兼容别名"
+else
+  bad "--help 未保留 --no-wait"
+fi
+if printf '%s\n' "$help_text" | grep -q '默认不等待'; then
+  ok "--help 写清默认不等待"
+else
+  bad "--help 未写清默认不等待"
+fi
+
+# 直接用 importlib 加载源脚本，断言 build_prompt 的 --team 注入、默认异步实现点与缺省行为
 if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
 import importlib.machinery
 import importlib.util
@@ -72,11 +91,31 @@ for word in ("子任务", "依赖", "队长", "插件"):
     assert word in team, f"team=True 段落缺少关键词：{word}"
 assert team.startswith(base), "--team 段落只能追加在任务包末尾"
 assert "team=args.team" in inspect.getsource(module.dispatch_session), "dispatch_session 必须把 args.team 传给 build_prompt"
+
+# 默认异步：DEFAULT_WAIT 常量、argparse 默认值、session/headless 两条路径
+assert module.DEFAULT_WAIT is False, "DEFAULT_WAIT 必须为 False（默认不等待）"
+assert module.DEFAULT_TIMEOUT > 0, "DEFAULT_TIMEOUT 必须为正数"
+main_src = inspect.getsource(module.main)
+assert "default=DEFAULT_WAIT" in main_src, "--wait 必须以 DEFAULT_WAIT 作默认值"
+assert "--no-wait" in main_src, "--no-wait 兼容别名缺失"
+assert "仅 --wait 生效" in main_src, "--timeout 必须注明仅对 --wait 生效"
+
+session_src = inspect.getsource(module.dispatch_session)
+assert "if not args.wait" in session_src, "dispatch_session 默认必须不等待"
+assert "args.no_wait" not in session_src, "dispatch_session 不得再依赖 args.no_wait"
+assert "已发送，未等待回合" in session_src, "session 异步日志状态缺失"
+assert "next_step=" in session_src, "session 异步日志必须注明如何回到 GUI 会话"
+assert "回到会话" in inspect.getsource(module.log_entry), "日志缺少回到会话字段"
+
+headless_src = inspect.getsource(module.dispatch_headless)
+assert "if not args.wait" in headless_src, "headless 默认也必须不等待"
+assert "已发送，未等待回合" in headless_src, "headless 异步日志状态缺失"
+assert "Popen" in headless_src, "headless 默认应以后台进程启动"
 PY
 then
-  ok "build_prompt --team 注入且缺省不变"
+  ok "build_prompt --team 注入且缺省不变；默认异步实现点有断言"
 else
-  bad "build_prompt --team 断言失败"
+  bad "build_prompt / 默认异步断言失败"
 fi
 
 printf '任务：TEST-001 冒烟派发\n\n1. 只读验证。\n' > "$TMP/task.md"

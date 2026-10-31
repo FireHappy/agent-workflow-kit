@@ -48,7 +48,7 @@ cd ~/Documents/GitHub/agent-workflow-kit
 ./agent-workflow/check_workflow.sh
 ./agent-workflow/bin/awf status
 
-# 跨项目派发（目标有工作流且已登记工作区）
+# 跨项目派发（目标有工作流且已登记工作区；默认只发送不等待，--wait 才等待回合结束）
 ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md
 ```
 

@@ -10,6 +10,9 @@ name: agent-workflow-kit
 purpose: 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
 aliases: agent-workflow-kit
 stack: generic
+version_file: VERSION
+changelog: CHANGELOG.md
+tag_prefix: v
 
 # 校验命令（留空表示暂未配置）
 gate: ./agent-workflow/check_workflow.sh
