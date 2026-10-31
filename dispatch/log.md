@@ -108,3 +108,39 @@
 - 目标 HEAD：aeb551e chore: awf status 刷新状态摘要
 - 回报节选：任务完成。说明执行路径与回报如下。 ## 任务路由说明 本任务为收尾性质（跑校验 + 刷新状态 + 本地提交），属于「任务小到协调成本更高」的情形（AGENTS.md 任务路由），故按单会话流程直接完成，账本与 commit 均由主线 Owner 处理。 ## 执行结果 **1. check_workflow.sh** —— 退出 0，全部检查通过（校验了 11 个文件 + 受控区块配对 + AGENTS.md 与 project.yaml 同步，digest 5f4340e1）。 **2. 状态刷新** —— `awf status` 已执行（退出 0），`status.md` 中 DEV-…（已截断，完整回报见会话）
 
+## 2026-10-31 20:41 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · DOCS-005 升级工作流框架到 0.4.1（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo01-DOCS-005-workflow-0.4.1.md）
+- 模块：工作流
+- 工作区：agent-demo01（181aff53-4218-4074-a910-5d9025047c2f）
+- 会话：session-e7186846-2408-4f48-9438-c89f90bfa45f（[awf] agent-demo01 · 工作流）
+- 会话来源：新建
+- 状态：完成
+- 目标 HEAD：82f75b8 chore: 升级工作流框架到 0.4.1
+- 回报节选：DOCS-005 已完成 ✅ ## 回报 **状态**：完成（无意外的 active/blocked，无 push） **变更文件**（commit 82f75b8，4 个文件，均属预期生成文件 / 账本）： - `agent-workflow/bin/awf-dispatch`（+378/−36 行，会话复用核心：`--module/--new/--session/--idle-wait`） - `agent-workflow/workflows/cross-project.md`（含「模块：」可选字段说明 + 会话复用说明） - `agent-workflow/tasks/docs/don…（已截断，完整回报见会话）
+
+## 2026-10-31 20:42 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · DEV-010 升级工作流框架到 0.4.1（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo02-DEV-010-workflow-0.4.1.md）
+- 模块：工作流
+- 工作区：agent-demo02（2954372d-7230-4a5f-ad49-993ecd25ff02）
+- 会话：session-84f9da7b-a58e-4aaa-81c9-e43611562db2（[awf] agent-demo02 · 工作流）
+- 会话来源：新建
+- 状态：完成
+- 目标 HEAD：aeb551e chore: awf status 刷新状态摘要
+- 回报节选：独立复核仍在运行。等待其完成通知后继续归档与提交。
+
+## 2026-10-31 20:59 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · DEV-034 升级工作流框架到 0.4.1（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/rokid-system-components-DEV-034-workflow-0.4.1.md）
+- 模块：工作流
+- 工作区：rokid_system_components（b49610a8-d5ac-4575-9e29-221b141b1fce）
+- 会话：session-79436f0b-4c06-4578-a818-eef0196e501c（[awf] rokid_system_components · 工作流）
+- 会话来源：新建
+- 状态：完成
+- 目标 HEAD：43a25eda chore: 升级工作流框架到 0.4.1
+- 回报节选：DEV-034 完成。以下是按任务包五项格式的回报： --- ## DEV-034 回报 **状态**：✅ 完成（验收 4/4 通过，dev.md 全流程走完：认领 → 实现 → 验证 → 独立复核 → 归档 → 本地 commit） **变更文件**（commit 内 6 个，均为框架文件；项目内容 `config/`、`docs/`、`memory/`、`tasks/dev/current.md` 零改动）： | 文件 | 变更 | |---|---| | [AGENTS.md](<AGENTS.md>) | 入口重渲染，digest 023e5214 → 6c5ca8f3（0.4.1 h…（已截断，完整回报见会话）
+
