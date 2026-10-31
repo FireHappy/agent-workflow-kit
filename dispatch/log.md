@@ -78,3 +78,33 @@
 - 目标 HEAD：2305a3a9 卸载APP排序问题，充电提示
 - 回到会话：在 GUI 的 `rokid_system_components` 工作区打开「rokid_system_components · DEV-033 升级工作流框架到 0.3.0合并上次安装残留」（会话 session-a3ef3654-27eb-4209-80a5-078848091be7）继续提细节。
 
+## 2026-10-31 20:12 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · DEV-009 升级工作流框架到 0.4.0（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo02-DEV-009-workflow-0.4.0.md）
+- 工作区：agent-demo02（2954372d-7230-4a5f-ad49-993ecd25ff02）
+- 会话：session-d202eb66-b1f7-45fa-9f72-03670d3b14b8（agent-demo02 · DEV-009 升级工作流框架到 0.4.0）
+- 状态：完成
+- 目标 HEAD：bbd4cf6 chore: 升级工作流框架到 0.3.0
+- 回报节选：改动范围内无越界、无未跟踪文件。等复核结果回来后归档收尾。
+
+## 2026-10-31 20:13 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · DOCS-004 升级工作流框架到 0.4.0（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo01-DOCS-004-workflow-0.4.0.md）
+- 工作区：agent-demo01（181aff53-4218-4074-a910-5d9025047c2f）
+- 会话：session-4094c7dc-d293-4885-a9af-6db225b6efa8（agent-demo01 · DOCS-004 升级工作流框架到 0.4.0）
+- 状态：完成
+- 目标 HEAD：87b473a chore: 升级工作流框架到 0.4.0
+- 回报节选：DOCS-004 已完成。以下按任务包回报格式汇报： ## 状态 **已完成** ✅ — 工作流框架已从 0.3.0 升级到 0.4.0，账本已归档，已本地 commit，未 push。 ## 变更文件（commit 87b473a，共 7 个，均为预期生成文件 + 任务账本） - [AGENTS.md](AGENTS.md) — 入口受控区块重建（digest `d42b4d57`），任务路由/跨项目文案改为 harness 中立 - [agent-workflow/README.md](agent-workflow/README.md) — 中立化文案 - [agent-workflow/…（已截断，完整回报见会话）
+
+## 2026-10-31 20:14 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · DEV-009 收尾：提交 0.4.0 升级（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo02-DEV-009-finish.md）
+- 工作区：agent-demo02（2954372d-7230-4a5f-ad49-993ecd25ff02）
+- 会话：session-ecd52474-8d77-4d3e-90d5-aa00ce2043fb（agent-demo02 · DEV-009 收尾：提交 0.4.0 升级）
+- 状态：完成
+- 目标 HEAD：aeb551e chore: awf status 刷新状态摘要
+- 回报节选：任务完成。说明执行路径与回报如下。 ## 任务路由说明 本任务为收尾性质（跑校验 + 刷新状态 + 本地提交），属于「任务小到协调成本更高」的情形（AGENTS.md 任务路由），故按单会话流程直接完成，账本与 commit 均由主线 Owner 处理。 ## 执行结果 **1. check_workflow.sh** —— 退出 0，全部检查通过（校验了 11 个文件 + 受控区块配对 + AGENTS.md 与 project.yaml 同步，digest 5f4340e1）。 **2. 状态刷新** —— `awf status` 已执行（退出 0），`status.md` 中 DEV-…（已截断，完整回报见会话）
+
