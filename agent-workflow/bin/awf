@@ -69,6 +69,10 @@ awf — agent workflow framework
   awf find <别名|ID>
       按别名或 ID 查找项目路径。
 
+  awf-dispatch <别名|目录> <任务文件>
+      跨项目派发（DSH 会话适配）：检查目标工作流/工作区后，在目标工作区创建会话执行。
+      另见 docs/dispatch.md 与 agent-workflow/workflows/cross-project.md。
+
 说明:
   init 之后请编辑 agent-workflow/project.yaml，再运行 awf bootstrap。
   check 的退出码 = 失败项数量，可直接用于 pre-commit / CI。
@@ -456,6 +460,12 @@ cmd_init() {
   cp "$TPL_DIR/AGENTS.md.tmpl" "$target/agent-workflow/templates/AGENTS.md.tmpl"
   cp "$KIT_DIR/bin/awf" "$target/agent-workflow/bin/awf"
   chmod +x "$target/agent-workflow/bin/awf"
+  if [ -f "$KIT_DIR/bin/awf-dispatch" ]; then
+    cp "$KIT_DIR/bin/awf-dispatch" "$target/agent-workflow/bin/awf-dispatch"
+    chmod +x "$target/agent-workflow/bin/awf-dispatch"
+  else
+    warn "未找到 bin/awf-dispatch；目标项目只能手工派发"
+  fi
 
   write_task_files "$target/agent-workflow/tasks"
   write_aux_files "$target"
@@ -505,11 +515,12 @@ EOF
   say "  agent-workflow/"
   say "  ├── project.yaml             项目事实（唯一输入）"
   say "  ├── README.md                规范正文"
-  say "  ├── workflows/               dev / debug / docs / review"
+  say "  ├── workflows/               dev / debug / docs / review / cross-project"
   say "  ├── tasks/                   任务账本（todo/current/done + status）"
   say "  ├── memory/                  cache / history"
   say "  ├── tools/                   操作手册"
   say "  ├── bin/awf                  bootstrap / check / status"
+  say "  ├── bin/awf-dispatch         跨项目派发（DSH 会话适配）"
   say "  └── check_workflow.sh        兼容入口"
   say ""
   say "下一步：编辑 agent-workflow/project.yaml，然后运行"
@@ -542,7 +553,7 @@ cmd_bootstrap() {
   write_agents "$root" "$block"
   rm -f "$block"
 
-  say "已刷新 AGENTS.md 受控区块（digest: $P_DIGEST）"
+  say "已刷新 AGENTS.md 受控区块（digest: ${P_DIGEST}）"
 
   if is_registered; then
     if write_registration; then
@@ -601,6 +612,7 @@ agent-workflow/workflows/dev.md
 agent-workflow/workflows/debug.md
 agent-workflow/workflows/docs.md
 agent-workflow/workflows/review.md
+agent-workflow/workflows/cross-project.md
 agent-workflow/tasks/status.md
 agent-workflow/templates/AGENTS.md.tmpl
 "
@@ -617,9 +629,9 @@ agent-workflow/templates/AGENTS.md.tmpl
   actual="$(hash_files agent-workflow/project.yaml agent-workflow/templates/AGENTS.md.tmpl)"
   recorded="$(sed -n 's/.*<!-- awf:begin v[0-9][0-9]* digest:\([0-9a-f]\{8\}\).*/\1/p' AGENTS.md | head -n 1)"
   if [ "$actual" = "$recorded" ]; then
-    say "ok    AGENTS.md 入口与 project.yaml 同步（digest: $actual）"
+    say "ok    AGENTS.md 入口与 project.yaml 同步（digest: ${actual}）"
   else
-    say "FAIL  AGENTS.md 入口已过期（记录: ${recorded:-无} / 实际: $actual）"
+    say "FAIL  AGENTS.md 入口已过期（记录: ${recorded:-无} / 实际: ${actual}）"
     say "      → 运行 ./agent-workflow/bin/awf bootstrap"
     fails=$((fails + 1))
   fi
@@ -906,7 +918,7 @@ main() {
     projects)  cmd_projects ;;
     find)      cmd_find "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "未知命令：$cmd（可用：init / bootstrap / check / status）" ;;
+    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status）" ;;
   esac
 }
 

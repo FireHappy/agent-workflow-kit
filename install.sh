@@ -6,7 +6,6 @@ REPO="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-link}"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 SKILLS="$DSH_HOME/skills"
-DEST="$SKILLS/agent-workflow-scaffold"
 
 case "$MODE" in
   link|--link) MODE="link" ;;
@@ -16,22 +15,34 @@ esac
 
 mkdir -p "$SKILLS"
 
-if [ -e "$DEST" ] && [ ! -L "$DEST" ]; then
-  BACKUP_DIR="$DSH_HOME/skill-backups"
-  mkdir -p "$BACKUP_DIR"
-  BAK="$BACKUP_DIR/agent-workflow-scaffold.$(date +%Y%m%d%H%M%S)"
-  mv "$DEST" "$BAK"
-  echo "已备份旧技能目录：$BAK"
-fi
-rm -f "$DEST"
+install_skill() {
+  local name="$1" src="$2" dest="$SKILLS/$1"
+  if [ ! -e "$src" ]; then
+    echo "缺少技能源：$src" >&2
+    exit 1
+  fi
+  if [ -e "$dest" ] && [ ! -L "$dest" ]; then
+    local backup_dir="$DSH_HOME/skill-backups"
+    mkdir -p "$backup_dir"
+    local bak="$backup_dir/$name.$(date +%Y%m%d%H%M%S)"
+    mv "$dest" "$bak"
+    echo "已备份旧技能目录：$bak"
+  fi
+  rm -f "$dest"
+  if [ "$MODE" = "link" ]; then
+    ln -s "$src" "$dest"
+  else
+    cp -R "$src" "$dest"
+  fi
+  echo "已安装：${dest}（${MODE}）"
+}
 
-if [ "$MODE" = "link" ]; then
-  ln -s "$REPO" "$DEST"
-else
-  cp -R "$REPO" "$DEST"
-fi
+install_skill "agent-workflow-scaffold" "$REPO"
+install_skill "cross-project-dispatch" "$REPO/skills/cross-project-dispatch"
 
-chmod +x "$DEST/bin/awf" "$DEST/test/smoke.sh" 2>/dev/null || true
+chmod +x "$REPO/bin/awf" "$REPO/bin/awf-dispatch" "$REPO/test/smoke.sh" 2>/dev/null || true
+chmod +x "$SKILLS/agent-workflow-scaffold/bin/awf" \
+         "$SKILLS/agent-workflow-scaffold/bin/awf-dispatch" \
+         "$SKILLS/agent-workflow-scaffold/test/smoke.sh" 2>/dev/null || true
 
-echo "已安装：$DEST（$MODE）"
-echo "验证：bash \"$DEST/test/smoke.sh\""
+echo "验证：bash \"$SKILLS/agent-workflow-scaffold/test/smoke.sh\""

@@ -16,12 +16,13 @@
 1. 若目标目录已有 `agent-workflow/project.yaml`，停止并询问是否覆盖。
 2. 按 `templates/` 内容写入：
    - `agent-workflow/README.md` ← `templates/README.md`
-   - `agent-workflow/workflows/{dev,debug,docs,review}.md` ← `templates/workflows/`
+   - `agent-workflow/workflows/{dev,debug,docs,review,cross-project}.md` ← `templates/workflows/`
    - `agent-workflow/project.yaml` ← 渲染 `templates/project.yaml.tmpl`
    - `agent-workflow/tasks/`：`status.md` 由任务摘要生成；`dev|debug|docs` 各含 `todo.md`、`current.md`、`done.md`
    - `agent-workflow/memory/{cache,history}/`、`agent-workflow/tools/README.md`
    - `agent-workflow/templates/AGENTS.md.tmpl`（复制原文）
    - `agent-workflow/bin/awf`（复制 `bin/awf`，加可执行权限）
+   - `agent-workflow/bin/awf-dispatch`（存在则复制；DSH 跨项目会话派发）
    - `agent-workflow/check_workflow.sh`（调用 `bin/awf check`）
 3. 渲染 `AGENTS.md`：`templates/AGENTS.md.tmpl` 的占位符替换为项目事实，`{{DIGEST}}` 取 `sha256(project.yaml + AGENTS.md.tmpl)` 前 8 位。
    - 已有 `AGENTS.md` 时，只替换 `<!-- awf:begin -->` 与 `<!-- awf:end -->` 之间；无标记则追加。

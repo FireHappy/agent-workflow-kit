@@ -41,16 +41,17 @@
    - 问题排查 → `workflows/debug.md`
    - 文档撰写 → `workflows/docs.md`
    - 开发完成待审 → `workflows/review.md`
+   - 跨项目派发 → `workflows/cross-project.md`
 3. 有进行中任务则读对应 `tasks/<type>/current.md`
 4. 判断下一动作：恢复自己的任务 → 认领无 Owner 的高优先级任务 → 提议开始最优先待办
 
-**不要**在启动时同时加载四个流程文件。
+**不要**在启动时同时加载所有流程文件。
 
 ---
 
 ## 任务模型
 
-工作流类型：`dev`（功能/重构/优化）、`debug`（异常排查）、`docs`（文档/分析）、`review`（dev 的审查子流程）。
+工作流类型：`dev`（功能/重构/优化）、`debug`（异常排查）、`docs`（文档/分析）、`review`（dev 的审查子流程）。`cross-project` 是路由流程，不新增任务类型；任务仍落在目标项目的 `dev` / `debug` / `docs`。
 
 状态：`active`（执行中）、`blocked`（阻塞）、`review`（待审）、`verify`（待构建/测试/人工验证）、`handoff`（等待接手）。
 
@@ -130,6 +131,19 @@
 3. `project.yaml` 的 `serialized` 列出的文件只能由主线修改
 4. 账本（`current.md` / `status.md`）只由主线写，子任务返回结构化结果
 5. 子任务先 `verify/review`，再由主任务 Owner 合流归档
+
+---
+
+## 跨项目派发
+
+当任务目标在另一个仓库时，先过四道前置门：
+
+1. 目标有完整 `agent-workflow/` 与 `AGENTS.md`
+2. 目标已登记为当前 harness 的工作区（DSH：GUI 工作区列表）
+3. 目标没有未提交改动 / 其他 active 任务
+4. 目标工作区可创建会话
+
+全过时优先在**目标工作区的会话**中执行，不要默认 headless；详细流程见 `workflows/cross-project.md`。DSH 可用 `./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话。
 
 ---
 

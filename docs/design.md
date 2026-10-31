@@ -40,7 +40,7 @@
 
 `awf check` 检查四类：
 
-1. 框架文件齐全（入口、事实、四份流程、模板、状态）。
+1. 框架文件齐全（入口、事实、五份流程、模板、状态）。
 2. `AGENTS.md` 的 digest 与 `project.yaml` + 模板一致。
 3. 每个进行中任务块包含 `状态` / `Owner` / `下一步`。
 4. 退出码 = 失败项数量，可直接给 pre-commit / CI 用。
@@ -61,6 +61,12 @@
 
 配套原则：账本单写者。子任务只返回结果，由主线合并 `current.md`，避免多写者冲突。
 
+## 跨项目派发
+
+跨项目不是把 cwd 切过去，而是先过四道门：目标工作流、目标工作区、可写、会话通道。全过时用 `awf-dispatch` 在目标工作区创建正式会话，任务留在会话里可继续追问；headless 仅作为无人值守回退。
+
+核心与适配分离：`workflows/cross-project.md` 是 harness 无关规范，`bin/awf-dispatch` 是 DSH 适配器；其他 harness 可用 GUI 手工会话，语义相同。
+
 ## 版本
 
-`VERSION` 是技能版本；入口区块记录 `v<version>`。升级项目是显式动作：替换 `bin/awf` 与入口模板，再 `bootstrap` + `check`。
+`VERSION` 是技能版本；入口区块记录 `v<version>`。升级项目是显式动作：替换 `bin/awf`、`bin/awf-dispatch`、`cross-project.md` 与入口模板，再 `bootstrap` + `check`。

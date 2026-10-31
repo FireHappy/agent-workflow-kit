@@ -13,11 +13,11 @@ stack: generic
 
 # 校验命令（留空表示暂未配置）
 gate: ./agent-workflow/check_workflow.sh
-compile: bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh
+compile: bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && python3 -m py_compile bin/awf-dispatch
 test: bash test/smoke.sh
 
 # 并行切分：格式为 “名称(路径), 名称(路径)”
-scopes: 生成器与模板(bin/ templates/), 测试与CI(test/ .github/), 文档(docs/ README.md SKILL.md prompt.md)
+scopes: 生成器与模板(bin/ templates/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
 
 # 并行时任何单元都不许同时修改的文件或目录
-serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf
+serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, agent-workflow/workflows/cross-project.md

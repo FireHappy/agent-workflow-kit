@@ -5,19 +5,22 @@
 - **一份技能，N 个项目**：技能只提供生成器与模板，项目事实写在各自的 `project.yaml`。
 - **生成器在内，入口在外**：`AGENTS.md` 是产物，落在工作流目录之外，Codex / DSH / Claude Code 都能直接读。
 - **可校验**：入口带 digest，`awf check` 能发现它与事实文件脱节；`status.md` 由脚本生成。
+- **跨项目会话派发**：目标有工作流且已登记工作区时，在目标工作区创建会话执行，用户可继续追问。
 
 ## 目录
 
 ```text
 agent-workflow-kit/
-├── SKILL.md                 # 技能入口（DSH/Claude 安装后可直接调用）
+├── SKILL.md                 # 技能入口（脚手架）
 ├── prompt.md                # 无 shell 环境的提示词版
 ├── bin/awf                  # init / bootstrap / check / status / register / projects / find
+├── bin/awf-dispatch         # 跨项目派发（DSH 工作区会话适配）
+├── skills/cross-project-dispatch/SKILL.md  # 配套技能：跨项目派发
 ├── templates/               # 生成用的规范与入口模板
-├── test/smoke.sh            # 冒烟测试（26 项）
+├── test/smoke.sh            # 冒烟测试
 ├── docs/design.md           # 设计取舍
-├── docs/dispatch.md         # 跨项目派发（headless / subagent）
-├── install.sh               # 安装到 ~/.dsh/skills（link 或 copy）
+├── docs/dispatch.md         # 跨项目派发（会话优先 / headless / handoff）
+├── install.sh               # 安装两个技能到 ~/.dsh/skills（link 或 copy）
 └── VERSION                  # 版本号
 ```
 
@@ -30,7 +33,7 @@ cd ~/Documents/GitHub/agent-workflow-kit
 # 或：./install.sh copy  # Windows / 不希望联动时用拷贝
 ```
 
-安装后 DSH 会在下一次请求前把 `agent-workflow-scaffold` 加入技能目录；Codex 直接用 `SKILL.md` 或 `prompt.md` 的内容。
+安装后 DSH 会在下一次请求前把 `agent-workflow-scaffold` 与 `cross-project-dispatch` 加入技能目录；Codex 直接用 `SKILL.md` / `skills/cross-project-dispatch/SKILL.md` 或 `prompt.md` 的内容。
 
 ## 在项目里使用
 
@@ -44,6 +47,9 @@ cd ~/Documents/GitHub/agent-workflow-kit
 # 校验 / 状态
 ./agent-workflow/check_workflow.sh
 ./agent-workflow/bin/awf status
+
+# 跨项目派发（目标有工作流且已登记工作区）
+./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md
 ```
 
 生成结果：
@@ -55,14 +61,28 @@ cd ~/Documents/GitHub/agent-workflow-kit
 └── agent-workflow/
     ├── project.yaml          项目事实（唯一输入）
     ├── README.md             规范正文
-    ├── workflows/            dev / debug / docs / review
+    ├── workflows/            dev / debug / docs / review / cross-project
     ├── tasks/                status + todo/current/done
     ├── memory/               cache / history
     ├── tools/                操作手册
     ├── templates/            入口模板
     ├── bin/awf               bootstrap / check / status / register / projects / find
+    ├── bin/awf-dispatch      跨项目派发（DSH 会话适配）
     └── check_workflow.sh     兼容入口
 ```
+
+## 跨项目派发
+
+当任务目标在另一个仓库时，先检查目标是否有工作流、是否已登记为当前 harness 的工作区；都满足后，优先在**目标工作区的会话**中执行，而不是默认 headless。
+
+```bash
+./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
+./agent-workflow/bin/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
+./agent-workflow/bin/awf-dispatch demo02 task.md --headless # GUI 不可用时
+./agent-workflow/bin/awf-dispatch demo02 task.md --handoff  # 只生成交接单
+```
+
+四道前置门、回退矩阵与任务包格式见 [docs/dispatch.md](docs/dispatch.md) 和生成的 `agent-workflow/workflows/cross-project.md`。
 
 ## 全局索引
 
@@ -81,7 +101,7 @@ awf find 系统组件          # 别名 → 路径
 ## 测试
 
 ```bash
-bash test/smoke.sh        # 26 项：init / check / status / bootstrap / --force / 全局索引
+bash test/smoke.sh        # init / check / status / bootstrap / --force / 全局索引 / 派发 CLI
 ```
 
 CI（GitHub Actions）在每次 push 时运行同一套测试。
@@ -94,7 +114,7 @@ git pull
 bash test/smoke.sh
 ```
 
-已生成的项目各自保留 `agent-workflow/bin/awf` 与模板副本，不会被自动改写；需要升级某个项目时，把新的 `bin/awf` 与 `templates/AGENTS.md.tmpl` 拷过去，再跑一次 `bootstrap` + `check`。
+已生成的项目各自保留 `agent-workflow/bin/awf` 与模板副本，不会被自动改写；需要升级某个项目时，把新的 `bin/awf`、`bin/awf-dispatch`、`agent-workflow/workflows/cross-project.md` 与 `templates/AGENTS.md.tmpl` 拷过去，再跑一次 `bootstrap` + `check`。
 
 ## 版本
 

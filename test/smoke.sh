@@ -27,6 +27,22 @@ assert_file "$PROJ/agent-workflow/bin/awf" "bin/awf"
 assert_file "$PROJ/agent-workflow/tasks/status.md" "status.md"
 assert_grep 'awf:begin v1 digest:' "$PROJ/AGENTS.md" "入口含 digest"
 assert_grep '（未配置' "$PROJ/AGENTS.md" "空校验命令有回退提示"
+assert_file "$PROJ/agent-workflow/workflows/cross-project.md" "cross-project 工作流"
+assert_file "$PROJ/agent-workflow/bin/awf-dispatch" "awf-dispatch"
+assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
+
+# 1.1 派发器：help / handoff / 无工作流前置检查
+"$PROJ/agent-workflow/bin/awf-dispatch" --help >/dev/null && ok "awf-dispatch --help" || bad "awf-dispatch --help 失败"
+printf '任务：TEST-001 冒烟派发\n\n1. 只读验证。\n' > "$TMP/task.md"
+( cd "$TMP" && "$PROJ/agent-workflow/bin/awf-dispatch" "$PROJ" task.md --handoff >/dev/null ) \
+  && ok "handoff 生成交接单" || bad "handoff 失败"
+[ -f "$TMP"/dispatch/handoff/*.md ] && ok "交接单文件存在" || bad "交接单文件缺失"
+mkdir -p "$TMP/noworkflow"
+if "$PROJ/agent-workflow/bin/awf-dispatch" "$TMP/noworkflow" "$TMP/task.md" --dry-run >"$TMP/out" 2>&1; then
+  bad "无工作流时派发应失败"
+else
+  grep -q 'G1 工作流失败' "$TMP/out" && ok "无工作流时前置检查失败" || bad "无工作流时错误信息不明确"
+fi
 
 # 2. check 通过
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "check 通过" || bad "check 未通过"

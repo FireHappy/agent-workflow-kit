@@ -1,0 +1,766 @@
+#!/usr/bin/env python3
+"""awf-dispatch — 跨项目派发器（DSH 会话适配）。
+
+先在调度方项目里做四道前置检查：
+  G1 目标有 agent-workflow / AGENTS.md
+  G2 目标已登记为 DSH 工作区
+  G3 目标没有已跟踪改动 / 其他 active 任务
+  G4 DSH GUI 与会话通道可用
+
+全过时在目标工作区创建正式会话，发送任务并等待回合结束；
+会话留在 GUI 里，用户可以在同一个会话继续提细节。
+
+用法：
+  ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
+  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
+  ./agent-workflow/bin/awf-dispatch demo02 task.md --headless
+  ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
+
+设计约束：只依赖 Python 3 标准库；不打印、不落盘 GUI 认证 cookie。
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import datetime
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+DEFAULT_WEB_URL = "http://127.0.0.1:51439"
+DEFAULT_TIMEOUT = 600
+DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+
+
+class DispatchError(Exception):
+    """前置检查或派发失败；main 统一转成退出码 2。"""
+
+
+def emit(message: str, json_mode: bool = False) -> None:
+    if json_mode:
+        print(message, file=sys.stderr)
+    else:
+        print(message)
+
+
+def dsh_home() -> Path:
+    return Path(os.environ.get("DSH_HOME", str(Path.home() / ".dsh")))
+
+
+def agents_home() -> Path:
+    return Path(os.environ.get("DSH_AGENTS_HOME", str(Path.home() / ".agents")))
+
+
+# ---------------------------------------------------------------- 目标解析
+
+
+def resolve_target(value: str) -> Path:
+    direct = Path(value).expanduser()
+    if direct.is_dir():
+        return direct.resolve()
+
+    registry = agents_home() / "projects.tsv"
+    if not registry.is_file():
+        raise DispatchError(
+            "未找到全局索引 ~/.agents/projects.tsv；先在目标项目运行 awf register"
+        )
+
+    exact = []
+    loose = []
+    for raw in registry.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 3:
+            continue
+        project_id, aliases, path = parts[0], parts[1], parts[2]
+        names = [project_id] + [a.strip() for a in aliases.split(",")]
+        if any(value.lower() == name.lower() for name in names):
+            exact.append((project_id, path))
+        elif any(value.lower() in name.lower() for name in names):
+            loose.append((project_id, path))
+
+    candidates = exact or loose
+    if not candidates:
+        raise DispatchError(f"未找到项目：{value}（检查 awf projects / 全局索引）")
+    project_id, path = candidates[0]
+    target = Path(path).expanduser().resolve()
+    if not target.is_dir():
+        raise DispatchError(f"索引里的路径不存在：{target}（先运行 awf bootstrap / register）")
+    return target
+
+
+def read_task(path: str):
+    task = Path(path).expanduser().resolve()
+    if not task.is_file():
+        raise DispatchError(f"任务文件不存在：{task}")
+    text = task.read_text(encoding="utf-8")
+    if not text.strip():
+        raise DispatchError(f"任务文件为空：{task}")
+    return task, text
+
+
+def clean_title(value: str, limit: int = 60) -> str:
+    value = re.sub(r"[`*_\[\]（）()]+", "", value).strip(" -—:：·")
+    value = re.sub(r"\s+", " ", value)
+    return value[:limit].strip() or "未命名任务"
+
+
+def task_title(task: Path, text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("任务：", "任务:")):
+            return clean_title(stripped[3:])
+    for line in text.splitlines():
+        match = re.match(r"^#{1,3}\s+(.+)", line.strip())
+        if match:
+            return clean_title(match.group(1))
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith(("|", "-", "#", ">", "```")):
+            return clean_title(stripped)
+    return clean_title(task.stem)
+
+
+def task_type(text: str) -> str:
+    match = re.search(r"workflows/(dev|debug|docs)\.md", text)
+    if match:
+        return match.group(1)
+    match = re.match(r"\s*(DEV|DEBUG|DOCS)-", text)
+    if match:
+        return {"DEV": "dev", "DEBUG": "debug", "DOCS": "docs"}[match.group(1)]
+    return "dev"
+
+
+# ---------------------------------------------------------------- 前置检查
+
+
+def check_workflow(target: Path) -> None:
+    required = [
+        "AGENTS.md",
+        "agent-workflow/project.yaml",
+        "agent-workflow/README.md",
+        "agent-workflow/workflows/dev.md",
+        "agent-workflow/check_workflow.sh",
+    ]
+    missing = [rel for rel in required if not (target / rel).exists()]
+    if missing:
+        raise DispatchError(
+            "G1 工作流失败：目标缺少 " + "、".join(missing) + "；先运行 awf init 或补齐工作流"
+        )
+
+    proc = subprocess.run(
+        ["./agent-workflow/check_workflow.sh"],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stdout + proc.stderr).strip().splitlines()[-8:]
+        raise DispatchError(
+            "G1 工作流校验失败；先让目标项目通过 check_workflow.sh：\n"
+            + "\n".join(detail)
+        )
+
+
+def check_git(target: Path, allow_dirty: bool) -> str:
+    if not (target / ".git").exists():
+        return "非 git 仓库（跳过）"
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    changes = [line for line in proc.stdout.splitlines() if line.strip()]
+    if changes and not allow_dirty:
+        raise DispatchError(
+            "G3 可写失败：目标有已跟踪改动，先提交/清理，或加 --allow-dirty：\n"
+            + "\n".join(changes[:10])
+        )
+    return "clean" if not changes else f"有 {len(changes)} 处改动（已允许）"
+
+
+def check_active(target: Path, allow_active: bool) -> str:
+    active = []
+    for current in sorted((target / "agent-workflow/tasks").glob("*/current.md")):
+        text = current.read_text(encoding="utf-8")
+        for match in re.finditer(r"^## \[([A-Z]+-[0-9]+)\]\s*(.+)$", text, re.M):
+            active.append(f"{match.group(1)} {match.group(2).strip()}")
+    if active and not allow_active:
+        raise DispatchError(
+            "G3 可写失败：目标已有 active 任务，避免多写者；确认后加 --allow-active：\n"
+            + "\n".join(active)
+        )
+    return "无 active 任务" if not active else f"{len(active)} 个 active 任务（已允许）"
+
+
+# ---------------------------------------------------------------- 工作区
+
+
+def load_workspaces() -> list:
+    path = dsh_home() / "storages/workspace.json"
+    if not path.is_file():
+        raise DispatchError(f"找不到 DSH 工作区注册表：{path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    table = (data.get("tables", {}) or {}).get("workspaces", {}) or {}
+    result = []
+    for workspace_id, workspace in table.items():
+        item = dict(workspace)
+        item["workspaceId"] = workspace_id
+        result.append(item)
+    return result
+
+
+def find_workspace(target: Path):
+    real = os.path.realpath(str(target))
+    for workspace in load_workspaces():
+        path = workspace.get("path") or ""
+        if path and os.path.realpath(path) == real:
+            return workspace
+    return None
+
+
+# ---------------------------------------------------------------- DSH Web API
+
+
+def cookie_candidates() -> list:
+    home = Path.home()
+    values = [
+        os.environ.get("DSH_COOKIE_DB"),
+        str(home / "Library/Application Support/@deepseek-ai/dsh-desktop/Cookies"),
+        str(home / ".config/@deepseek-ai/dsh-desktop/Cookies"),
+        str(home / ".config/dsh-desktop/Cookies"),
+    ]
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        values.append(str(Path(appdata) / "@deepseek-ai/dsh-desktop/Cookies"))
+    return [Path(v) for v in values if v and Path(v).is_file()]
+
+
+def read_auth_cookie(authority: str) -> str:
+    databases = cookie_candidates()
+    if not databases:
+        raise DispatchError(
+            "G4 通道失败：找不到 DSH 桌面端 Cookies 数据库；"
+            "确认 GUI 正在运行，或使用 --headless / --handoff"
+        )
+
+    fd, tmp = tempfile.mkstemp(prefix="awf-cookies-", suffix=".db")
+    os.close(fd)
+    best = None
+    try:
+        shutil.copyfile(databases[0], tmp)
+        os.chmod(tmp, 0o600)
+        con = sqlite3.connect(tmp)
+        rows = con.execute(
+            "select name, value, expires_utc from cookies where host_key in ('127.0.0.1', 'localhost')"
+        ).fetchall()
+        con.close()
+        now = time.time() + 11644473600  # Chrome epoch
+        for name, value, expires in rows:
+            parts = value.split(".")
+            if len(parts) < 3:
+                continue
+            payload = parts[1] + "=" * (-len(parts[1]) % 4)
+            try:
+                data = json.loads(base64.urlsafe_b64decode(payload))
+            except Exception:
+                continue
+            if data.get("authority") != authority:
+                continue
+            if expires and (expires / 1e6) <= now:
+                continue
+            issued = data.get("issuedAt", 0)
+            if best is None or issued > best[0]:
+                best = (issued, name, value)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+    if best is None:
+        raise DispatchError(
+            f"G4 通道失败：没有 {authority} 的有效 GUI 认证 cookie；"
+            "重开 GUI URL 后重试，或使用 --headless / --handoff"
+        )
+    return f"{best[1]}={best[2]}"
+
+
+class DshApi:
+    def __init__(self, web_url: str = ""):
+        self.base = (web_url or os.environ.get("DSH_WEB_URL") or DEFAULT_WEB_URL).rstrip("/")
+        parsed = urllib.parse.urlparse(self.base)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise DispatchError(f"无效的 DSH Web URL：{self.base}")
+        self.authority = parsed.netloc
+        self.cookie = read_auth_cookie(self.authority)
+
+    def rpc(self, endpoint: str, args: dict, timeout: int = 60):
+        body = json.dumps(
+            {
+                "type": "client-request",
+                "rpcId": str(uuid.uuid4()),
+                "method": endpoint,
+                "payload": {"args": args},
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base}/api/{endpoint}",
+            data=body,
+            method="POST",
+            headers={
+                "content-type": "application/json",
+                "Origin": self.base,
+                "Cookie": self.cookie,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code == 401:
+                raise DispatchError(
+                    "G4 通道失败：DSH Web 认证失效；重开 GUI 打印的 URL 后重试"
+                )
+            if error.code == 404:
+                raise DispatchError(f"DSH Web 不支持端点 {endpoint}（版本不匹配？）")
+            raise DispatchError(f"DSH Web HTTP {error.code}：{endpoint}")
+        except (urllib.error.URLError, ConnectionError) as error:
+            raise DispatchError(
+                f"G4 通道失败：连不上 DSH GUI（{self.base}）；"
+                f"确认 GUI 正在运行，或用 --headless / --handoff（{error}）"
+            )
+
+        result = data.get("result") or {}
+        if not result.get("ok"):
+            detail = json.dumps(result.get("error"), ensure_ascii=False)
+            raise DispatchError(f"{endpoint} 失败：{detail}")
+        return result.get("value")
+
+    def sessions(self) -> list:
+        return self.rpc("session/list", {"_request": {}}).get("items", [])
+
+    def create_session(self, workspace_id: str) -> dict:
+        return self.rpc("session/create", {"request": {"workspaceId": workspace_id}})
+
+    def rename(self, session_id: str, title: str) -> None:
+        self.rpc("session/rename", {"request": {"sessionId": session_id, "title": title}})
+
+    def prompt(self, session_id: str, text: str, request_id: str) -> None:
+        self.rpc(
+            "session/prompt",
+            {
+                "request": {
+                    "requestId": request_id,
+                    "sessionId": session_id,
+                    "mode": "queue",
+                    "content": [{"type": "text", "text": text}],
+                    "clientTimeZone": "Asia/Shanghai",
+                }
+            },
+        )
+
+    def workspace_create(self, path: Path) -> dict:
+        value = self.rpc("workspace/create", {"request": {"path": str(path)}})
+        return value.get("workspace", {})
+
+
+# ---------------------------------------------------------------- 任务包与等待
+
+
+def build_prompt(target: Path, title: str, kind: str, text: str) -> str:
+    return (
+        f"请在本会话中执行下面的跨项目任务。目标仓库：{target}。\n"
+        f"必须遵守本仓库 AGENTS.md 与 agent-workflow/workflows/{kind}.md。\n\n"
+        "----- 任务包开始 -----\n"
+        f"{text.rstrip()}\n"
+        "----- 任务包结束 -----\n\n"
+        "补充约定：\n"
+        "- 目标项目的任务账本由你维护；派发方不会改你的 current.md / status.md。\n"
+        "- 只允许本地 commit，禁止 push；仓库里的验证命令必须实际执行。\n"
+        "- 完成后按任务文件要求的回报格式回复，并保留本会话，用户会在这里继续提细节。\n"
+    )
+
+
+def find_session(api: DshApi, session_id: str):
+    for row in api.sessions():
+        if row.get("sessionId") == session_id:
+            return row
+    return None
+
+
+def session_title(row: dict) -> str:
+    projections = row.get("projections") or {}
+    values = projections.get("values") or {}
+    return values.get("title") or ""
+
+
+def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, json_mode: bool):
+    started = False
+    deadline = time.time() + timeout
+    last_note = 0
+    while time.time() < deadline:
+        row = find_session(api, session_id)
+        if row:
+            running = bool(row.get("running"))
+            if running:
+                started = True
+            elif started or (not row.get("blank") and (row.get("updatedAt") or 0) >= prompt_ms):
+                return row
+        if not json_mode and time.time() - last_note > 15:
+            last_note = time.time()
+            print("  … 等待目标 agent 完成（会话保留，Ctrl-C 不影响执行）", file=sys.stderr)
+        time.sleep(3)
+    return None
+
+
+def latest_assistant(api: DshApi, row: dict):
+    projections = row.get("projections") or {}
+    through = projections.get("asOfSeq")
+    if not isinstance(through, int):
+        return None
+    try:
+        page = api.rpc(
+            "session/page",
+            {
+                "request": {
+                    "address": {"kind": "session", "sessionId": row["sessionId"]},
+                    "throughSeq": through,
+                    "maxMessages": 300,
+                }
+            },
+            timeout=30,
+        )
+    except DispatchError:
+        return None
+
+    texts = []
+    for record in page.get("records", []):
+        event = record.get("event") or {}
+        if event.get("type") != "assistant/message":
+            continue
+        message = (event.get("data") or {}).get("message") or {}
+        for part in message.get("content") or []:
+            if part.get("type") == "text" and part.get("text"):
+                texts.append(part["text"])
+    return texts[-1] if texts else None
+
+
+# ---------------------------------------------------------------- 日志
+
+
+def append_log(entry: str) -> Path:
+    local = Path.cwd() / "dispatch"
+    path = local / "log.md" if local.is_dir() else agents_home() / "dispatch.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(entry.rstrip() + "\n\n")
+    return path
+
+
+def git_head(target: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(target), "log", "-1", "--oneline"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return "N/A"
+
+
+def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
+              workspace: dict, status: str, final_text: str, task: Path) -> str:
+    excerpt = re.sub(r"\s+", " ", final_text or "").strip()[:300]
+    workspace_title = (workspace or {}).get("title", "未知工作区")
+    workspace_id = (workspace or {}).get("workspaceId", "-")
+    return (
+        f"## {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} → {alias}\n\n"
+        f"- 目标：{target}\n"
+        f"- 任务：{title}（{task}）\n"
+        f"- 工作区：{workspace_title}（{workspace_id}）\n"
+        f"- 会话：{session_id}（{session_title_value or title}）\n"
+        f"- 状态：{status}\n"
+        f"- 目标 HEAD：{git_head(target)}\n"
+        + (f"- 回报节选：{excerpt}\n" if excerpt else "")
+    )
+
+
+# ---------------------------------------------------------------- 派发模式
+
+
+def preflight(target: Path, args, need_channel: bool):
+    check_workflow(target)
+    emit("G1 工作流：ok", args.json)
+    result = {
+        "target": str(target),
+        "gate": "ok",
+        "git": check_git(target, args.allow_dirty),
+        "active": check_active(target, args.allow_active),
+        "workspace": None,
+        "api": None,
+    }
+    emit(f"G3 可写：ok（{result['git']}；{result['active']}）", args.json)
+
+    if not need_channel:
+        emit("G2/G4：跳过（当前回退模式不要求工作区会话）", args.json)
+        return result
+
+    try:
+        api = DshApi(args.web_url)
+        api.sessions()  # 认证/连通性探针
+    except DispatchError as error:
+        if args.add_workspace:
+            raise
+        raise DispatchError(str(error) + "；或在 GUI 添加工作区后用 --add-workspace")
+
+    workspace = find_workspace(target)
+    if workspace is None and args.add_workspace:
+        if args.dry_run:
+            emit("G2 工作区：缺失（dry-run 不登记；实际运行会 --add-workspace）", args.json)
+        else:
+            workspace = api.workspace_create(target)
+            print(f"已登记工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）")
+    if workspace is None:
+        if not (args.dry_run and args.add_workspace):
+            raise DispatchError(
+                f"G2 工作区失败：{target} 未登记为 DSH 工作区；"
+                "在 GUI「添加工作区」后重试，或加 --add-workspace"
+            )
+        emit(f"G4 通道：ok（{api.base}）", args.json)
+        result["api"] = api
+        return result
+
+    result["workspace"] = workspace
+    result["api"] = api
+    emit(f"G2 工作区：ok（{workspace.get('title')} / {workspace.get('workspaceId')}）", args.json)
+    emit(f"G4 通道：ok（{api.base}）", args.json)
+    return result
+
+
+def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str, args):
+    state = preflight(target, args, need_channel=True)
+    api = state["api"]
+    workspace = state["workspace"]
+
+    existing = [
+        row
+        for row in api.sessions()
+        if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
+        and session_title(row) == title
+    ]
+    if existing and not args.force:
+        raise DispatchError(
+            "检测到同名会话，可能已派发过："
+            + "、".join(row["sessionId"] for row in existing[:3])
+            + "；确认要再派发请加 --force"
+        )
+
+    created = api.create_session(workspace["workspaceId"])
+    session_id = created["sessionId"]
+    api.rename(session_id, title)
+    prompt_ms = int(time.time() * 1000)
+    api.prompt(session_id, build_prompt(target, title, kind, text), str(uuid.uuid4()))
+
+    emit(f"已创建会话：{session_id}（{title}）", args.json)
+    emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
+    emit("任务已受理；等待目标 agent 完成…", args.json)
+
+    if args.no_wait:
+        entry = log_entry(target.name, target, title, session_id, title, workspace,
+                          "已受理（未等待）", "", task)
+        log_path = append_log(entry)
+        payload = {
+            "ok": True,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "workspace": workspace,
+            "status": "accepted",
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"已记录：{log_path}")
+            print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{title}」继续提细节。")
+        return 0
+
+    row = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json)
+    final_text = latest_assistant(api, row) if row else None
+    status = "完成" if row else f"超时（>{args.timeout}s，会话仍在运行）"
+    entry = log_entry(target.name, target, title, session_id, session_title(row or {}) or title,
+                      workspace, status, final_text or "", task)
+    log_path = append_log(entry)
+
+    payload = {
+        "ok": bool(row),
+        "mode": "session",
+        "sessionId": session_id,
+        "title": title,
+        "workspace": workspace,
+        "status": "completed" if row else "timeout",
+        "head": git_head(target),
+        "final": final_text,
+        "log": str(log_path),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(f"状态：{status}")
+        print(f"目标 HEAD：{git_head(target)}")
+        if final_text:
+            excerpt = final_text.strip()
+            if len(excerpt) > 900:
+                excerpt = excerpt[:900] + "\n…（完整回报见会话）"
+            print("\n--- 目标 agent 回报（节选）---")
+            print(excerpt)
+        print(f"\n已记录：{log_path}")
+        print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{title}」继续提细节。")
+    return 0 if row else 3
+
+
+def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
+    state = preflight(target, args, need_channel=False)
+    dsh = os.environ.get("DSH_BIN") or DEFAULT_DSH
+    if not Path(dsh).exists():
+        found = shutil.which("dsh")
+        if not found:
+            raise DispatchError("找不到 dsh 可执行文件；设置 DSH_BIN 或安装 DSH CLI")
+        dsh = found
+
+    emit("模式：headless（会话不会出现在 GUI 工作区，用户无法直接续聊）", args.json)
+    proc = subprocess.run(
+        [dsh, "--profile", "headless", "-"],
+        cwd=str(target),
+        input=text,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=args.timeout,
+    )
+    final_text = proc.stdout.strip()
+    status = "完成" if proc.returncode == 0 else f"失败（exit {proc.returncode}）"
+    entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
+                      status, final_text, task)
+    log_path = append_log(entry)
+    payload = {
+        "ok": proc.returncode == 0,
+        "mode": "headless",
+        "status": status,
+        "head": git_head(target),
+        "final": final_text,
+        "log": str(log_path),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(f"状态：{status}")
+        print(final_text)
+        print(f"已记录：{log_path}")
+    return 0 if proc.returncode == 0 else 3
+
+
+def dispatch_handoff(target: Path, task: Path, text: str, title: str, args):
+    preflight(target, args, need_channel=False)
+    outdir = Path.cwd() / "dispatch/handoff"
+    outdir.mkdir(parents=True, exist_ok=True)
+    dest = outdir / f"{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{target.name}.md"
+    dest.write_text(
+        f"# 跨项目交接：{title}\n\n"
+        f"- 目标：{target}\n"
+        f"- 任务文件：{task}\n\n"
+        "在 GUI 左侧切到目标工作区，新建会话后把下面的任务包粘贴进去：\n\n"
+        "----- 任务包开始 -----\n"
+        f"{text.rstrip()}\n"
+        "----- 任务包结束 -----\n",
+        encoding="utf-8",
+    )
+    emit(f"已生成交接单：{dest}", args.json)
+    emit("没有创建会话；请在目标工作区手动执行。", args.json)
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="awf-dispatch",
+        description="跨项目派发：先检查目标工作流与工作区，再在目标工作区创建会话执行。",
+        epilog=(
+            "示例：\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md\n"
+            "  awf-dispatch demo02 task.md --dry-run\n"
+            "  awf-dispatch demo02 task.md --headless\n"
+            "  awf-dispatch demo02 task.md --handoff\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("target", help="项目别名 / 项目 ID / 目录")
+    parser.add_argument("task", help="任务文件（Markdown）")
+    parser.add_argument("--web-url", default="", help=f"DSH Web URL（默认 $DSH_WEB_URL 或 {DEFAULT_WEB_URL}）")
+    parser.add_argument("--dry-run", action="store_true", help="只做前置检查，不创建会话")
+    parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
+    parser.add_argument("--handoff", action="store_true", help="只生成交接单，不执行")
+    parser.add_argument("--add-workspace", action="store_true", help="目标未登记工作区时自动登记")
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="等待回合完成秒数（默认 600）")
+    parser.add_argument("--no-wait", action="store_true", help="只发送任务，不等待回合完成")
+    parser.add_argument("--force", action="store_true", help="允许同名会话重复派发")
+    parser.add_argument("--allow-dirty", action="store_true", help="允许目标有已跟踪改动")
+    parser.add_argument("--allow-active", action="store_true", help="允许目标已有 active 任务")
+    parser.add_argument("--title", default="", help="会话标题（默认 <别名> · <任务标题>）")
+    parser.add_argument("--json", action="store_true", help="最终输出 JSON")
+    args = parser.parse_args(argv)
+
+    try:
+        target = resolve_target(args.target)
+        task, text = read_task(args.task)
+        kind = task_type(text)
+        title = args.title or f"{target.name} · {task_title(task, text)}"
+
+        emit(f"目标：{target}", args.json)
+        emit(f"任务：{title}（{kind}）", args.json)
+
+        if args.dry_run:
+            preflight(target, args, need_channel=not args.headless and not args.handoff)
+            emit("dry-run：前置检查通过，未创建会话。", args.json)
+            return 0
+
+        if args.handoff:
+            return dispatch_handoff(target, task, text, title, args)
+
+        if args.headless:
+            return dispatch_headless(target, task, text, title, args)
+        return dispatch_session(target, task, text, title, kind, args)
+
+    except DispatchError as error:
+        print(f"FAIL  {error}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\n已中断；已创建的会话会继续执行，可在 GUI 查看。", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())
