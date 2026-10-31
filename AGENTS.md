@@ -56,3 +56,11 @@
 
 > 本区块由 `agent-workflow/bin/awf bootstrap` 生成，源为 `agent-workflow/project.yaml` 与该模板。区块外的内容可以自由编辑。
 <!-- awf:end -->
+
+## 本仓库协作约定（区块外，本地维护）
+
+- 默认把多文件任务交给 AgentTeams，三轨对应现有流程：docs / dev / debug；触发口令 `用 AgentTeams 按 docs/team-flow.md 执行：<目标>`。
+- 轨道规则与成员分工见 `docs/team-flow.md`；跨项目写仍走 `awf-dispatch`。
+- 单文件小修、文案改动、只读查询不开团队（协调成本 > 收益）。
+- 跨项目写操作仍走 `awf-dispatch` 派发给目标项目自己的会话，不由本仓库团队代写目标仓库。
+- 单人任务（改一条文案、跑一次校验）不必开团队，避免为小改动付协调成本。
