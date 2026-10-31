@@ -80,6 +80,369 @@ else
   bad "--help 未说明归档目录"
 fi
 
+# 1.3b 会话复用：help 参数与选择函数（项目+模块复用键、不看压力、running 等待、--session 互斥）
+for flag in --reuse --new --session --idle-wait --module; do
+  if printf '%s\n' "$help_text" | grep -Eq -- "(^|[[:space:]])${flag}([[:space:]]|=|$)"; then
+    ok "--help 列出 ${flag}"
+  else
+    bad "--help 未列出 ${flag}"
+  fi
+done
+if printf '%s\n' "$help_text" | grep -q '复用'; then
+  ok "--help 说明会话复用"
+else
+  bad "--help 未说明会话复用"
+fi
+if printf '%s\n' "$help_text" | grep -q '\[awf\]'; then
+  ok "--help 说明 [awf] 标题约定"
+else
+  bad "--help 未说明 [awf] 标题约定"
+fi
+if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+import contextlib
+import importlib.machinery
+import importlib.util
+import inspect
+import io
+import json
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_reuse_under_test", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+target = pathlib.Path("/tmp/awf-reuse-project")
+
+
+def row(session_id, cwd=str(target), running=False, blank=False, title="",
+        tokens=None, window=None, updated=0):
+    values = {"title": title}
+    if tokens is not None or window is not None:
+        values["contextPressure"] = {"pressureTokens": tokens, "contextWindow": window}
+    return {
+        "sessionId": session_id,
+        "cwd": cwd,
+        "running": running,
+        "blank": blank,
+        "updatedAt": updated,
+        "projections": {"values": values},
+    }
+
+
+assert module.DEFAULT_REUSE is True, "默认必须复用"
+assert module.PRESSURE_HINT_LIMIT == 0.9, "压力只作 0.9 提示，不再作为轮换阈值"
+assert module.DEFAULT_IDLE_WAIT == 300, "running 等待默认 300s"
+assert module.MODULE_DEFAULT == "通用", "默认模块必须是「通用」"
+
+project = target.name
+title = module.awf_session_title(project, "工作流")
+assert title == f"[awf] {project} · 工作流", title
+assert module.awf_session_title(project, "") == f"[awf] {project} · 通用"
+
+# 模块来源：--module > 票据「模块：」行 > 默认「通用」
+ticket = "任务：TEST-001\n\n- 目标项目：proj（/tmp/proj）\n- 模块：工作流\n"
+assert module.ticket_module(ticket) == "工作流"
+assert module.ticket_module("任务：TEST-001\n") == ""
+assert module.resolve_module(ticket) == "工作流"
+assert module.resolve_module(ticket, "文档") == "文档", "--module 必须覆盖票据"
+assert module.resolve_module("任务：TEST-001\n") == "通用"
+
+# 模块相同 → 复用；模块不同 → 不复用（不借其它模块上下文）
+same = row("s-same", title=title, updated=1)
+other_module = row("s-other-module", title=module.awf_session_title(project, "文档"), updated=9)
+assert module.select_reuse_session([same], target, "工作流")["sessionId"] == "s-same"
+assert module.select_reuse_session([other_module], target, "工作流") is None, "不得复用其它模块会话"
+assert module.select_reuse_session([same, other_module], target, "工作流")["sessionId"] == "s-same"
+
+# 运行中的同模块会话也选中（由调用方等待空闲，不静默新建）
+running_same = row("s-running", title=title, running=True, updated=99)
+assert module.select_reuse_session([running_same], target, "工作流")["sessionId"] == "s-running"
+
+# 同模块多个：先选空闲，再取 updatedAt 最新
+older = row("s-old", title=title, updated=10)
+newer = row("s-new", title=title, updated=20)
+assert module.select_reuse_session([older, newer], target, "工作流")["sessionId"] == "s-new"
+assert module.select_reuse_session([older, running_same], target, "工作流")["sessionId"] == "s-old"
+
+# 旧格式标题（无 [awf]）：单条空闲时迁移复用并改名；多条不猜；运行中不迁移
+legacy = row("s-legacy", title=f"{project} · 旧任务")
+assert module.is_legacy_session_title(f"{project} · 旧任务", project)
+assert not module.is_legacy_session_title(title, project)
+assert module.select_reuse_session([legacy], target, "工作流")["sessionId"] == "s-legacy"
+assert module.reuse_rename_needed(legacy, title), "旧格式标题复用后必须改名"
+assert not module.reuse_rename_needed(same, title)
+legacy2 = row("s-legacy2", title=f"{project} · 另一个旧任务")
+assert module.select_reuse_session([legacy, legacy2], target, "工作流") is None, "多条旧格式不得猜"
+assert module.select_reuse_session([row("s-legacy-run", title=f"{project} · 旧", running=True)],
+                                   target, "工作流") is None
+# 项目已有规范会话时，旧格式也不迁移（避免串模块）
+assert module.select_reuse_session([other_module, legacy], target, "工作流") is None
+
+# 不兜底复用普通用户会话；不同 cwd / blank 跳过；无候选返回 None
+assert module.select_reuse_session([row("s-user", title="用户的会话")], target, "工作流") is None
+assert module.select_reuse_session([row("s-other", cwd="/tmp/other", title=title)],
+                                   target, "工作流") is None
+assert module.select_reuse_session([row("s-blank", blank=True, title=title)],
+                                   target, "工作流") is None
+assert module.select_reuse_session([], target, "工作流") is None
+
+# 压力不参与筛选（上下文是开发资产）：高压力会话仍被选中，只给提示
+high = row("s-high", title=title, tokens=950, window=1000)
+assert module.select_reuse_session([high], target, "工作流")["sessionId"] == "s-high", "高压力会话不得被跳过"
+hint = module.pressure_hint(high)
+assert hint and "--new" in hint and "可考虑" in hint, hint
+assert module.pressure_hint(row("s-low", tokens=500, window=1000)) == "", "低压力不得提示"
+
+# 标题约定：[awf] <项目名> · <模块名>（模块截断 40 字）
+assert module.awf_session_title("proj", "x" * 50) == "[awf] proj · " + "x" * 40
+
+
+class FakeApi:
+    """只实现 sessions()，模拟 session/list 轮询（不触碰真实会话）。"""
+
+    def __init__(self, sequence):
+        self.sequence = list(sequence)
+        self.calls = 0
+
+    def sessions(self):
+        self.calls += 1
+        return self.sequence[min(self.calls - 1, len(self.sequence) - 1)]
+
+
+def turn(running):
+    return {"sessionId": "s-awf", "running": running, "blank": False}
+
+
+# running=true：轮询到空闲后返回
+polling = FakeApi([[turn(True)], [turn(True)], [turn(False)]])
+row_idle = module.wait_for_idle(polling, "s-awf", timeout=5, interval=0.01)
+assert row_idle is not None and row_idle["running"] is False and polling.calls == 3
+
+# 持续运行：超时返回 None（调用方据此报「等待超时」并建议 --new / 加大 --idle-wait）
+stuck = FakeApi([[turn(True)]])
+assert module.wait_for_idle(stuck, "s-awf", timeout=0.05, interval=0.01) is None
+
+# 轮询中会话消失/被归档：返回 SESSION_GONE（与超时区分，调用方提示重新派发）
+missing = FakeApi([[{"sessionId": "other", "running": False}]])
+assert module.wait_for_idle(missing, "s-awf", timeout=0.05, interval=0.01) is module.SESSION_GONE
+
+# 派发主流程（mock API，不接触真实会话）：同模块复用 / 异模块新建 / 旧标题改名 / running 等待
+import argparse
+
+module.time.sleep = lambda _seconds: None  # wait_for_idle 在测试里不真等
+
+
+class FakeDispatchApi:
+    def __init__(self, rows, idle_after=None):
+        self.rows = rows
+        self.idle_after = idle_after
+        self.calls = 0
+        self.created = []
+        self.renamed = []
+        self.prompts = []
+
+    def sessions(self):
+        self.calls += 1
+        if self.idle_after is not None:
+            running = self.calls < self.idle_after
+            for item in self.rows:
+                item["running"] = running
+        return self.rows
+
+    def create_session(self, workspace_id):
+        created = row(f"s-created-{len(self.created) + 1}", title="")
+        self.rows.append(created)
+        self.created.append(created["sessionId"])
+        return {"sessionId": created["sessionId"]}
+
+    def rename(self, session_id, new_title):
+        # 只记录，不原地改 rows（row 是快照）；改名后的输出必须由 dispatch_session 用新标题。
+        self.renamed.append((session_id, new_title))
+
+    def prompt(self, session_id, text, request_id):
+        self.prompts.append((session_id, text))
+
+
+class NoListApi(FakeDispatchApi):
+    """--new 不应调用 session/list：一旦调用就失败。"""
+
+    def sessions(self):
+        raise module.DispatchError("session/list 不可用（--new 不应调用）")
+
+
+class VanishApi(FakeDispatchApi):
+    """轮询中会话消失：sessions() 在指定次数后返回空列表。"""
+
+    def __init__(self, rows, disappear_after):
+        super().__init__(rows)
+        self.disappear_after = disappear_after
+
+    def sessions(self):
+        self.calls += 1
+        if self.calls >= self.disappear_after:
+            return []
+        return self.rows
+
+
+def run_dispatch(api, task_module, idle_wait=300, force=False, reuse=True,
+                 json_mode=False, expect_error=False):
+    logs = []
+    output = io.StringIO()
+    original = (module.preflight, module.append_log, module.emit)
+    module.preflight = lambda target, args, need_channel: {
+        "api": api,
+        "workspace": {"title": "w", "workspaceId": "id"},
+    }
+    module.append_log = lambda entry: logs.append(entry) or pathlib.Path("/tmp/awf-dispatch-log.md")
+    module.emit = lambda message, json_mode=False: None
+    text = (
+        f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n"
+        f"- 模块：{task_module}\n"
+    )
+    args = argparse.Namespace(
+        session="", reuse=reuse, module="", title="", wait=False, timeout=600,
+        idle_wait=idle_wait, force=force, team=False, json=json_mode, headless=False,
+        handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
+        allow_active=False, apply=False, prune=False, web_url="",
+    )
+    try:
+        with contextlib.redirect_stdout(output):
+            try:
+                code = module.dispatch_session(
+                    target, pathlib.Path("/tmp/task.md"), text,
+                    f"{project} · TEST-001", "dev", args,
+                )
+            except module.DispatchError as error:
+                if not expect_error:
+                    raise
+                return str(error)
+    finally:
+        module.preflight, module.append_log, module.emit = original
+    if expect_error:
+        raise AssertionError("预期派发失败但成功了")
+    assert code == 0, code
+    return logs, output.getvalue()
+
+
+# 模块相同 → 复用，不新建
+same_api = FakeDispatchApi([row("s-same", title=title)])
+logs, _ = run_dispatch(same_api, "工作流")
+assert same_api.created == [], "同模块应复用，不新建会话"
+assert same_api.prompts and same_api.prompts[0][0] == "s-same", same_api.prompts
+assert "会话来源：复用" in logs[0]
+
+# 模块不同 → 不复用，新建本模块会话并改名
+other_api = FakeDispatchApi([row("s-doc", title=module.awf_session_title(project, "文档"))])
+logs, _ = run_dispatch(other_api, "工作流")
+assert other_api.prompts and other_api.prompts[0][0] == "s-created-1", other_api.prompts
+assert other_api.prompts[0][0] != "s-doc", "不得复用其它模块会话"
+assert ("s-created-1", title) in other_api.renamed, other_api.renamed
+assert "会话来源：新建" in logs[0]
+
+# 旧格式标题 → 复用并改名为规范标题；日志/JSON 必须用新标题（row 只是改名前的快照）
+legacy_api = FakeDispatchApi([row("s-legacy", title=f"{project} · 旧任务")])
+logs, _ = run_dispatch(legacy_api, "工作流")
+assert legacy_api.created == [], "旧格式单会话应迁移复用"
+assert ("s-legacy", title) in legacy_api.renamed, legacy_api.renamed
+assert f"（{title}）" in logs[0], logs[0]
+assert f"（{project} · 旧任务）" not in logs[0], logs[0]
+assert "会话来源：复用" in logs[0]
+
+legacy_json_api = FakeDispatchApi([row("s-legacy-json", title=f"{project} · 旧任务")])
+_, legacy_json = run_dispatch(legacy_json_api, "工作流", json_mode=True)
+payload = json.loads(legacy_json)
+assert payload["reused"] is True and payload["sessionId"] == "s-legacy-json", payload
+assert payload["sessionTitle"] == title, payload
+
+# running=true → 等空闲后再发送（不静默新建）
+running_api = FakeDispatchApi([row("s-same", title=title, running=True)], idle_after=3)
+logs, _ = run_dispatch(running_api, "工作流")
+assert running_api.created == [], running_api.created
+assert running_api.prompts and running_api.prompts[0][0] == "s-same", running_api.prompts
+
+# --new 不碰 session/list：mock sessions() 抛错也应成功（不应报 G4 / 复用检查失败）
+new_api = NoListApi([row("s-same", title=title)])
+logs, _ = run_dispatch(new_api, "工作流", reuse=False)
+assert new_api.created == ["s-created-1"], new_api.created
+assert new_api.prompts and new_api.prompts[0][0] == "s-created-1", new_api.prompts
+assert "会话来源：新建" in logs[0]
+
+# 自动路径的同名保护仍按原逻辑 gated：自动新建遇同名会话要 --force；--new 跳过
+dup_rows = [
+    row("s-dup", title=f"{project} · TEST-001"),
+    row("s-dup-2", title=f"{project} · 另一个旧任务"),
+]
+dup_msg = run_dispatch(FakeDispatchApi(dup_rows), "工作流", expect_error=True)
+assert "同名会话" in dup_msg and "--force" in dup_msg, dup_msg
+forced_api = FakeDispatchApi(dup_rows)
+forced_logs, _ = run_dispatch(forced_api, "工作流", force=True)
+assert forced_api.created == ["s-created-1"], forced_api.created
+assert "会话来源：新建" in forced_logs[0]
+
+# 等待超时 vs 会话消失：两类错误分开（文案与恢复建议不同）
+timeout_msg = run_dispatch(
+    FakeDispatchApi([row("s-same", title=title, running=True)]),
+    "工作流", idle_wait=0, expect_error=True,
+)
+assert "超时" in timeout_msg and "仍在运行" in timeout_msg, timeout_msg
+assert "消失" not in timeout_msg, timeout_msg
+
+gone_msg = run_dispatch(
+    VanishApi([row("s-same", title=title, running=True)], disappear_after=3),
+    "工作流", expect_error=True,
+)
+assert "消失" in gone_msg and "重新派发" in gone_msg, gone_msg
+assert "超时" not in gone_msg, gone_msg
+
+# 日志记录复用/新建、模块；--session 来源单独标注；headless 不写
+base = dict(
+    alias="proj", target=target, title="任务", session_id="s-awf",
+    session_title_value=title, workspace={"title": "w", "workspaceId": "id"},
+    status="已发送，未等待回合", final_text="", task=pathlib.Path("/tmp/task.md"),
+)
+assert "- 会话来源：复用\n" in module.log_entry(**base, reused=True)
+assert "- 会话来源：新建\n" in module.log_entry(**base, reused=False)
+assert "- 会话来源：复用（--session 指定）\n" in module.log_entry(**base, reused="复用（--session 指定）")
+assert "会话来源" not in module.log_entry(**base), "headless 路径不写会话来源"
+assert "- 会话提示：" in module.log_entry(**base, reused=True, session_note="接近上限")
+assert "- 模块：工作流\n" in module.log_entry(**base, reused=True, module="工作流")
+assert "模块：" not in module.log_entry(**base), "未传模块时不写模块行"
+
+# 实现点：dispatch_session 走 args.module / args.reuse / --session / 等待 / 旧标题改名
+session_src = inspect.getsource(module.dispatch_session)
+for needle in ("args.module", "resolve_module(", "args.reuse", "args.session",
+               "select_reuse_session(", "wait_for_idle(", "args.idle_wait",
+               "reuse_rename_needed(", "api.rename(session_id, session_name)",
+               "--new", "pressure_hint(", "SESSION_GONE", "renamed = True",
+               "if args.reuse:"):
+    assert needle in session_src, f"dispatch_session 缺少 {needle}"
+
+main_src = inspect.getsource(module.main)
+for needle in ("--reuse", "--new", "--session", "--idle-wait", "--module",
+               "default=DEFAULT_REUSE", "default=DEFAULT_IDLE_WAIT",
+               "--session 与 --new 互斥"):
+    assert needle in main_src, f"main 缺少 {needle}"
+
+# --session 参数解析：与 --new / --headless 互斥（argparse 阶段退出 2）
+for argv in (["demo", "task.md", "--session", "session-x", "--new"],
+             ["demo", "task.md", "--session", "session-x", "--headless"]):
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            module.main(argv)
+        except SystemExit as code:
+            assert code.code == 2, (argv, code.code)
+        else:
+            raise AssertionError(f"{argv} 应被拒绝")
+PY
+then
+  ok "会话复用：选择不看压力 / [awf] 优先 / running 等待 / --session 互斥"
+else
+  bad "会话复用选择或参数断言失败"
+fi
+
 # 1.4 --prune 判定：票据解析 + commit 无 ID 但 done.md 含 ID 也算 completed
 if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
 import importlib.machinery

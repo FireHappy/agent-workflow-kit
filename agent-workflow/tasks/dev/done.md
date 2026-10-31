@@ -2,6 +2,7 @@
 
 | 任务ID | 优先级 | 描述 | 完成日期 |
 |--------|--------|------|----------|
+| DEV-011 | P1 | awf-dispatch 会话复用（项目 × 模块）：默认复用同模块空闲会话保留上下文，会话命名 `[awf] <项目> · <模块>`，新增 --new/--session/--module/--idle-wait；发版 0.4.1 | 2026-10-31 |
 | DEV-010 | P2 | 派发票据生命周期：`--prune` 默认 dry-run，按 commit/`done.md` 判定归档；7 张已完成票据入 archive | 2026-10-31 |
 | DEV-008 | P1 | awf-dispatch 默认异步：立即返回会话 ID、`--wait` 才阻塞；headless 后台化；超时返回 3 | 2026-10-31 |
 | DEV-009 | P1 | 发版工作流 release.md + 发版手册 docs/release.md + CHANGELOG；版本 0.3.0 | 2026-10-31 |

@@ -7,13 +7,20 @@
   G3 目标没有已跟踪改动 / 其他 active 任务
   G4 DSH GUI 与会话通道可用
 
-全过时在目标工作区创建正式会话，发送任务后立即返回（默认异步，不等待回合）；
-需要本回合结果时加 --wait。会话留在 GUI 里，用户可以在同一个会话继续提细节。
+全过时默认复用目标工作区里「项目 + 模块」对应的常驻会话（标题 `[awf] <项目名> · <模块名>`）；
+会话正在运行时先等它空闲再发送，没有可用会话时才新建。随后发送任务并立即返回
+（默认异步，不等待回合）。需要本回合结果时加 --wait；需要隔离/调试时加 --new；
+也可以用 --session <id> 直接续跑某个指定会话。会话留在 GUI 里，用户可以继续提细节。
+
+模块来源：`--module` > 票据「模块：」行 > 默认「通用」；不同模块各自一个会话，不串上下文。
 
 用法：
   ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
+  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
+  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流
+  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx
   ./agent-workflow/bin/awf-dispatch demo02 task.md --headless
   ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
   ./agent-workflow/bin/awf-dispatch demo02 task.md --team
@@ -50,6 +57,18 @@ DEFAULT_WEB_URL = "http://127.0.0.1:51439"
 DEFAULT_TIMEOUT = 600
 # 默认异步：只创建会话并发送任务，立即返回；显式 --wait 才等待回合结束。
 DEFAULT_WAIT = False
+# 默认复用目标工作区已有的常驻会话，避免每次派发都新建、会话数线性增长。
+DEFAULT_REUSE = True
+# 上下文压力只作提示：达到该值提醒可考虑 --new，但不自动切换会话。
+PRESSURE_HINT_LIMIT = 0.9
+# 选中的会话正在运行时，默认最多等它空闲这么多秒再发送。
+DEFAULT_IDLE_WAIT = 300
+AWF_TITLE_PREFIX = "[awf]"
+SESSION_TITLE_LIMIT = 40
+# 票据没写「模块：」、命令行也没给 --module 时的默认模块。
+MODULE_DEFAULT = "通用"
+# wait_for_idle 的返回值：会话在轮询中消失/被归档，与「等待超时」区分。
+SESSION_GONE = object()
 DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
 
@@ -152,6 +171,29 @@ def task_type(text: str) -> str:
     if match:
         return {"DEV": "dev", "DEBUG": "debug", "DOCS": "docs"}[match.group(1)]
     return "dev"
+
+
+def awf_session_title(project: str, module: str,
+                      limit: int = SESSION_TITLE_LIMIT) -> str:
+    """会话标题约定：`[awf] <项目名> · <模块名>`；模块为空时用「通用」。"""
+    label = clean_title(module, limit=limit) if (module or "").strip() else MODULE_DEFAULT
+    return f"{AWF_TITLE_PREFIX} {project} · {label or MODULE_DEFAULT}"
+
+
+def ticket_module(text: str) -> str:
+    """从票据正文读取可选「模块：<名称>」行；没写返回空串。"""
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*]\s*)?模块\s*[：:]\s*(.+?)\s*$", line)
+        if match:
+            return clean_title(match.group(1), limit=SESSION_TITLE_LIMIT)
+    return ""
+
+
+def resolve_module(text: str, override: str = "") -> str:
+    """模块来源：`--module` > 票据「模块：」行 > 默认「通用」。"""
+    if (override or "").strip():
+        return clean_title(override, limit=SESSION_TITLE_LIMIT)
+    return ticket_module(text) or MODULE_DEFAULT
 
 
 # ---------------------------------------------------------------- 前置检查
@@ -439,6 +481,120 @@ def session_title(row: dict) -> str:
     return values.get("title") or ""
 
 
+def session_pressure(row: dict):
+    """上下文压力 = pressureTokens / contextWindow；拿不到完整数据时返回 None。"""
+    projections = row.get("projections") or {}
+    values = projections.get("values") or {}
+    pressure = values.get("contextPressure") or {}
+    tokens = pressure.get("pressureTokens")
+    window = pressure.get("contextWindow")
+    if not isinstance(tokens, (int, float)) or isinstance(tokens, bool):
+        return None
+    if not isinstance(window, (int, float)) or isinstance(window, bool) or window <= 0:
+        return None
+    return float(tokens) / float(window)
+
+
+def is_legacy_session_title(title: str, project: str) -> bool:
+    """模块约定之前的旧标题：`<项目> · <任务>`（没有 `[awf]` 标记）。"""
+    title = (title or "").strip()
+    if not title or title.startswith(AWF_TITLE_PREFIX):
+        return False
+    return title.startswith(f"{project} · ")
+
+
+def reuse_rename_needed(row: dict, session_name: str) -> bool:
+    """复用会话的标题不符合命名约定（含旧格式）时需要顺手改名。"""
+    return session_title(row) != session_name
+
+
+def _reuse_rank(row: dict):
+    updated = row.get("updatedAt")
+    updated = updated if isinstance(updated, (int, float)) else 0
+    idle = row.get("running") is False
+    return (0 if idle else 1, -updated)
+
+
+def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT):
+    """按「同 cwd + 标题等于 `[awf] <项目> · <模块>`」复用；没有候选返回 None。
+
+    复用键是「项目 + 模块」：
+    - 精确命中规范标题的会话优先；多个时先选空闲的，再取 updatedAt 最新；
+    - `running=true` 的规范会话仍会被选中，由调用方等它空闲（不静默新建）；
+    - 匹配不到时**不借用同项目其它模块的会话**，直接返回 None 让调用方新建；
+    - 唯一的迁移例外：项目里还没有任何 `[awf]` 规范会话、且恰好只有一个旧格式（无标记）
+      空闲会话时复用它，调用方会把标题改成规范格式。
+    上下文压力不参与筛选：会话上下文是开发资产，收缩交给 harness 的压缩机制。
+    """
+    project = Path(target).name
+    canonical = awf_session_title(project, module)
+    real = os.path.realpath(str(target))
+    same = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        cwd = row.get("cwd") or ""
+        if not cwd or os.path.realpath(cwd) != real:
+            continue
+        if row.get("blank") is not False:
+            continue
+        same.append(row)
+
+    exact = [row for row in same if session_title(row) == canonical]
+    if exact:
+        return sorted(exact, key=_reuse_rank)[0]
+
+    # 迁移例外：项目还没有任何规范（[awf]）会话，且只有一个旧格式空闲会话时复用它。
+    # 一旦项目里已有规范会话，就只按模块精确匹配，绝不借用其它模块的上下文。
+    if any(session_title(row).startswith(AWF_TITLE_PREFIX) for row in same):
+        return None
+    legacy = [
+        row
+        for row in same
+        if row.get("running") is False
+        and is_legacy_session_title(session_title(row), project)
+    ]
+    if len(legacy) == 1:
+        return legacy[0]
+    return None
+
+
+def pressure_hint(row: dict, limit: float = PRESSURE_HINT_LIMIT) -> str:
+    """上下文接近上限时给出提示（只提示，不切换会话）；未达阈值返回空串。"""
+    ratio = session_pressure(row)
+    if ratio is None or ratio < limit:
+        return ""
+    return (
+        f"该会话上下文接近上限（{ratio:.0%}），可考虑加 --new 新建会话；"
+        "默认仍复用它，上下文收缩交给 harness 的压缩机制"
+    )
+
+
+def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = False,
+                  interval: float = 3.0):
+    """轮询 session/list 直到会话空闲。
+
+    返回：空闲的会话行；超时返回 None；会话在轮询中消失/被归档返回 SESSION_GONE。
+    """
+    deadline = time.time() + max(0, timeout)
+    last_note = time.time()
+    while True:
+        row = find_session(api, session_id)
+        if row is None:
+            return SESSION_GONE
+        if row.get("running") is False:
+            return row
+        if time.time() >= deadline:
+            return None
+        if not json_mode and time.time() - last_note > 15:
+            last_note = time.time()
+            print(
+                "  … 目标会话仍在运行，等它空闲后再发送（Ctrl-C 不打断目标回合）",
+                file=sys.stderr,
+            )
+        time.sleep(max(0.0, min(interval, deadline - time.time())))
+
+
 def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, json_mode: bool):
     started = False
     deadline = time.time() + timeout
@@ -517,18 +673,26 @@ def git_head(target: Path) -> str:
 
 def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
               workspace: dict, status: str, final_text: str, task: Path,
-              next_step: str = "") -> str:
+              next_step: str = "", reused=None, session_note: str = "",
+              module: str = "") -> str:
     flat = re.sub(r"\s+", " ", final_text or "").strip()
     excerpt = flat[:300] + ("…（已截断，完整回报见会话）" if len(flat) > 300 else "")
     workspace_title = (workspace or {}).get("title", "未知工作区")
     workspace_id = (workspace or {}).get("workspaceId", "-")
+    if isinstance(reused, str):
+        source = reused
+    else:
+        source = "复用" if reused else "新建"
     return (
         f"## {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} → {alias}\n\n"
         f"- 目标：{target}\n"
         f"- 任务：{title}（{task}）\n"
-        f"- 工作区：{workspace_title}（{workspace_id}）\n"
+        + (f"- 模块：{module}\n" if module else "")
+        + f"- 工作区：{workspace_title}（{workspace_id}）\n"
         f"- 会话：{session_id}（{session_title_value or title}）\n"
-        f"- 状态：{status}\n"
+        + (f"- 会话来源：{source}\n" if reused is not None else "")
+        + (f"- 会话提示：{session_note}\n" if session_note else "")
+        + f"- 状态：{status}\n"
         f"- 目标 HEAD：{git_head(target)}\n"
         + (f"- 回到会话：{next_step}\n" if next_step else "")
         + (f"- 回报节选：{excerpt}\n" if excerpt else "")
@@ -879,37 +1043,149 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     api = state["api"]
     workspace = state["workspace"]
 
-    existing = [
-        row
-        for row in api.sessions()
-        if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
-        and session_title(row) == title
-    ]
-    if existing and not args.force:
-        raise DispatchError(
-            "检测到同名会话，可能已派发过："
-            + "、".join(row["sessionId"] for row in existing[:3])
-            + "；确认要再派发请加 --force"
-        )
+    # 会话标题约定：`[awf] <项目名> · <模块名>`；模块来自 --module / 票据「模块：」/ 默认「通用」。
+    module = resolve_module(text, args.module)
+    session_name = args.title or awf_session_title(target.name, module)
+    rows = None
+    row = None
+    session_id = None
+    source = None
+    reused = False
+    renamed = False
+    session_note = ""
 
-    created = api.create_session(workspace["workspaceId"])
-    session_id = created["sessionId"]
-    api.rename(session_id, title)
+    emit(f"模块：{module}（会话标题 {session_name}）", args.json)
+
+    if args.session:
+        try:
+            row = find_session(api, args.session)
+        except DispatchError as error:
+            raise DispatchError(
+                f"G4 通道失败：--session 查询时 session/list 失败（{error}）；"
+                "稍后重试，或用 --headless / --handoff"
+            )
+        if row is None:
+            raise DispatchError(
+                f"--session 指定的会话不存在：{args.session}；"
+                "在 GUI 确认会话 ID，或去掉 --session 让派发器自动选择/新建"
+            )
+        if os.path.realpath(row.get("cwd") or "") != os.path.realpath(str(target)):
+            raise DispatchError(
+                f"--session 指定的会话属于其他目录：{row.get('cwd') or '未知'}"
+                f"（目标 {target}）；去掉 --session 自动选择，或用 --new"
+            )
+        session_id = args.session
+        reused = True
+        source = "复用（--session 指定）"
+    elif args.reuse:
+        try:
+            rows = api.sessions()
+        except DispatchError as error:
+            raise DispatchError(
+                f"G4 通道失败：复用前 session/list 失败（{error}）；"
+                "加 --new 跳过复用检查，或用 --headless / --handoff"
+            )
+        row = select_reuse_session(rows, target, module)
+        if row is not None:
+            session_id = row["sessionId"]
+            reused = True
+            source = "复用"
+
+    if session_id is None:
+        # 新建路径：--new 直接建会话，不碰 session/list；自动新建时才做同名保护。
+        # 显式 --new 跳过复用检查与同名保护（用户已明确要新会话）。
+        if args.reuse:
+            duplicate = [
+                row
+                for row in rows
+                if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
+                and session_title(row) in (title, session_name)
+            ]
+            if duplicate and not args.force:
+                raise DispatchError(
+                    "检测到同名会话，可能已派发过："
+                    + "、".join(row["sessionId"] for row in duplicate[:3])
+                    + "；确认要再派发请加 --force"
+                )
+        created = api.create_session(workspace["workspaceId"])
+        session_id = created["sessionId"]
+        api.rename(session_id, session_name)
+        reused = False
+        source = "新建"
+    else:
+        # 复用路径：先确认会话存在；运行中的会话等它空闲，绝不静默改成新建。
+        row = find_session(api, session_id)
+        if row is None:
+            raise DispatchError(
+                f"复用会话在等待前消失了：{session_id}；会话不可恢复，请重新派发（或用 --new 新建）"
+            )
+        if row.get("running") is not False:
+            emit(
+                f"目标会话 {session_id} 正在运行，等待空闲（最多 {args.idle_wait}s；"
+                "--idle-wait 可调）",
+                args.json,
+            )
+            outcome = wait_for_idle(api, session_id, args.idle_wait, args.json)
+            if outcome is SESSION_GONE:
+                raise DispatchError(
+                    f"等待期间会话消失或被归档：{session_id}；"
+                    "原会话不可恢复，请重新派发（GUI 确认后用 --new 新建会话）"
+                )
+            if outcome is None:
+                raise DispatchError(
+                    f"等待会话 {session_id} 空闲超时（>{args.idle_wait}s）："
+                    "会话仍在运行；稍后重试、加大 --idle-wait，"
+                    "或加 --new 新建会话（原会话保留）"
+                )
+            row = outcome
+            emit(f"会话已空闲：{session_id}", args.json)
+        hint = pressure_hint(row)
+        if hint:
+            session_note = hint
+            emit(f"提示：{hint}", args.json)
+        # 旧格式/其它标题顺手改成 `[awf] <项目> · <模块>`（--session 也归一）；改名失败不阻塞派发。
+        if reuse_rename_needed(row, session_name):
+            try:
+                api.rename(session_id, session_name)
+                renamed = True
+            except DispatchError as error:
+                emit(f"提示：复用会话改名失败（继续发送任务）：{error}", args.json)
+
     prompt_ms = int(time.time() * 1000)
-    api.prompt(session_id, build_prompt(target, title, kind, text, team=args.team), str(uuid.uuid4()))
+    try:
+        api.prompt(
+            session_id,
+            build_prompt(target, title, kind, text, team=args.team),
+            str(uuid.uuid4()),
+        )
+    except DispatchError as error:
+        if reused:
+            raise DispatchError(
+                f"复用会话 {session_id} 发送任务失败：{error}；"
+                "建议加 --new 强制新建会话后重试（复用会话本身保留）"
+            )
+        raise
 
-    emit(f"已创建会话：{session_id}（{title}）", args.json)
+    if reused:
+        emit(f"复用会话：{session_id}（{source}；reused: true）", args.json)
+    else:
+        emit(f"已创建会话：{session_id}（{source}；reused: false）", args.json)
     emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
+    # 改名成功时以新标题为准（row 是改名前的快照，不能再用它覆盖）。
+    shown_title = session_name if (renamed or row is None) else (session_title(row) or session_name)
 
     if not args.wait:
         emit("任务已发送，未等待回合（默认异步；加 --wait 等待回合结束）", args.json)
         entry = log_entry(
-            target.name, target, title, session_id, title, workspace,
+            target.name, target, title, session_id, shown_title, workspace,
             "已发送，未等待回合", "", task,
             next_step=(
-                f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{title}」"
+                f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{shown_title}」"
                 f"（会话 {session_id}）继续提细节。"
             ),
+            reused=source,
+            session_note=session_note,
+            module=module,
         )
         log_path = append_log(entry)
         payload = {
@@ -917,6 +1193,10 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             "mode": "session",
             "sessionId": session_id,
             "title": title,
+            "module": module,
+            "sessionTitle": shown_title,
+            "reused": reused,
+            "source": source,
             "workspace": workspace,
             "status": "accepted",
             "waited": False,
@@ -926,15 +1206,17 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             print(json.dumps(payload, ensure_ascii=False))
         else:
             print(f"已记录：{log_path}")
-            print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{title}」继续提细节。")
+            print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{shown_title}」继续提细节。")
         return 0
 
     emit("任务已受理；等待目标 agent 完成…", args.json)
     row = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json)
     final_text = latest_assistant(api, row) if row else None
     status = "完成" if row else f"超时（>{args.timeout}s，会话仍在运行）"
-    entry = log_entry(target.name, target, title, session_id, session_title(row or {}) or title,
-                      workspace, status, final_text or "", task)
+    final_title = session_name if renamed else (session_title(row or {}) or shown_title)
+    entry = log_entry(target.name, target, title, session_id, final_title,
+                      workspace, status, final_text or "", task,
+                      reused=source, session_note=session_note, module=module)
     log_path = append_log(entry)
 
     payload = {
@@ -942,6 +1224,10 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         "mode": "session",
         "sessionId": session_id,
         "title": title,
+        "module": module,
+        "sessionTitle": final_title,
+        "reused": reused,
+        "source": source,
         "workspace": workspace,
         "status": "completed" if row else "timeout",
         "waited": True,
@@ -961,7 +1247,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             print("\n--- 目标 agent 回报（节选）---")
             print(excerpt)
         print(f"\n已记录：{log_path}")
-        print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{title}」继续提细节。")
+        print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{final_title}」继续提细节。")
     return 0 if row else 3
 
 
@@ -1107,13 +1393,17 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="awf-dispatch",
         description=(
-            "跨项目派发：先检查目标工作流与工作区，再在目标工作区创建会话执行。"
-            "默认只发送任务、立即返回会话 ID（不等待回合）；加 --wait 才等待回合结束。"
+            "跨项目派发：先检查目标工作流与工作区，再按「项目 + 模块」复用目标工作区的"
+            "常驻会话（没有可用会话时新建）执行。默认只发送任务、立即返回会话 ID"
+            "（不等待回合）；加 --wait 才等待回合结束。"
         ),
         epilog=(
             "示例：\n"
-            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md            # 默认异步：只发送\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md            # 默认异步：复用/新建后只发送\n"
             "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait     # 等待回合结束\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --new      # 强制新建会话\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流  # 指定模块会话\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx  # 指定会话\n"
             "  awf-dispatch demo02 task.md --dry-run\n"
             "  awf-dispatch demo02 task.md --headless\n"
             "  awf-dispatch demo02 task.md --handoff\n"
@@ -1127,9 +1417,20 @@ def main(argv=None) -> int:
             "        默认 dry-run 只打印计划，--apply 才移动；git 索引里的票据用 git mv，其余 os.rename；\n"
             "        目标已存在则跳过并报冲突（不覆盖）。无票据或全部 pending 时退出码 0。\n"
             "        --prune 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。\n"
-            "\n默认异步：创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
+            "\n会话复用（默认）：派发前先 session/list，按「项目 + 模块」复用目标工作区会话：\n"
+            "        复用键 = 同 cwd + 标题等于「[awf] <项目名> · <模块名>」；\n"
+            "        模块来源：--module > 票据「模块：」行 > 默认「通用」；\n"
+            "        匹配不到时不借用同项目其它模块的会话，直接新建本模块会话（避免上下文串味）；\n"
+            "        项目里恰好只有一个旧格式（无 [awf] 标记）空闲会话时复用它并改名为规范标题；\n"
+            "        不看上下文压力（上下文是开发资产，收缩交给 harness 压缩机制）；\n"
+            "        复用时不新建会话，标题更新为「[awf] <项目名> · <模块名>」后直接 prompt。\n"
+            "        选中的会话 running=true 时先等它空闲（--idle-wait，默认 300s），超时报错并建议 --new，\n"
+            "        不会静默改成新建；上下文压力 ≥ 0.9 只在输出/日志里提示可考虑 --new，不自动切换。\n"
+            "        没有可用会话时才新建并同样命名，作为该项目该模块后续派发的常驻会话。\n"
+            "        --new 强制新建（隔离/调试）；--session <id> 直接向指定会话发送；--reuse 可显式书写（默认值）。\n"
+            "\n默认异步：复用/创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
             "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
-            "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录回到 GUI 会话的方式。\n"
+            "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
             "\n--headless：默认同样不等待（后台启动、立即返回输出文件路径）；\n"
             "        加 --wait 才同步等待进程结束。--handoff 只生成交接单，本身不执行回合。\n"
             "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
@@ -1162,6 +1463,36 @@ def main(argv=None) -> int:
         help="在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议",
     )
     parser.add_argument("--add-workspace", action="store_true", help="目标未登记工作区时自动登记")
+    reuse_group = parser.add_mutually_exclusive_group()
+    reuse_group.add_argument(
+        "--reuse",
+        dest="reuse",
+        action="store_true",
+        default=DEFAULT_REUSE,
+        help="默认行为：按「项目 + 模块」复用目标工作区已有的常驻会话",
+    )
+    reuse_group.add_argument(
+        "--new",
+        dest="reuse",
+        action="store_false",
+        help="强制新建会话（隔离/调试），不复用",
+    )
+    parser.add_argument(
+        "--module",
+        default="",
+        help="模块名（默认取票据「模块：」行，都没有用「通用」）；标题为 [awf] <项目> · <模块>",
+    )
+    parser.add_argument(
+        "--session",
+        default="",
+        help="直接向指定会话 ID 发送任务（续跑历史会话或人工指定），不会新建",
+    )
+    parser.add_argument(
+        "--idle-wait",
+        type=int,
+        default=DEFAULT_IDLE_WAIT,
+        help="目标会话正在运行时最多等待其空闲的秒数（默认 300，仅会话模式生效）",
+    )
     parser.add_argument(
         "--timeout",
         type=int,
@@ -1185,12 +1516,18 @@ def main(argv=None) -> int:
     parser.add_argument("--force", action="store_true", help="允许同名会话重复派发")
     parser.add_argument("--allow-dirty", action="store_true", help="允许目标有已跟踪改动")
     parser.add_argument("--allow-active", action="store_true", help="允许目标已有 active 任务")
-    parser.add_argument("--title", default="", help="会话标题（默认 <别名> · <任务标题>）")
+    parser.add_argument("--title", default="", help="会话标题（默认 [awf] <项目> · <模块>）")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
     args = parser.parse_args(argv)
 
     if args.apply and not args.prune:
         parser.error("--apply 只能配合 --prune 使用")
+    if args.session and not args.reuse:
+        parser.error("--session 与 --new 互斥：指定会话时不会再新建")
+    if args.session and (args.headless or args.handoff):
+        parser.error("--session 只用于会话模式，不能与 --headless / --handoff 同用")
+    if args.idle_wait < 0:
+        parser.error("--idle-wait 不能为负数")
     if args.prune:
         if args.target or args.task:
             parser.error("--prune 不接受 target / task 位置参数；它只扫描 ./dispatch/tasks/")
