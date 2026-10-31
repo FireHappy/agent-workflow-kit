@@ -47,11 +47,26 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 | `--dry-run` | 只做前置检查，不创建会话 |
 | `--headless` | 回退 `dsh --profile headless`（会话不可见，需用户同意） |
 | `--handoff` | 只生成交接单，不执行 |
+| `--team` | 在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议 |
 | `--add-workspace` | 目标未登记工作区时自动登记 |
 | `--no-wait` | 只发送任务，不等待回合结束 |
 | `--force` | 允许同名会话重复派发 |
 | `--allow-dirty` / `--allow-active` | 放宽 G3（需明确知道风险） |
 | `--json` | 机器可读输出 |
+
+### 可选：用 AgentTeams 执行（`--team`）
+
+给会话模式加 `--team`，派发器会在任务包末尾追加一段中性的可选建议：
+
+- 目标 agent 可先把任务拆成 2–3 个可并行的子任务，声明子任务之间的依赖，再由队长汇总结果；
+- 拆分不改变任务包的验收标准；账本仍只由一个 Owner 写入，并行子任务只回结果，避免多写者；
+- 目标端没有 AgentTeams 插件时，目标 agent 直接忽略这一节，用普通会话完成任务——不阻塞、不报错。
+
+```sh
+./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --team
+```
+
+建议只对可拆分的大任务使用；小改动直接普通会话即可。不加 `--team` 时任务包与旧版完全一致；`--team` 只影响会话模式注入的任务包，`--handoff` 生成的交接单保持原文。
 
 ## 手工等价流程
 

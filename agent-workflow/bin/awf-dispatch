@@ -15,6 +15,7 @@
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
   ./agent-workflow/bin/awf-dispatch demo02 task.md --headless
   ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
+  ./agent-workflow/bin/awf-dispatch demo02 task.md --team
 
 设计约束：只依赖 Python 3 标准库；不打印、不落盘 GUI 认证 cookie。
 """
@@ -388,8 +389,17 @@ class DshApi:
 # ---------------------------------------------------------------- 任务包与等待
 
 
-def build_prompt(target: Path, title: str, kind: str, text: str) -> str:
-    return (
+TEAM_SECTION = (
+    "\n可选：用 AgentTeams 执行\n"
+    "- 如果本会话具备团队协作能力，可先把任务拆成 2–3 个可并行的子任务，"
+    "声明子任务之间的依赖，再由队长汇总各子任务结果；拆分后仍需满足本任务包的验收标准。\n"
+    "- 任务账本只由一个 Owner 写入；并行子任务只返回结果，汇总时再统一记账，避免多写者冲突。\n"
+    "- 如果团队协作插件不可用，直接忽略本节，在普通会话中按任务包完成，不需要额外说明。\n"
+)
+
+
+def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = False) -> str:
+    prompt = (
         f"请在本会话中执行下面的跨项目任务。目标仓库：{target}。\n"
         f"必须遵守本仓库 AGENTS.md 与 agent-workflow/workflows/{kind}.md。\n\n"
         "----- 任务包开始 -----\n"
@@ -400,6 +410,9 @@ def build_prompt(target: Path, title: str, kind: str, text: str) -> str:
         "- 只允许本地 commit，禁止 push；仓库里的验证命令必须实际执行。\n"
         "- 完成后按任务文件要求的回报格式回复，并保留本会话，用户会在这里继续提细节。\n"
     )
+    if team:
+        prompt += TEAM_SECTION
+    return prompt
 
 
 def find_session(api: DshApi, session_id: str):
@@ -579,7 +592,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     session_id = created["sessionId"]
     api.rename(session_id, title)
     prompt_ms = int(time.time() * 1000)
-    api.prompt(session_id, build_prompt(target, title, kind, text), str(uuid.uuid4()))
+    api.prompt(session_id, build_prompt(target, title, kind, text, team=args.team), str(uuid.uuid4()))
 
     emit(f"已创建会话：{session_id}（{title}）", args.json)
     emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
@@ -711,6 +724,10 @@ def main(argv=None) -> int:
             "  awf-dispatch demo02 task.md --dry-run\n"
             "  awf-dispatch demo02 task.md --headless\n"
             "  awf-dispatch demo02 task.md --handoff\n"
+            "  awf-dispatch demo02 task.md --team\n"
+            "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
+            "        先拆 2–3 个可并行子任务、声明依赖、队长汇总；插件不可用时目标 agent\n"
+            "        忽略该节，按普通会话完成。缺省不追加，任务包与旧版一致。\n"
             "\n退出码：0 成功；2 前置门或派发失败；1 未预期异常。\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -721,6 +738,11 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="只做前置检查，不创建会话")
     parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
     parser.add_argument("--handoff", action="store_true", help="只生成交接单，不执行")
+    parser.add_argument(
+        "--team",
+        action="store_true",
+        help="在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议",
+    )
     parser.add_argument("--add-workspace", action="store_true", help="目标未登记工作区时自动登记")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="等待回合完成秒数（默认 600）")
     parser.add_argument("--no-wait", action="store_true", help="只发送任务，不等待回合完成")

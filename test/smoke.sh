@@ -31,8 +31,54 @@ assert_file "$PROJ/agent-workflow/workflows/cross-project.md" "cross-project 工
 assert_file "$PROJ/agent-workflow/bin/awf-dispatch" "awf-dispatch"
 assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
 
-# 1.1 派发器：help / handoff / 无工作流前置检查
+# 1.1 派发器：help / --team 任务包注入 / handoff / 无工作流前置检查
 "$PROJ/agent-workflow/bin/awf-dispatch" --help >/dev/null && ok "awf-dispatch --help" || bad "awf-dispatch --help 失败"
+if "$PROJ/agent-workflow/bin/awf-dispatch" --help 2>&1 | grep -q -- '--team'; then
+  ok "--help 列出 --team"
+else
+  bad "--help 未列出 --team"
+fi
+if "$PROJ/agent-workflow/bin/awf-dispatch" --help 2>&1 | grep -q 'AgentTeams'; then
+  ok "--help 说明 AgentTeams 语义"
+else
+  bad "--help 未说明 AgentTeams 语义"
+fi
+
+# 直接用 importlib 加载源脚本，断言 build_prompt 的 --team 注入与缺省行为
+if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+import importlib.machinery
+import importlib.util
+import inspect
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_under_test", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+target = pathlib.Path("/tmp/awf-demo")
+task = "任务：TEST-001 冒烟派发\n\n1. 只读验证。\n"
+base = module.build_prompt(target, "demo · 冒烟", "dev", task)
+off = module.build_prompt(target, "demo · 冒烟", "dev", task, team=False)
+team = module.build_prompt(target, "demo · 冒烟", "dev", task, team=True)
+
+assert inspect.signature(module.build_prompt).parameters["team"].default is False, "build_prompt 的 team 默认值必须为 False"
+assert base == off, "team 缺省与 team=False 输出必须一致"
+assert "AgentTeams" not in base, "未开启 --team 时不得出现 AgentTeams 段"
+assert "可选：用 AgentTeams 执行" in team, "team=True 时缺少 AgentTeams 段标题"
+for word in ("子任务", "依赖", "队长", "插件"):
+    assert word in team, f"team=True 段落缺少关键词：{word}"
+assert team.startswith(base), "--team 段落只能追加在任务包末尾"
+assert "team=args.team" in inspect.getsource(module.dispatch_session), "dispatch_session 必须把 args.team 传给 build_prompt"
+PY
+then
+  ok "build_prompt --team 注入且缺省不变"
+else
+  bad "build_prompt --team 断言失败"
+fi
+
 printf '任务：TEST-001 冒烟派发\n\n1. 只读验证。\n' > "$TMP/task.md"
 ( cd "$TMP" && "$PROJ/agent-workflow/bin/awf-dispatch" "$PROJ" task.md --handoff >/dev/null ) \
   && ok "handoff 生成交接单" || bad "handoff 失败"

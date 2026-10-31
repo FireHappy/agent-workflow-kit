@@ -80,6 +80,7 @@ cd ~/Documents/GitHub/agent-workflow-kit
 ./agent-workflow/bin/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
 ./agent-workflow/bin/awf-dispatch demo02 task.md --headless # GUI 不可用时
 ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff  # 只生成交接单
+./agent-workflow/bin/awf-dispatch demo02 task.md --team     # 任务包附团队执行建议
 ```
 
 四道前置门、回退矩阵与任务包格式见 [docs/dispatch.md](docs/dispatch.md) 和生成的 `agent-workflow/workflows/cross-project.md`。
