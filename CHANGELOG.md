@@ -3,11 +3,15 @@
 本仓库遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)：
 `MAJOR.MINOR.PATCH`。历史条目只追加更正，不改写。
 
-## [Unreleased]
+## [0.4.0] - 2026-10-31
 
 ### Added
 - `awf-dispatch --prune [--apply] [--json]`：按 commit 消息或目标 `done.md` 判定已完成票据，归档到 `dispatch/archive/<项目>/<YYYY-MM>/`，默认 dry-run
 - 派发票据生命周期说明（docs/dispatch.md、cross-project.md、跨项目派发技能）
+
+### Changed
+- 跨项目派发默认建队（派发即建队）：captain 负责拆分/汇总/账本/commit，每个目标一个 dispatcher 成员，成员用 `awf-dispatch --wait` 同步等到回合结束并回报成功/失败、目标 commit、check 结果与退出码；单行修改、只读查询、跑一次校验与建队成本不划算的任务可豁免，但须说明理由（AGENTS.md、docs/team-flow.md、docs/dispatch.md、跨项目派发技能）
+- `templates/` 中派发与任务路由文案改为 harness 中立：去掉具体产品名与工具名，只描述「多会话/多角色协作」「派发工具（若 harness 提供）」（README.md、AGENTS.md.tmpl、workflows/cross-project.md）
 
 ## [0.3.0] - 2026-10-31
 

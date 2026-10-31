@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:595d2653 -->
+<!-- awf:begin v1 digest:f68a3383 -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -28,7 +28,7 @@
 
 ## 任务路由
 
-- 当前 harness 提供团队协作能力时（例如 DSH 的 AgentTeams：工具列表含 `agent_teams_*` 或 `/agent-teams` 可用），**任务默认优先派发给团队**：先出计划与依赖，成员执行，主线汇总。
+- 当前 harness 提供团队/多角色协作能力（例如工具列表含团队工具或支持 `/团队` 类命令）时，**任务默认优先派发给团队**：先出计划与依赖，成员执行，主线汇总。
 - 团队不可用，或任务小到协调成本更高（单行修改、只读查询、跑一次校验）时，按单会话流程直接完成，并在回复里说明原因。
 - 无论走哪条路径，账本与 commit 始终归主线 Owner。
 
@@ -51,7 +51,7 @@
 - 按名字定位：`./agent-workflow/bin/awf find <别名|ID>`
 - 若索引里还没有本仓库（clone/移动后），运行 `./agent-workflow/bin/awf register`；`bootstrap` 会自动刷新已登记项目的路径
 - 派发前先确认目标项目有工作流且已登记为当前 harness 的工作区；满足后优先在目标工作区的会话中执行，不要默认 headless
-- DSH 适配：`./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
+- 派发工具（若 harness 提供）：`./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
 - 不要在调度方会话里直接改目标仓库；写入由目标 agent 在目标工作区完成
 
 ## 项目事实
@@ -68,5 +68,7 @@
 ## 本仓库协作约定（区块外，本地维护）
 
 - 检测到团队能力时，对话中的需求默认直接建队执行（automatic），主对话只做澄清、拆分、验收与叫停；三轨 docs / dev / debug 见 `docs/team-flow.md`。
-- 跨项目写仍走 `awf-dispatch` 派发给目标项目自己的会话，不由本仓库团队代写。
+- 跨项目派发默认建队（派发即建队）：captain=需求方（拆分 / 汇总 / 本仓库账本 / commit），每个目标一个 dispatcher 成员；成员执行 `awf-dispatch <目标> <票据> --wait` 同步等到回合结束，把「成功/失败、目标 commit、check 结果、阻塞原因」回报 captain，由 captain 汇总归档，成员不代写目标仓库。
+- 派发豁免：单行修改、只读查询、跑一次校验可直接做；建队开销大于任务本身时也可不建队——两种情况都要在回复里说明为何不建队。
 - 团队启动使用 `approval=automatic`（用户已明确授权）：不再 staged 审批；建队后仍贴 3 行计划（目标/成员/验收），发现不对可立即叫停。
+- 跨项目写仍走 `awf-dispatch` 派发给目标项目自己的会话，不由本仓库团队代写目标仓库；默认由 team 内的 dispatcher 成员同步执行并回报（见 `docs/team-flow.md`「派发模式」）。

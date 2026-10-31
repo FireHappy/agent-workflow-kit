@@ -2,16 +2,91 @@
 
 目标：在 A 项目里把任务交给 B 项目的 agent，由它按 B 自己的 `AGENTS.md` 与工作流执行，A 只收结果。
 
+## 团队派发模式（默认，派发即建队）
+
+检测到当前 harness 有团队协作能力时，跨项目派发**默认建队执行**，而不是主线自己派发：
+
+- **captain = 需求方（主线）**：拆目标、写票据、建队、汇总回报、写本仓库账本与 commit。不直接改目标仓库。
+- **dispatcher = 每个目标一个成员**：只负责一个目标，执行 `awf-dispatch ... --wait` **同步等到回合结束**，然后回报 captain。
+
+`--wait` 是团队模式的默认动作：派发不是「发出去就算完成」，成员必须等到目标 agent 的回合结束，拿到目标 agent 按任务包五项（状态 / 变更文件 / 验证结果 / commit / 阻塞，见 `templates/workflows/cross-project.md`）给出的结果，再按团队回报五项汇总给 captain。
+
+### 用法 1：单目标
+
+```sh
+# dispatcher 成员执行（默认加 --wait，显式给超时）
+./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-010-fix-calc.md --wait --timeout 900
+# 退出码 0：派发/等待正常结束（不代表任务成功）→ 按团队回报五项回报 captain
+```
+
+captain 只做三件事：写票据、把它交给 dispatcher、收回报后汇总归档；命令本身由成员执行，captain 不代跑。
+
+### 用法 2：多目标（无依赖，并行）
+
+每个目标一个 dispatcher，各自等待自己的目标，互不阻塞：
+
+```sh
+# dispatcher A
+./agent-workflow/bin/awf-dispatch demo01 dispatch/tasks/demo01-DOCS-002-calc-doc.md --wait --timeout 900
+# dispatcher B
+./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-011-clock.md --wait --timeout 900
+```
+
+- captain 按回报到达顺序汇总，不要求两个成员同时起步；
+- 同一目标同一模块仍然只能有一个写者（G3），不要为并行而绕过 `--allow-dirty` / `--allow-active`。
+
+### 用法 3：有依赖（串行）
+
+下游必须等上游回报「成功 + 目标 commit 已落地」后再派：
+
+```sh
+# dispatcher A：先做接口/数据，回报 commit sha
+./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-012-api.md --wait --timeout 900
+# captain 确认 commit 后，再建/派下游
+./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-013-ui.md --wait --timeout 900
+```
+
+不下发「等上游」的空转成员；依赖关系写在 captain 的分解里，不写在票据里让目标方猜。
+
+### 回报与退出码
+
+dispatcher 必须把退出码一并回报，captain 据此决定重试、改派或降级：
+
+| 退出码 | 含义 | captain 处理 |
+|---|---|---|
+| 0 | 派发/等待正常结束（`--wait` 时回合已结束；未等待时只代表「已发送」；**不代表任务成功**） | 按团队回报五项核对任务自身结果，再进账本 |
+| 2 | 前置门不过 / 派发失败（`workflow-missing`、`workspace-missing`、写者冲突、用法错误） | 补门（`awf init` / `--add-workspace` / 等写者），或改派、降级 handoff |
+| 3 | `--wait` 超时（会话仍在运行，`--timeout` 默认 600s） | 不杀会话；看 GUI 进度，决定加大 `--timeout` 重派（`--force`）或改派 |
+| 1 | 未预期异常 | 保留输出原样回报，不静默重试 |
+
+团队回报五项（dispatcher → captain）：
+
+```text
+- 退出码与最终状态：0 / 1 / 2 / 3；成功 / 失败 / 超时 / 阻塞
+- 目标 commit：<sha 或 无>
+- check / 验证结果：./agent-workflow/check_workflow.sh → 通过 / 失败（摘要）
+- 阻塞原因：无 / 原因（含错误码）
+- 待 captain 决策：无 / 重试 / 改派 / 降级
+```
+
+与 `docs/team-flow.md`「团队回报五项」同一组格式；不要与任务包五项（目标 agent → dispatcher 的回报格式）混用。
+
+### 豁免
+
+单行修改、只读查询、跑一次校验可直接由 captain 派发或直接做；建队开销大于任务本身时也可以不建队——两种情况都要在回复里说明为什么没建队。
+
+---
+
 ## 推荐：目标工作区会话（会话优先）
 
-默认流程不是 headless，而是：
+团队模式下，dispatcher 的传输默认也不是 headless，而是：
 
 1. 检查 B 是否有自己的工作流；
 2. 检查 B 是否已登记为当前 harness 的工作区；
 3. 满足后在 B 的工作区**创建正式会话**，把任务发进去，**立即返回会话 ID**（默认异步，不阻塞调度方）；
 4. 用户之后可以在同一个会话里继续提细节。
 
-需要本次回合结果时加 `--wait`：派发器才轮询到回合结束，并打印目标 agent 的回报；`--timeout` 只对 `--wait` 生效。
+团队派发默认加 `--wait`：派发器轮询到回合结束并打印目标 agent 的回报；`--timeout` 只对 `--wait` 生效。
 
 这样任务可见、可追问、可恢复；headless 只作为无人值守回退。
 
@@ -188,14 +263,14 @@ GUI 左侧切到目标工作区 → 新建会话 → 粘贴任务包。效果相
 - 明确“禁止 push”；
 - 任务包不要依赖调度方上下文。
 
-## 结果契约
+## 任务包五项（目标 agent → dispatcher）
 
 ```text
 - 状态：完成 / 阻塞
 - 变更文件：...
-- 验证：命令 + 结果摘要
+- 验证结果：命令 + 结果摘要
 - commit：sha
-- 阻塞点：无 / 原因
+- 阻塞：无 / 原因
 ```
 
 ## 写者与账本

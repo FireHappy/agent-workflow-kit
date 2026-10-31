@@ -134,7 +134,7 @@
 5. 子任务先 `verify/review`，再由主任务 Owner 合流归档
 6. 实现与复核尽量由不同会话/角色承担；复核必须独立重跑验证命令，不接受只读自述
 
-> 当前 harness 支持多角色协作（如 DSH 的 AgentTeams）时，任务**默认优先派发给团队**，三轨流程见 kit 的 `docs/team-flow.md`；不支持时退回单会话，本模板不绑定具体 harness。
+> 当前 harness 提供多会话/多角色协作能力时，任务**默认优先派发给团队**，三轨流程见 kit 的 `docs/team-flow.md`；不支持时退回单会话，本模板不绑定具体 harness。
 
 ---
 
@@ -143,11 +143,11 @@
 当任务目标在另一个仓库时，先过四道前置门：
 
 1. 目标有完整 `agent-workflow/` 与 `AGENTS.md`
-2. 目标已登记为当前 harness 的工作区（DSH：GUI 工作区列表）
+2. 目标已登记为当前 harness 的工作区
 3. 目标没有未提交改动 / 其他 active 任务
 4. 目标工作区可创建会话
 
-全过时优先在**目标工作区的会话**中执行，不要默认 headless；详细流程见 `workflows/cross-project.md`。DSH 可用 `./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话。
+全过时优先在**目标工作区的会话**中执行，不要默认 headless；详细流程见 `workflows/cross-project.md`。若当前 harness 提供派发工具，可用 `./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话；否则按 `workflows/cross-project.md` 手动派发。
 
 ---
 

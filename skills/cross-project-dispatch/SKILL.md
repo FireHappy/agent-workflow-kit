@@ -1,6 +1,6 @@
 ---
 name: cross-project-dispatch
-description: 在 agent-workflow 项目之间派发任务：先检查目标项目是否有工作流、是否已登记为工作区，再在目标工作区创建会话执行，支持 headless / handoff 回退。
+description: 在 agent-workflow 项目之间派发任务：先检查目标项目是否有工作流、是否已登记为工作区，再在目标工作区创建会话执行，支持 headless / handoff 回退；宿主有团队协作能力时默认建队派发，每个目标一个成员并用 `--wait` 同步等待回报。
 whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、在 demo02 等对象项目的会话中执行，或需要判断目标项目是否具备工作流与工作区。
 ---
 
@@ -21,33 +21,50 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、在 de
 
 只读任务可以放宽 G3，但仍建议在会话中执行，留下可追问的记录。
 
-## 推荐执行
+## 默认：派发即建队（团队模式）
+
+当前 harness 有团队协作能力时，跨项目派发**默认由团队执行**，不把派发压在主线上：
+
+- **captain（需求方）**：拆目标、写票据、建队、汇总回报、写本仓库账本与 commit；不直接改目标仓库
+- **dispatcher（每个目标一个成员）**：只派一个目标，`--wait` 同步等到回合结束，按团队回报五项回报 captain
+
+### captain 最小操作序列
+
+1. 预检（不建会话）：`awf-dispatch <目标> <票据> --dry-run`，确认 G1–G4
+2. 写票据 `dispatch/tasks/<项目>-<ID>-<slug>.md`（见下「任务包」）
+3. 建队：每个目标一个 dispatcher 任务，`inScope` 只含「执行派发 + 回报结果」
+4. 收回报 → 写 `dispatch/log.md` → 更新本仓库账本 → `--prune` 归档票据 → 本地 commit
+5. 有依赖的目标等上游回报「成功 + commit 已落地」后再派；失败/超时按退出码决定重试、改派或降级
+
+### dispatcher 最小操作序列
 
 ```sh
 KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 [ -x "$KIT/bin/awf-dispatch" ] || KIT="$HOME/Documents/GitHub/agent-workflow-kit"
-"$KIT/bin/awf-dispatch" <别名|目录> <任务文件>
+"$KIT/bin/awf-dispatch" <别名|目录> <任务文件> --wait --timeout 900
 ```
 
-脚本会（**默认异步，不等待回合**）：
+1. 只处理自己那一个目标，不跨目标并行写；
+2. **默认加 `--wait`**：等到回合结束，不把「已发送」当「已完成」；
+3. 记录团队回报五项（退出码与最终状态 / 目标 commit / check 验证结果 / 阻塞原因 / 待 captain 决策），原样回报 captain；
+4. 不改目标仓库，不自行重试、改派或降级（由 captain 决定）。
+
+### 脚本做了什么
+
+脚本会（**默认异步，团队模式必须显式 `--wait`**）：
 
 1. 跑 G1–G4，并打印前置换结果；
 2. 在目标工作区创建会话，标题为 `<项目> · <任务标题>`；
-3. 发送任务包后立即返回会话 ID；加 `--wait` 才等待回合结束（`--timeout` 仅对 `--wait` 生效）；
+3. 发送任务包后立即返回会话 ID；加 `--wait` 才轮询到回合结束（`--timeout` 仅对 `--wait` 生效）；
 4. 把 sessionId、标题、状态、目标 HEAD 写到 `dispatch/log.md`；未等待时状态为「已发送，未等待回合」，并写明回到 GUI 会话的方式；
 5. 打印会话信息；后续细节由用户在同一个会话里继续提。
-
-需要本回合结果时显式等：
-
-```sh
-"$KIT/bin/awf-dispatch" <别名|目录> <任务文件> --wait --timeout 900
-```
 
 常用参数：
 
 | 参数 | 作用 |
 |---|---|
-| `--wait` | 等待回合结束并打印回报（默认不等待） |
+| `--wait` | 等待回合结束并打印回报；**团队派发默认加**（脚本默认不等待） |
+| `--timeout N` | 等待秒数，仅 `--wait` 生效（默认 600） |
 | `--no-wait` | 默认行为的兼容别名，与 `--wait` 互斥 |
 | `--dry-run` | 只做前置检查，不创建会话 |
 | `--headless` | 回退 headless（默认后台启动，`--wait` 才同步等待） |
@@ -82,11 +99,13 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 - 验收标准与**必须实际执行**的验证命令
 - 目标项目账本要求：在 `tasks/<type>/current.md` 认领、完成后归档
 - 提交要求：只允许本地 commit，禁止 push
-- 回报格式：状态 / 变更文件 / 验证 / commit / 阻塞点
+- 回报格式：状态 / 变更文件 / 验证结果 / commit / 阻塞
 
 任务包不要依赖调度方上下文；目标 agent 是独立会话。
 
 ## 回退
+
+回退由 captain 决定并派给 dispatcher 执行；dispatcher 不自行降级：
 
 | 情况 | 回退 | 代价 |
 |---|---|---|
@@ -99,13 +118,14 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 
 - 目标 agent 写目标项目的 `tasks/**`、`status.md`、代码与 commit。
 - 调度方只写自己的 `dispatch/log.md` 与任务文件；**不要**跨仓库改目标账本。
+- 账本与 commit 归 captain；dispatcher 只回报结果，不写 `tasks/**`。
 - 一个任务只有一个 Owner；目标已有 active 任务时不要并行派发同一模块。
 
 ## 验收与收尾
 
-1. 回合结束后检查目标 agent 的回报是否包含五项契约。
-2. 在目标仓库核对 `git log -1`、`git status`、`./agent-workflow/check_workflow.sh`。
-3. 调度方记录：会话 ID、任务文件、状态、目标 HEAD、时间。
+1. dispatcher 等回合结束后，检查目标 agent 的回报是否包含任务包五项（状态 / 变更文件 / 验证结果 / commit / 阻塞，见 `workflows/cross-project.md`），再按团队回报五项（`docs/team-flow.md`）汇总后回报 captain。
+2. captain 在目标仓库核对 `git log -1`、`git status`、`./agent-workflow/check_workflow.sh`（关键命令不只看成员自述）。
+3. captain 记录：会话 ID、任务文件、状态、目标 HEAD、时间。
 4. 用户后续细节优先回到同一会话；只有新目标或新任务才重新派发。
 
 ## 失败处理
@@ -114,7 +134,7 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 - `workflow-missing`：先 `awf init` / 补齐 `agent-workflow/`。
 - `writer-held` / `session/conflict`：目标会话被 GUI 占用或同目录写者冲突；切走/等待后重试。
 - `auth-required` / `connection refused`：重开 GUI URL；或 `--headless`。
-- 回合超时：会话保留，不要杀掉；在 GUI 查看进度。默认派发本身不等待（`--no-wait` 是默认行为的兼容别名），需要重派时直接重新派发并加 `--force`。
+- 回合超时（退出码 3）：会话保留，不要杀掉；回 GUI 看进度，由 captain 决定加大 `--timeout` 重派（`--force`）、改派或降级。
 
 ## 安全
 
