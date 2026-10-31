@@ -40,6 +40,26 @@
 
 ---
 
+## 任务包生命周期
+
+`dispatch/tasks/*.md` 是一次性票据：`dispatch/tasks/` 只留在途，完成后归档。
+
+1. **生成**：文件名带任务 ID（`<项目>-<ID>-<slug>.md`），正文写 `- 目标项目：<别名>（<绝对路径>）`。
+2. **在途**：派发后票据留在 `dispatch/tasks/`；`dispatch/log.md` 记录会话、状态与目标 HEAD。
+3. **落地**：目标项目完成并本地 commit，账本归档到目标 `agent-workflow/tasks/<type>/done.md`。
+4. **归档**：完成后在调度方运行 `awf-dispatch --prune`（默认 dry-run，只打印计划），确认后加 `--apply` 把票据移到 `dispatch/archive/<目标别名>/<YYYY-MM>/<原文件名>`。
+
+判定依据：目标仓库提交消息含任务 ID，**或** 目标账本 `done.md` 已含该 ID——提交消息没写 ID 的票据也能归档；解析不到目标项目/任务 ID、目标路径不存在或不是 git 仓库时判 unknown 并跳过（不猜）。
+
+```sh
+./agent-workflow/bin/awf-dispatch --prune           # dry-run：打印票据 / 目标 / 任务ID / 判定 / 将移往路径
+./agent-workflow/bin/awf-dispatch --prune --apply   # 真正移动已完成票据
+```
+
+`dispatch/log.md` 是**永久派发日志**，`--prune` 只移动票据文件，不清理、不改写日志。
+
+---
+
 ## 执行：会话优先
 
 DSH 下用 `awf-dispatch`（**默认异步**：创建会话并发送任务后立即返回会话 ID，不阻塞调度方）：

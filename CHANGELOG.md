@@ -3,6 +3,12 @@
 本仓库遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)：
 `MAJOR.MINOR.PATCH`。历史条目只追加更正，不改写。
 
+## [Unreleased]
+
+### Added
+- `awf-dispatch --prune [--apply] [--json]`：按 commit 消息或目标 `done.md` 判定已完成票据，归档到 `dispatch/archive/<项目>/<YYYY-MM>/`，默认 dry-run
+- 派发票据生命周期说明（docs/dispatch.md、cross-project.md、跨项目派发技能）
+
 ## [0.3.0] - 2026-10-31
 
 ### Added

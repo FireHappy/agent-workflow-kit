@@ -56,6 +56,8 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 | `--no-wait` | 兼容别名：等价默认行为（只发送，不等待回合） |
 | `--force` | 允许同名会话重复派发 |
 | `--allow-dirty` / `--allow-active` | 放宽 G3（需明确知道风险） |
+| `--prune` | 归档已完成票据：扫描 `./dispatch/tasks/*.md`，默认 dry-run 只打印计划 |
+| `--apply` | 配合 `--prune` 真正移动文件（默认不移动） |
 | `--json` | 机器可读输出 |
 
 ### 默认异步与回到会话
@@ -91,6 +93,61 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 ```
 
 建议只对可拆分的大任务使用；小改动直接普通会话即可。不加 `--team` 时任务包与旧版完全一致；`--team` 只影响会话模式注入的任务包，`--handoff` 生成的交接单保持原文。
+
+### 票据生命周期
+
+`dispatch/tasks/*.md` 是一次性票据：生成后留在 `dispatch/tasks/` 直到目标项目落地，然后用 `--prune` 归档。`dispatch/tasks/` 只留在途，`dispatch/archive/` 存已完成的票据。
+
+```text
+dispatch/tasks/<项目>-<ID>-<slug>.md      生成（调度方写任务包）
+        │  派发（会话 / headless / handoff）；dispatch/log.md 记录
+        ▼
+目标项目完成并本地 commit，账本归档到 agent-workflow/tasks/<type>/done.md
+        │  awf-dispatch --prune（默认 dry-run）
+        ▼
+dispatch/archive/<目标别名>/<YYYY-MM>/<原文件名>
+```
+
+- **生成**：文件名必须含任务 ID（`<项目>-<ID>-<slug>.md`），正文必须有 `- 目标项目：<别名>（<绝对路径>）` 一行。
+- **在途**：派发后票据留在 `dispatch/tasks/`；`dispatch/log.md` 记录会话、状态与目标 HEAD。
+- **落地**：目标项目完成并本地 commit，账本归档到目标 `agent-workflow/tasks/<type>/done.md`。
+- **归档**：`--prune` 判定完成后把票据移到 `dispatch/archive/`，主目录恢复为「只有在途」。
+  - 判定 completed：`git -C <目标路径> log --all --grep=<ID>` 命中，**或** 目标账本 `agent-workflow/tasks/*/done.md`（工作区或 HEAD）含该 ID。提交消息没写任务 ID 的票据，只要目标账本已归档同样判 completed。
+  - 判定 unknown：解析不到「目标项目」行 / 文件名没有任务 ID / 目标路径不存在 / 目标不是 git 仓库。unknown 只报告，不猜、不移动。
+  - 判定 pending：commit 与 done.md 都没命中。
+  - 归档路径：`dispatch/archive/<目标别名>/<YYYY-MM>/<原文件名>`；月份取该任务提交的 `%cs`，取不到（例如只命中账本）用当天。
+  - 移动：票据在 git 索引里用 `git mv`，否则 `os.rename`；目标已存在则跳过并报冲突，不覆盖。
+  - 无票据或全部 pending 时退出码 0；`--prune` 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。
+
+```sh
+# 只打印计划（默认 dry-run，不改任何文件）
+./agent-workflow/bin/awf-dispatch --prune
+
+# 确认后真正归档
+./agent-workflow/bin/awf-dispatch --prune --apply
+
+# 机器可读（items[].status / archive / summary）
+./agent-workflow/bin/awf-dispatch --prune --json
+```
+
+dry-run 示例：
+
+```text
+prune：dry-run（只读；加 --apply 才移动文件）
+票据目录：/path/to/kit/dispatch/tasks
+归档目录：/path/to/kit/dispatch/archive
+
+completed dispatch/tasks/demo02-DEV-005-sum-between.md
+  目标项目：agent-demo02 → /Users/.../agent-demo02
+  任务ID：DEV-005
+  判定：completed（commit 命中 2026-10-31）
+  将移往：dispatch/archive/agent-demo02/2026-10/demo02-DEV-005-sum-between.md
+
+合计：completed 1 / pending 0 / unknown 0（共 1）
+dry-run：未移动任何文件；确认后加 --apply 执行。
+```
+
+`dispatch/log.md` 是永久派发日志，`--prune` 只移动票据文件，不清理、不改写日志。
 
 ## 手工等价流程
 

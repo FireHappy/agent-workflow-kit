@@ -63,6 +63,90 @@ else
   bad "--help 未写清默认不等待"
 fi
 
+# 1.3 --prune：help 同步归档参数与目录语义
+if printf '%s\n' "$help_text" | grep -q -- '--prune'; then
+  ok "--help 列出 --prune"
+else
+  bad "--help 未列出 --prune"
+fi
+if printf '%s\n' "$help_text" | grep -q -- '--apply'; then
+  ok "--help 列出 --apply"
+else
+  bad "--help 未列出 --apply"
+fi
+if printf '%s\n' "$help_text" | grep -q 'dispatch/archive'; then
+  ok "--help 说明归档目录"
+else
+  bad "--help 未说明归档目录"
+fi
+
+# 1.4 --prune 判定：票据解析 + commit 无 ID 但 done.md 含 ID 也算 completed
+if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+import importlib.machinery
+import importlib.util
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_prune_under_test", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+ticket = "# demo01 · DOCS-042 冒烟\n\n- 目标项目：demo01（/tmp/awf-demo01）\n- 类型：docs\n"
+alias, target = module.parse_ticket_target(ticket)
+assert alias == "demo01", alias
+assert str(target) == "/tmp/awf-demo01", target
+assert module.parse_ticket_target("- 类型：docs\n") == (None, None)
+assert module.parse_ticket_target("- 目标项目：demo01（relative/path）\n") == (None, None)
+
+assert module.ticket_task_id("demo01-DOCS-042-smoke.md") == "DOCS-042"
+assert module.ticket_task_id("no-id-ticket.md") is None
+assert module.ticket_task_id("demo02-DEV-0071-x.md") == "DEV-0071"
+assert not module.id_regex("DEV-007").search("DEV-0071"), "ID 边界失效"
+assert module.id_regex("DEV-007").search("归档 DEV-007 完成")
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = pathlib.Path(tmp)
+    repo = tmp / "repo"
+    (repo / "agent-workflow/tasks/dev").mkdir(parents=True)
+    (repo / "agent-workflow/tasks/dev/done.md").write_text("## [DEV-007] 已完成\n", encoding="utf-8")
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+
+    git("init", "-q")
+    git("config", "user.email", "smoke@example.com")
+    git("config", "user.name", "smoke")
+    git("add", "-A")
+    git("commit", "-qm", "chore: 升级工作流框架到 0.3.0")  # 提交消息不含任务 ID
+
+    tasks = tmp / "dispatch/tasks"
+    tasks.mkdir(parents=True)
+    (tasks / "demo02-DEV-007-ledger.md").write_text(f"- 目标项目：demo02（{repo}）\n", encoding="utf-8")
+    (tasks / "demo02-DEV-099-pending.md").write_text(f"- 目标项目：demo02（{repo}）\n", encoding="utf-8")
+    (tasks / "demo02-DEV-100-broken.md").write_text("# 无目标项目行\n", encoding="utf-8")
+    (tasks / "demo02-DEV-101-missing.md").write_text("- 目标项目：demo02（/no/such/path）\n", encoding="utf-8")
+
+    items = {item["taskId"]: item for item in module.scan_tickets(tmp)}
+    assert items["DEV-007"]["status"] == "completed", items["DEV-007"]
+    assert "done.md" in items["DEV-007"]["reason"], items["DEV-007"]["reason"]
+    month = module.datetime.date.today().strftime("%Y-%m")
+    expected = f"dispatch/archive/demo02/{month}/demo02-DEV-007-ledger.md"
+    assert items["DEV-007"]["archive"] == expected, items["DEV-007"]["archive"]
+    assert items["DEV-099"]["status"] == "pending", items["DEV-099"]
+    assert items["DEV-100"]["status"] == "unknown", items["DEV-100"]
+    assert items["DEV-101"]["status"] == "unknown", items["DEV-101"]
+    assert (tasks / "demo02-DEV-007-ledger.md").is_file(), "判定阶段不得移动票据"
+PY
+then
+  ok "票据解析与完成判定（commit 无 ID、done.md 含 ID）正确"
+else
+  bad "票据解析 / 完成判定断言失败"
+fi
+
 # 直接用 importlib 加载源脚本，断言 build_prompt 的 --team 注入、默认异步实现点与缺省行为
 if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
 import importlib.machinery
@@ -128,6 +212,121 @@ if "$PROJ/agent-workflow/bin/awf-dispatch" "$TMP/noworkflow" "$TMP/task.md" --dr
 else
   grep -q 'G1 工作流失败' "$TMP/out" && ok "无工作流时前置检查失败" || bad "无工作流时错误信息不明确"
 fi
+
+# 1.5 --prune 端到端：dry-run 不改文件 / --apply 移动（git mv 与 os.rename）/ 冲突不覆盖 / 用法错误
+DISPATCH="$PROJ/agent-workflow/bin/awf-dispatch"
+PRUNE="$TMP/prune"
+PRUNE_TARGET="$TMP/prune-target"
+mkdir -p "$PRUNE/dispatch/tasks" "$PRUNE_TARGET/agent-workflow/tasks/dev"
+printf '## [DEV-101] 已完成\n' > "$PRUNE_TARGET/agent-workflow/tasks/dev/done.md"
+git -C "$PRUNE_TARGET" init -q
+git -C "$PRUNE_TARGET" config user.email smoke@example.com
+git -C "$PRUNE_TARGET" config user.name smoke
+git -C "$PRUNE_TARGET" add -A
+git -C "$PRUNE_TARGET" commit -qm "chore: 无任务 ID 的提交"
+
+git -C "$PRUNE" init -q
+git -C "$PRUNE" config user.email smoke@example.com
+git -C "$PRUNE" config user.name smoke
+
+cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" <<EOF
+# demo01 · DEV-101
+
+- 目标项目：demo01（$PRUNE_TARGET）
+EOF
+cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
+# demo01 · DEV-101 副本
+
+- 目标项目：demo01（$PRUNE_TARGET）
+EOF
+git -C "$PRUNE" add dispatch/tasks/demo01-DEV-101-tracked.md
+git -C "$PRUNE" commit -qm "chore: 种子票据（只把 tracked 加入索引）"
+cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-conflict.md" <<EOF
+# demo01 · DEV-101 冲突
+
+- 目标项目：demo01（$PRUNE_TARGET）
+EOF
+
+if ( cd "$PRUNE" && "$DISPATCH" --prune --json > plan.json ); then
+  ok "--prune dry-run 退出 0"
+else
+  bad "--prune dry-run 失败"
+fi
+if [ -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && [ ! -e "$PRUNE/dispatch/archive" ]; then
+  ok "dry-run 不移动文件、不建 archive"
+else
+  bad "dry-run 改动了票据文件"
+fi
+if python3 - "$PRUNE/plan.json" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+assert data["mode"] == "prune", data
+assert data["dryRun"] is True, data
+assert data["summary"]["completed"] == 3, data["summary"]
+assert data["summary"]["total"] == 3, data["summary"]
+for item in data["items"]:
+    assert item["status"] == "completed", item
+    assert item["taskId"] == "DEV-101", item
+    assert item["archive"].startswith("dispatch/archive/demo01/"), item
+    assert item["archive"].endswith(item["file"].split("/")[-1]), item
+PY
+then
+  ok "--prune --json 计划字段完整（completed / 任务 ID / 归档路径）"
+else
+  bad "--prune --json 计划字段不完整"
+fi
+
+# 冲突：预先占用一张票据的归档路径，apply 时必须跳过且不覆盖
+conflict_dest="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([i["archive"] for i in d["items"] if i["file"].endswith("conflict.md")][0])' "$PRUNE/plan.json")"
+mkdir -p "$(dirname "$PRUNE/$conflict_dest")"
+printf '老内容\n' > "$PRUNE/$conflict_dest"
+
+if ( cd "$PRUNE" && "$DISPATCH" --prune --apply --json > apply.json ); then
+  ok "--prune --apply 退出 0"
+else
+  bad "--prune --apply 失败"
+fi
+[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && ok "apply 移走已跟踪票据" || bad "已跟踪票据未移动"
+[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" ] && ok "apply 移走未跟踪票据" || bad "未跟踪票据未移动"
+[ -f "$PRUNE/dispatch/tasks/demo01-DEV-101-conflict.md" ] && ok "冲突时源票据保留" || bad "冲突时源票据被删除"
+[ "$(cat "$PRUNE/$conflict_dest")" = "老内容" ] && ok "冲突不覆盖目标文件" || bad "冲突覆盖了目标文件"
+if git -C "$PRUNE" status --porcelain | grep -q '^R  dispatch/tasks/.* -> dispatch/archive/'; then
+  ok "已跟踪票据用 git mv（索引记录为 rename）"
+else
+  bad "已跟踪票据未使用 git mv"
+fi
+if ls "$PRUNE"/dispatch/archive/demo01/*/demo01-DEV-101-tracked.md >/dev/null 2>&1; then
+  ok "归档路径含别名与 YYYY-MM"
+else
+  bad "归档路径不符合 <别名>/<YYYY-MM>/<文件名>"
+fi
+if python3 - "$PRUNE/apply.json" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+assert data["dryRun"] is False, data
+assert data["summary"]["moved"] == 2, data["summary"]
+assert data["summary"]["conflicts"] == 1, data["summary"]
+assert data["summary"]["errors"] == 0, data["summary"]
+PY
+then
+  ok "apply 汇总：移动 2、冲突 1、失败 0"
+else
+  bad "apply 汇总不符"
+fi
+
+( cd "$PRUNE" && "$DISPATCH" --prune >/dev/null ) && ok "全部 pending/冲突时 dry-run 退出 0" || bad "剩余票据 dry-run 退出非 0"
+set +e
+( cd "$PRUNE" && "$DISPATCH" --prune demo01 x.md >/dev/null 2>&1 )
+prune_positional=$?
+( cd "$PRUNE" && "$DISPATCH" --apply >/dev/null 2>&1 )
+apply_only=$?
+set -e
+[ "$prune_positional" = "2" ] && ok "--prune 与位置参数同用退出 2" || bad "--prune 位置参数退出码为 $prune_positional（期望 2）"
+[ "$apply_only" = "2" ] && ok "--apply 不配 --prune 时退出 2" || bad "--apply 单独使用退出码为 $apply_only（期望 2）"
 
 # 2. check 通过
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "check 通过" || bad "check 未通过"

@@ -68,3 +68,13 @@
 - 目标 HEAD：d4ac028 chore: 升级工作流框架到 0.2.1
 - 回到会话：在 GUI 的 `agent-demo02` 工作区打开「agent-demo02 · DEV-008 升级工作流框架到 0.3.0」（会话 session-613ec35b-5bef-4c95-8628-3561ffda3418）继续提细节。
 
+## 2026-10-31 19:49 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · DEV-033 升级工作流框架到 0.3.0合并上次安装残留（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/rokid-system-components-DEV-033-workflow-0.3.0.md）
+- 工作区：rokid_system_components（b49610a8-d5ac-4575-9e29-221b141b1fce）
+- 会话：session-a3ef3654-27eb-4209-80a5-078848091be7（rokid_system_components · DEV-033 升级工作流框架到 0.3.0合并上次安装残留）
+- 状态：已发送，未等待回合
+- 目标 HEAD：2305a3a9 卸载APP排序问题，充电提示
+- 回到会话：在 GUI 的 `rokid_system_components` 工作区打开「rokid_system_components · DEV-033 升级工作流框架到 0.3.0合并上次安装残留」（会话 session-a3ef3654-27eb-4209-80a5-078848091be7）继续提细节。
+

@@ -18,6 +18,11 @@
   ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
   ./agent-workflow/bin/awf-dispatch demo02 task.md --team
 
+票据归档（默认为 dry-run，只打印计划）：
+  ./agent-workflow/bin/awf-dispatch --prune
+  ./agent-workflow/bin/awf-dispatch --prune --apply
+  ./agent-workflow/bin/awf-dispatch --prune --json
+
 设计约束：只依赖 Python 3 标准库；不打印、不落盘 GUI 认证 cookie。
 """
 
@@ -530,6 +535,297 @@ def log_entry(alias: str, target: Path, title: str, session_id: str, session_tit
     )
 
 
+# ---------------------------------------------------------------- 票据归档（--prune）
+
+ARCHIVE_ROOT = "dispatch/archive"
+TICKET_ID_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]+-[0-9]+(?![0-9])")
+TICKET_TARGET_RE = re.compile(
+    r"^\s*[-*]\s*目标项目\s*[：:]\s*(.+?)\s*[（(]\s*(.+?)\s*[）)]\s*$", re.M
+)
+
+
+def parse_ticket_target(text: str):
+    """从票据正文解析「- 目标项目：<别名>（<绝对路径>）」；解析不到返回 (None, None)。"""
+    match = TICKET_TARGET_RE.search(text or "")
+    if not match:
+        return None, None
+    alias = match.group(1).strip()
+    target = Path(match.group(2).strip()).expanduser()
+    if not alias or not target.is_absolute():
+        return None, None
+    return alias, target
+
+
+def ticket_task_id(name: str):
+    """从票据文件名取任务 ID（`[A-Z]+-[0-9]+`）；不含 ID 返回 None。"""
+    match = TICKET_ID_RE.search(Path(name).name)
+    return match.group(0) if match else None
+
+
+def id_regex(task_id: str):
+    """带边界的 ID 匹配：DEV-007 不命中 DEV-0071。"""
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(task_id)}(?![0-9])")
+
+
+def id_ere(task_id: str) -> str:
+    """git --grep 用的 POSIX ERE（不支持 lookbehind）。"""
+    return rf"(^|[^A-Za-z0-9]){re.escape(task_id)}([^0-9]|$)"
+
+
+def run_git(args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+
+
+def is_git_repo(target: Path) -> bool:
+    if not target.is_dir():
+        return False
+    return run_git(["git", "-C", str(target), "rev-parse", "--git-dir"]).returncode == 0
+
+
+def commit_dates(target: Path, task_id: str):
+    """目标仓库里提交消息命中任务 ID 的提交日期（新到旧）；没有返回空列表。"""
+    proc = run_git(
+        [
+            "git",
+            "-C",
+            str(target),
+            "log",
+            "--all",
+            "-E",
+            f"--grep={id_ere(task_id)}",
+            "--format=%cs",
+        ]
+    )
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def ledger_has_id(target: Path, task_id: str) -> bool:
+    """目标账本 agent-workflow/tasks/*/done.md 是否含该 ID（工作区与 HEAD 都看）。"""
+    pattern = id_regex(task_id)
+    for done in sorted((target / "agent-workflow/tasks").glob("*/done.md")):
+        try:
+            if pattern.search(done.read_text(encoding="utf-8", errors="replace")):
+                return True
+        except OSError:
+            continue
+
+    listing = run_git(
+        [
+            "git",
+            "-C",
+            str(target),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+            "--",
+            "agent-workflow/tasks",
+        ]
+    )
+    if listing.returncode != 0:
+        return False
+    for rel in listing.stdout.splitlines():
+        if not rel.endswith("/done.md"):
+            continue
+        shown = run_git(["git", "-C", str(target), "show", f"HEAD:{rel}"])
+        if shown.returncode == 0 and pattern.search(shown.stdout):
+            return True
+    return False
+
+
+def judge_ticket(target, task_id: str):
+    """判定票据：completed / pending / unknown，并给出归档月份与原因。"""
+    if target is None:
+        return "unknown", None, "缺少「目标项目」行或路径不是绝对路径"
+    if not target.is_dir():
+        return "unknown", None, f"目标路径不存在：{target}"
+    if not is_git_repo(target):
+        return "unknown", None, f"目标不是 git 仓库：{target}"
+
+    dates = commit_dates(target, task_id)
+    if dates:
+        return "completed", dates[0][:7], f"commit 命中 {dates[0]}"
+    if ledger_has_id(target, task_id):
+        return (
+            "completed",
+            datetime.date.today().strftime("%Y-%m"),
+            "目标账本 done.md 已归档（提交消息不含 ID，月份按当天）",
+        )
+    return "pending", None, "commit 消息与 done.md 都未命中"
+
+
+def archive_relpath(alias: str, month: str, filename: str) -> str:
+    return f"{ARCHIVE_ROOT}/{alias}/{month}/{filename}"
+
+
+def scan_tickets(root: Path):
+    """扫描 ./dispatch/tasks/*.md 并逐个判定；只读，不移动文件。"""
+    tasks_dir = root / "dispatch/tasks"
+    items = []
+    if not tasks_dir.is_dir():
+        return items
+    for ticket in sorted(tasks_dir.glob("*.md")):
+        if not ticket.is_file():
+            continue
+        item = {
+            "file": ticket.relative_to(root).as_posix(),
+            "alias": None,
+            "target": None,
+            "taskId": None,
+            "status": "unknown",
+            "month": None,
+            "archive": None,
+            "reason": "",
+        }
+        try:
+            text = ticket.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            item["reason"] = f"读取失败：{error}"
+            items.append(item)
+            continue
+
+        alias, target = parse_ticket_target(text)
+        task_id = ticket_task_id(ticket.name)
+        item["alias"] = alias
+        item["target"] = str(target) if target else None
+        item["taskId"] = task_id
+
+        reasons = []
+        if alias is None:
+            reasons.append("缺少「目标项目：<别名>（<绝对路径>）」行")
+        if task_id is None:
+            reasons.append("文件名不含任务 ID（[A-Z]+-[0-9]+）")
+        if reasons:
+            item["reason"] = "；".join(reasons)
+            items.append(item)
+            continue
+
+        status, month, reason = judge_ticket(target, task_id)
+        item["status"] = status
+        item["month"] = month
+        item["reason"] = reason
+        if status == "completed":
+            item["archive"] = archive_relpath(alias, month, ticket.name)
+        items.append(item)
+    return items
+
+
+def git_tracked(root: Path, rel: str) -> bool:
+    proc = run_git(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", rel])
+    return proc.returncode == 0
+
+
+def move_ticket(root: Path, source: Path, rel_dest: str) -> str:
+    """移动票据：git 索引里的用 git mv，否则 os.rename；目标已存在时返回 conflict。"""
+    dest = root / rel_dest
+    if dest.exists() or dest.is_symlink():
+        return "conflict"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rel_src = source.relative_to(root).as_posix()
+    if git_tracked(root, rel_src):
+        proc = run_git(["git", "-C", str(root), "mv", rel_src, rel_dest])
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise DispatchError(f"git mv 失败：{rel_src} → {rel_dest}：{detail}")
+    else:
+        try:
+            os.rename(source, dest)
+        except OSError as error:
+            raise DispatchError(f"移动失败：{rel_src} → {rel_dest}：{error}")
+    return "moved"
+
+
+def run_prune(args) -> int:
+    root = Path.cwd().resolve()
+    tasks_dir = root / "dispatch/tasks"
+    archive_dir = root / ARCHIVE_ROOT
+    items = scan_tickets(root)
+    apply = bool(args.apply)
+    counts = {"completed": 0, "pending": 0, "unknown": 0}
+    moved = 0
+    conflicts = 0
+    errors = 0
+
+    if apply:
+        for item in items:
+            if item["status"] != "completed" or not item["archive"]:
+                continue
+            try:
+                outcome = move_ticket(root, root / item["file"], item["archive"])
+            except DispatchError as error:
+                item["error"] = str(error)
+                errors += 1
+                emit(f"FAIL  {error}", args.json)
+                continue
+            if outcome == "conflict":
+                conflicts += 1
+                item["conflict"] = True
+                item["reason"] = item["reason"] + "；目标已存在，跳过（不覆盖）"
+            else:
+                moved += 1
+                item["moved"] = True
+
+    for item in items:
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": errors == 0,
+                    "mode": "prune",
+                    "dryRun": not apply,
+                    "root": str(root),
+                    "tasks": str(tasks_dir),
+                    "archive": str(archive_dir),
+                    "items": items,
+                    "summary": dict(
+                        counts,
+                        total=len(items),
+                        moved=moved,
+                        conflicts=conflicts,
+                        errors=errors,
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        mode = "apply（会移动文件）" if apply else "dry-run（只读；加 --apply 才移动文件）"
+        print(f"prune：{mode}")
+        print(f"票据目录：{tasks_dir}")
+        print(f"归档目录：{archive_dir}")
+        if not items:
+            print("没有票据：dispatch/tasks 为空或不存在。")
+        for item in items:
+            print()
+            print(f"{item['status']:<9} {item['file']}")
+            print(f"  目标项目：{item['alias'] or '-'} → {item['target'] or '-'}")
+            print(f"  任务ID：{item['taskId'] or '-'}")
+            print(f"  判定：{item['status']}（{item['reason']}）")
+            if item["archive"]:
+                print(f"  {'归档' if apply else '将移往'}：{item['archive']}")
+            if item.get("moved"):
+                print("  移动：已完成")
+            elif item.get("conflict"):
+                print("  移动：跳过（目标已存在，不覆盖）")
+        print()
+        print(
+            "合计：completed {c} / pending {p} / unknown {u}（共 {n}）".format(
+                c=counts["completed"], p=counts["pending"], u=counts["unknown"], n=len(items)
+            )
+        )
+        if apply:
+            print(f"已移动 {moved} 个票据；冲突 {conflicts} 个；失败 {errors} 个。")
+        else:
+            print("dry-run：未移动任何文件；确认后加 --apply 执行。")
+    return 2 if errors else 0
+
+
 # ---------------------------------------------------------------- 派发模式
 
 
@@ -822,6 +1118,15 @@ def main(argv=None) -> int:
             "  awf-dispatch demo02 task.md --headless\n"
             "  awf-dispatch demo02 task.md --handoff\n"
             "  awf-dispatch demo02 task.md --team\n"
+            "  awf-dispatch --prune                                  # dry-run：打印归档计划\n"
+            "  awf-dispatch --prune --apply                          # 真正移动已完成票据\n"
+            "  awf-dispatch --prune --json                           # 结构化输出\n"
+            "\n--prune：扫描 ./dispatch/tasks/*.md，从正文「- 目标项目：<别名>（<路径>）」取别名与路径、\n"
+            "        从文件名取任务 ID；git log --all 命中 ID，或目标账本 done.md 已含 ID → completed。\n"
+            "        归档到 dispatch/archive/<别名>/<YYYY-MM>/<原文件名>（月份取提交 %cs，取不到用当天）；\n"
+            "        默认 dry-run 只打印计划，--apply 才移动；git 索引里的票据用 git mv，其余 os.rename；\n"
+            "        目标已存在则跳过并报冲突（不覆盖）。无票据或全部 pending 时退出码 0。\n"
+            "        --prune 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。\n"
             "\n默认异步：创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
             "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
             "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录回到 GUI 会话的方式。\n"
@@ -835,10 +1140,20 @@ def main(argv=None) -> int:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("target", help="项目别名 / 项目 ID / 目录")
-    parser.add_argument("task", help="任务文件（Markdown）")
+    parser.add_argument("target", nargs="?", help="项目别名 / 项目 ID / 目录（--prune 时不需要）")
+    parser.add_argument("task", nargs="?", help="任务文件（Markdown；--prune 时不需要）")
     parser.add_argument("--web-url", default="", help=f"DSH Web URL（默认 $DSH_WEB_URL 或 {DEFAULT_WEB_URL}）")
     parser.add_argument("--dry-run", action="store_true", help="只做前置检查，不创建会话")
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="归档已完成票据：扫描 ./dispatch/tasks/*.md 并打印计划（默认 dry-run）",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="配合 --prune：真正移动文件到 dispatch/archive/（默认只打印计划）",
+    )
     parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
     parser.add_argument("--handoff", action="store_true", help="只生成交接单，不执行")
     parser.add_argument(
@@ -873,6 +1188,17 @@ def main(argv=None) -> int:
     parser.add_argument("--title", default="", help="会话标题（默认 <别名> · <任务标题>）")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
     args = parser.parse_args(argv)
+
+    if args.apply and not args.prune:
+        parser.error("--apply 只能配合 --prune 使用")
+    if args.prune:
+        if args.target or args.task:
+            parser.error("--prune 不接受 target / task 位置参数；它只扫描 ./dispatch/tasks/")
+        if args.headless or args.handoff:
+            parser.error("--prune 不能与 --headless / --handoff 同时使用")
+        return run_prune(args)
+    if not args.target or not args.task:
+        parser.error("缺少参数：需要 target 与 task（或用 --prune 归档票据）")
 
     try:
         target = resolve_target(args.target)

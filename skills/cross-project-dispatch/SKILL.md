@@ -43,9 +43,35 @@ KIT="${DSH_HOME:-$HOME/.dsh}/skills/agent-workflow-scaffold"
 "$KIT/bin/awf-dispatch" <别名|目录> <任务文件> --wait --timeout 900
 ```
 
-常用参数：`--wait`（等待回合结束；默认不等待）、`--no-wait`（默认行为的兼容别名，与 `--wait` 互斥）、`--dry-run`、`--headless`、`--handoff`、`--add-workspace`、`--json`、`--team`（任务包附加团队拆分建议，目标方自行决定是否拆队）。`--headless` 默认也在后台启动并立即返回输出文件路径，`--wait` 才同步等待。
+常用参数：
+
+| 参数 | 作用 |
+|---|---|
+| `--wait` | 等待回合结束并打印回报（默认不等待） |
+| `--no-wait` | 默认行为的兼容别名，与 `--wait` 互斥 |
+| `--dry-run` | 只做前置检查，不创建会话 |
+| `--headless` | 回退 headless（默认后台启动，`--wait` 才同步等待） |
+| `--handoff` | 只生成交接单，不执行 |
+| `--add-workspace` | 目标未登记工作区时自动登记 |
+| `--team` | 任务包附加团队拆分建议，目标方自行决定是否拆队 |
+| `--prune` | 归档已完成票据：扫描 `dispatch/tasks/*.md`，按目标 commit / 账本 `done.md` 判定；默认 dry-run 只打印计划 |
+| `--apply` | 配合 `--prune` 真正移动文件到 `dispatch/archive/<别名>/<YYYY-MM>/` |
+| `--json` | 机器可读输出 |
+
+`--headless` 默认也在后台启动并立即返回输出文件路径，`--wait` 才同步等待。
 
 手工等价操作：GUI 左侧切到目标工作区 → 新建会话 → 粘贴任务包。效果相同，只是没有自动前置检查与日志。
+
+## 票据生命周期
+
+`dispatch/tasks/*.md` 是一次性票据：完成后用 `--prune` 归档到 `dispatch/archive/<别名>/<YYYY-MM>/`，主目录只留在途；`dispatch/log.md` 是永久日志，不清理。
+
+判定 completed：目标仓库提交消息含任务 ID，或目标账本 `agent-workflow/tasks/*/done.md` 已含该 ID；解析不到目标项目/任务 ID、目标不是 git 仓库时判 unknown 并跳过。
+
+```sh
+"$KIT/bin/awf-dispatch" --prune           # dry-run：只打印计划，不改文件
+"$KIT/bin/awf-dispatch" --prune --apply   # 确认后真正归档
+```
 
 ## 任务包
 
