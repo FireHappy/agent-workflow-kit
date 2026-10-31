@@ -60,7 +60,7 @@
 
 ## 本仓库协作约定（区块外，本地维护）
 
-- 默认把多文件任务交给 AgentTeams，三轨对应现有流程：docs / dev / debug；触发口令 `用 AgentTeams 按 docs/team-flow.md 执行：<目标>`。
+- 对话中的需求默认先转团队计划（staged）：主对话只做澄清、拆分、审批与验收，不等成员执行；多文件任务按三轨 docs / dev / debug 组织。
 - 轨道规则与成员分工见 `docs/team-flow.md`；跨项目写仍走 `awf-dispatch`。
 - 单文件小修、文案改动、只读查询不开团队（协调成本 > 收益）。
 - 跨项目写操作仍走 `awf-dispatch` 派发给目标项目自己的会话，不由本仓库团队代写目标仓库。
