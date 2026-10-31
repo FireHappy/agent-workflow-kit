@@ -76,6 +76,7 @@ agent-workflow/
 - [ ] `project.yaml` 的 `compile` / `test` 为空时，入口显示“未配置”而不是假命令
 - [ ] 未修改用户已有的 `AGENTS.md` 区块外内容
 - [ ] `workflows/cross-project.md` 已生成；入口含“跨项目派发”路由
+- [ ] 入口含“任务路由”：有团队能力时优先派发，无则单会话
 - [ ] 需要跨项目发现时，`awf projects` 能列出新项目，`awf find <别名>` 能返回路径
 
 ## 跨项目派发（配套技能）
