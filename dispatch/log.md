@@ -144,3 +144,51 @@
 - 目标 HEAD：43a25eda chore: 升级工作流框架到 0.4.1
 - 回报节选：DEV-034 完成。以下是按任务包五项格式的回报： --- ## DEV-034 回报 **状态**：✅ 完成（验收 4/4 通过，dev.md 全流程走完：认领 → 实现 → 验证 → 独立复核 → 归档 → 本地 commit） **变更文件**（commit 内 6 个，均为框架文件；项目内容 `config/`、`docs/`、`memory/`、`tasks/dev/current.md` 零改动）： | 文件 | 变更 | |---|---| | [AGENTS.md](<AGENTS.md>) | 入口重渲染，digest 023e5214 → 6c5ca8f3（0.4.1 h…（已截断，完整回报见会话）
 
+## 2026-10-31 21:35 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · demo02-DEV-011 升级工作流框架到 0.4.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo02-DEV-011-workflow-0.4.2.md）
+- 模块：工作流
+- 工作区：agent-demo02（2954372d-7230-4a5f-ad49-993ecd25ff02）
+- 会话：session-84f9da7b-a58e-4aaa-81c9-e43611562db2（[awf] agent-demo02 · 工作流）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：1302a5f chore: 升级工作流框架到 0.4.2
+- 回报节选：提交完成，工作区干净，无 remote。以下是 DEV-011 回报。 --- ## DEV-011 回报（升级工作流框架到 0.4.2） ### 状态 ✅ **完成**（已认领 → active → 已验证 → 快速车道复核通过 → 已归档 done.md → 已本地 commit，未 push） **执行路径说明**：按 AGENTS.md 任务路由 + 0.4.2 两级复核策略（§3.5 快速车道 B），本任务为**机械升级任务**（生成器运行 + 验证 + 提交），默认直做、不派生子任务复核；自检门禁在**归档前后两次独立复跑**（升级后、提交前），结果一致，满足 dev.md「独立重…（已截断，完整回报见会话）
+
+## 2026-10-31 21:36 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · demo01-DOCS-006 升级工作流框架到 0.4.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/demo01-DOCS-006-workflow-0.4.2.md）
+- 模块：工作流
+- 工作区：agent-demo01（181aff53-4218-4074-a910-5d9025047c2f）
+- 会话：session-e7186846-2408-4f48-9438-c89f90bfa45f（[awf] agent-demo01 · 工作流）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：08408e2 chore: 升级工作流框架到 0.4.2
+- 回报节选：DEMO01-DOCS-006 已完成 ✅ ## 回报 **状态**：完成（无 active/blocked 遗留，未 push） **变更文件**（commit 08408e2，5 个文件，均属预期生成文件 / 账本）： - `agent-workflow/bin/awf`（+239 行，新增 `release-prep` 子命令） - `agent-workflow/bin/awf-dispatch`（+354/‑17 行，无进展快失败、等落地） - `agent-workflow/workflows/cross-project.md`（机械任务直做说明、`--wait` 落地确认） - …（已截断，完整回报见会话）
+
+## 2026-10-31 21:36 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · rokid-system-components-DEV-035 升级工作流框架到 0.4.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/rokid-system-components-DEV-035-workflow-0.4.2.md）
+- 模块：工作流
+- 工作区：rokid_system_components（b49610a8-d5ac-4575-9e29-221b141b1fce）
+- 会话：session-79436f0b-4c06-4578-a818-eef0196e501c（[awf] rokid_system_components · 工作流）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：fc69a4fa chore: 升级工作流框架到 0.4.2
+- 回报节选：DEV-035 完成。按任务包五项回报： --- ## DEV-035 回报 **状态**：✅ 完成（验收 4/4 通过；dev.md 全流程：认领 → 实现 → 验证 → 归档 → 本地 commit） **变更文件**（commit 内 3 个）： | 文件 | 变更 | |---|---| | [agent-workflow/workflows/cross-project.md](<agent-workflow/workflows/cross-project.md>) | +4 行：新增「机械/可验证任务直接完成并提交、验证以复跑命令为准，不要为复核再派生子任务」；`--wait` 改为…（已截断，完整回报见会话）
+
+## 2026-10-31 21:38 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · finderpathbar-DEV-001 升级工作流框架到 0.4.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/finderpathbar-DEV-001-workflow-0.4.2.md）
+- 模块：工作流
+- 工作区：FinderPathBar（20ebba16-29e9-4082-a6cc-7309a5d1f44e）
+- 会话：session-c10f51b0-7041-4428-ab3a-eb4bbd6cf475（[awf] FinderPathBar · 工作流）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：aca0622 chore: 升级工作流框架到 0.4.2
+- 回报节选：任务完成。按任务文件要求的回报格式汇报： --- ## 任务回报：finderpathbar-DEV-001 升级工作流框架到 0.4.2 **状态**：✅ 已完成（框架升级至 0.4.2，已本地提交，未 push，工作树干净） **变更文件**（12 个，commit `aca0622`）： - 修改（9）：[AGENTS.md](AGENTS.md)（受控区块重渲染，digest `840b8be7`）、[agent-workflow/README.md](agent-workflow/README.md)、[agent-workflow/bin/awf](agent-workflow/b…（已截断，完整回报见会话）
+
