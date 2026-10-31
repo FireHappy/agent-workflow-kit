@@ -132,5 +132,50 @@ else
   ok "--no-register 不写入索引"
 fi
 
+# 10. 受控区块缺 awf:end：bootstrap 必须失败且不改写文件
+cp "$PROJ/AGENTS.md" "$PROJ/AGENTS.full"
+grep -v 'awf:end' "$PROJ/AGENTS.full" > "$PROJ/AGENTS.md" || true
+before_size="$(wc -c < "$PROJ/AGENTS.md" | tr -d ' ')"
+if ( cd "$PROJ" && ./agent-workflow/bin/awf bootstrap >/dev/null 2>&1 ); then
+  bad "缺少 awf:end 时 bootstrap 未失败"
+else
+  ok "缺少 awf:end 时 bootstrap 失败"
+fi
+after_size="$(wc -c < "$PROJ/AGENTS.md" | tr -d ' ')"
+[ "$before_size" = "$after_size" ] && ok "bootstrap 失败时不改写文件" || bad "bootstrap 失败时仍改写了文件"
+mv "$PROJ/AGENTS.full" "$PROJ/AGENTS.md"
+
+# 11. 非法任务 ID 必须被 check 发现
+cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'AWFBAD'
+# 正在开发
+
+## [DEV_001] 非法 ID
+
+| 字段 | 内容 |
+|------|------|
+| 状态 | active |
+| Owner | agent |
+
+### 下一步
+改成 DEV-001。
+AWFBAD
+if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
+  bad "非法任务 ID 未被 check 发现"
+else
+  ok "非法任务 ID 被 check 发现"
+fi
+cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'AWFCLEAN'
+# 正在开发
+
+（暂无进行中任务）
+AWFCLEAN
+
+# 12. 派发器：无效目标应返回退出码 2（门失败）
+set +e
+"$KIT_DIR/bin/awf-dispatch" no-such-project /dev/null >/dev/null 2>&1
+dispatch_code=$?
+set -e
+[ "$dispatch_code" = "2" ] && ok "awf-dispatch 门失败退出码为 2" || bad "awf-dispatch 退出码为 $dispatch_code（期望 2）"
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

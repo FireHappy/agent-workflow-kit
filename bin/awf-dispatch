@@ -493,7 +493,8 @@ def git_head(target: Path) -> str:
 
 def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
               workspace: dict, status: str, final_text: str, task: Path) -> str:
-    excerpt = re.sub(r"\s+", " ", final_text or "").strip()[:300]
+    flat = re.sub(r"\s+", " ", final_text or "").strip()
+    excerpt = flat[:300] + ("…（已截断，完整回报见会话）" if len(flat) > 300 else "")
     workspace_title = (workspace or {}).get("title", "未知工作区")
     workspace_id = (workspace or {}).get("workspaceId", "-")
     return (
@@ -544,14 +545,10 @@ def preflight(target: Path, args, need_channel: bool):
             workspace = api.workspace_create(target)
             print(f"已登记工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）")
     if workspace is None:
-        if not (args.dry_run and args.add_workspace):
-            raise DispatchError(
-                f"G2 工作区失败：{target} 未登记为 DSH 工作区；"
-                "在 GUI「添加工作区」后重试，或加 --add-workspace"
-            )
-        emit(f"G4 通道：ok（{api.base}）", args.json)
-        result["api"] = api
-        return result
+        raise DispatchError(
+            f"G2 工作区失败：{target} 未登记为 DSH 工作区；"
+            "在 GUI「添加工作区」后重试，或加 --add-workspace（dry-run 不登记，因此同样失败）"
+        )
 
     result["workspace"] = workspace
     result["api"] = api
@@ -714,6 +711,7 @@ def main(argv=None) -> int:
             "  awf-dispatch demo02 task.md --dry-run\n"
             "  awf-dispatch demo02 task.md --headless\n"
             "  awf-dispatch demo02 task.md --handoff\n"
+            "\n退出码：0 成功；2 前置门或派发失败；1 未预期异常。\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

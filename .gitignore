@@ -14,3 +14,6 @@ __pycache__/
 # 编辑器
 .vscode/
 .idea/
+
+# AgentTeams 运行时状态（team.json / inbox）
+.agent-teams/

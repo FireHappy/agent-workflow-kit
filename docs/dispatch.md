@@ -29,7 +29,7 @@
 DSH 适配器（Python 3 标准库，不写第三方依赖）：
 
 ```sh
-./agent-workflow/bin/awf-dispatch <别名|目录> dispatch/tasks/<ID>-<slug>.md
+./agent-workflow/bin/awf-dispatch <别名|目录> dispatch/tasks/<项目>-<ID>-<slug>.md
 ```
 
 它会：

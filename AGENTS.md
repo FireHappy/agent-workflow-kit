@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:9708d6b0 -->
+<!-- awf:begin v1 digest:1f066d4d -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -10,17 +10,17 @@
    - 功能开发 / 重构 / 优化 → `agent-workflow/workflows/dev.md`
    - 崩溃 / 报错 / 行为异常 → `agent-workflow/workflows/debug.md`
    - 文档 / 架构分析 → `agent-workflow/workflows/docs.md`
-   - 开发完成待审 → `agent-workflow/workflows/review.md`
+   - 开发完成待审（dev 子流程，随 dev 一起加载） → `agent-workflow/workflows/review.md`
    - 跨项目派发 / 交接 → `agent-workflow/workflows/cross-project.md`
 3. 有自己名下 `active/verify/review/blocked` 的任务先恢复；没有则从 `tasks/<type>/todo.md` 认领
 4. 动手前把任务写入 `tasks/<type>/current.md`：状态、Owner、验收标准、下一步
-5. 收尾：`./agent-workflow/check_workflow.sh` 通过 → 更新 status → 归档 → 本地 commit
+5. 收尾：归档 → `./agent-workflow/check_workflow.sh` 通过 → `./agent-workflow/bin/awf status` → 本地 commit
 
 ## 铁律
 
 - 状态只写 `active` / `blocked` / `review` / `verify` / `handoff`
 - 一个任务块只有一个 Owner；并行任务必须写清修改范围
-- 不改 `status.md` 不算完成；不跑通过校验不算归档
+- 归档后必须跑通过校验；`status.md` 必须由 `awf status` 刷新后才算完成
 - 只允许本地 commit，**禁止 push**；推送与合并由用户明确触发
 - 未验证的判断只能写“待确认”，不能写成结论
 - 验证命令不可用时，必须在任务块里写明阻塞原因，并置为 `blocked`
@@ -33,7 +33,7 @@
 
 ## 并行
 
-- 可并行单元：生成器与模板(bin/ templates/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
+- 可并行单元：生成器与模板(bin/ templates/), 工作流规范(agent-workflow/README.md agent-workflow/workflows/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
 - 共享写点（任何并行单元都不得同时修改）：agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, agent-workflow/workflows/cross-project.md
 - 并行时账本只由主线写；子任务返回结果，由主线合并进 `current.md`
 
@@ -44,7 +44,6 @@
 - 若索引里还没有本仓库（clone/移动后），运行 `./agent-workflow/bin/awf register`；`bootstrap` 会自动刷新已登记项目的路径
 - 派发前先确认目标项目有工作流且已登记为当前 harness 的工作区；满足后优先在目标工作区的会话中执行，不要默认 headless
 - DSH 适配：`./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
-- 本仓库相关项目：`agent-workflow/neighbors.tsv`（不存在则忽略）
 - 不要在调度方会话里直接改目标仓库；写入由目标 agent 在目标工作区完成
 
 ## 项目事实

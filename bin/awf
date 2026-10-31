@@ -185,6 +185,12 @@ write_agents() {
   fi
 
   if grep -q '<!-- awf:begin' "$f"; then
+    local nb ne
+    nb="$(grep -c '<!-- awf:begin' "$f" || true)"
+    ne="$(grep -c '<!-- awf:end' "$f" || true)"
+    if [ "$nb" != "$ne" ] || [ "$nb" -gt 1 ]; then
+      die "AGENTS.md 受控区块不完整（begin $nb / end $ne）：请手工补成一对 <!-- awf:begin --> … <!-- awf:end --> 后重试；本次未改写文件"
+    fi
     awk -v bf="$block" '
       BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
       /<!-- awf:begin/ { printf "%s", blk; skip = 1; next }
@@ -580,12 +586,19 @@ check_current_file() {
       else printf "ok    %s [%s] 字段完整\n", wf, id
       id = ""
     }
+    incomment { if ($0 ~ /-->/) incomment = 0; next }
+    /<!--/ && !/-->/ { incomment = 1; next }
     index($0, "## [") == 1 {
       flush()
       line = substr($0, 5)
       c = index(line, "] ")
       id = substr(line, 1, c - 1)
-      if (id !~ /^[A-Z]+-[0-9]+$/) id = ""
+      if (c == 0 || id !~ /^[A-Z]+-[0-9]+$/) {
+        printf "FAIL  %s 任务块 ID 非法：%s（应为 类型-数字，如 DEV-001）\n", wf, (c > 0 ? id : line)
+        bad++
+        id = ""
+        next
+      }
       st = 0; ow = 0; nx = 0
       next
     }
@@ -624,6 +637,16 @@ agent-workflow/templates/AGENTS.md.tmpl
       fails=$((fails + 1))
     fi
   done
+
+  local nb ne
+  nb="$(grep -c '<!-- awf:begin' AGENTS.md || true)"
+  ne="$(grep -c '<!-- awf:end' AGENTS.md || true)"
+  if [ "$nb" = "1" ] && [ "$ne" = "1" ]; then
+    say "ok    AGENTS.md 受控区块标记成对"
+  else
+    say "FAIL  AGENTS.md 受控区块标记不成对（begin $nb / end $ne）"
+    fails=$((fails + 1))
+  fi
 
   local actual recorded
   actual="$(hash_files agent-workflow/project.yaml agent-workflow/templates/AGENTS.md.tmpl)"

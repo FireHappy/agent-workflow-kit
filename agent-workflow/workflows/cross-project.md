@@ -27,7 +27,7 @@
 
 ## 任务包
 
-派发前写成一份任务文件（如 `dispatch/tasks/<ID>-<slug>.md`），至少包含：
+派发前写成一份任务文件（如 `dispatch/tasks/<项目>-<ID>-<slug>.md`），至少包含：
 
 - 目标项目与任务 ID；类型 `dev|debug|docs`
 - 一句话目标、修改范围、明确不做什么
@@ -83,8 +83,10 @@ DSH 下用 `awf-dispatch`：
 
 1. 回合结束后检查目标 agent 的回报是否包含五项契约。
 2. 在目标仓库核对 `git log -1`、`git status`、`./agent-workflow/check_workflow.sh`。
-3. 调度方记录：会话 ID、任务文件、状态、目标 HEAD、时间。
+3. 调度方记录：会话 ID、任务文件、状态、目标 HEAD、时间；`dispatch/` 随调度方仓库本地 commit。
 4. 用户后续细节优先回到同一会话；只有新目标或新任务才重新派发。
+
+> 派发活动不写入目标项目账本；调度方的 `awf status` 只反映自身登记的任务，需在收尾时补跑一次。
 
 ---
 
