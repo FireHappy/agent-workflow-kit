@@ -30,5 +30,5 @@
 | dev | DEV-015 | P1 | awf 全局索引写入并发安全：$AGENTS_HOME 互斥锁（flock / mkdir 自旋 + 陈旧回收）串行化读改写、按 P_ID 合并、test/registry-concurrency.sh 并发回归 | 2026-11-01 |
 | dev | DEV-014 | P2 | P2 后续批次：RT-3 区间归因 / SKILL.md 同步 / 死代码清理 / headless 回退 / 模板措辞 + F5 正则 | 2026-11-01 |
 
-*最后更新：2026-11-01 20:20*
+*最后更新：2026-11-01 21:48*
 <!-- awf:status:end -->

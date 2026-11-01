@@ -1,7 +1,10 @@
 // dsh-awf-dashboard — 客户端（ModuleLoader chunk）
 //
-// 挂载：右侧边栏「工作流进度」页签。数据来自服务端只读路由
-//   /awf/projects（项目索引）与 /awf/ledger?path=...（账本看板）。
+// 挂载：右侧边栏「Agent Workflow」页签。数据来自服务端路由
+//   GET  /awf/projects（项目索引）与 /awf/ledger?path=...（账本看板）
+//   POST /awf/init（未初始化引导）、POST /awf/task/start（开始任务）
+//   GET  /awf/archive?path=...&id=...（归档只读查看）
+//   POST /awf/task/delete/dry-run / POST /awf/task/delete/execute（删除回退，二次确认）
 // 纯手写 chunk（无构建步骤）：factory(require) 只 require 宿主提供的外部模块。
 //
 // 默认锚定（DEV-019）：
@@ -13,6 +16,10 @@
 //     3) 会话快照 cwd / better-sidebar 通道注入的 scope.cwd
 //   再把根目录与 /awf/projects 索引的 path 匹配（精确或最长前缀）自动选中并加载
 //   账本。localStorage 中的用户手动选择（dsh-awf-dashboard.project）优先于自动检测。
+//   锚定结果（workspaceRoot）随写接口上报：未初始化项目不在全局索引里，靠它放行。
+//
+// 写接口（安全）：全部走服务端认证围栏 + 路径白名单（绝对路径 ∧（全局索引 ∨
+//   workspaceRoot）），服务端零外部命令。删除任务必须弹框二次确认后才调 execute。
 //
 // UI 约束：纯 h() 手写、无外部依赖、颜色全部使用 DSH 主题变量（--dsw-alias-* 与
 //   --dsl-*，白天/暗色自动跟随），不引入构建步骤。
@@ -61,7 +68,7 @@ window.__ModuleLoader__.load({
       active: { label: '进行中', color: 'var(--dsw-alias-state-business-primary, #4f8ef7)' },
       review: { label: '待复核', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
       verify: { label: '验证', color: 'var(--dsw-alias-state-success-primary, #3ecf8e)' },
-      blocked: { label: '阻塞', color: 'var(--dsw-alias-state-error-primary, #e5484d)' },
+      blocked: { label: '已暂停', color: 'var(--dsw-alias-state-error-primary, #e5484d)' },
       handoff: { label: '交接', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
       archived: { label: '已归档', color: 'var(--dsw-alias-label-tertiary, #b3bac4)' },
     }
@@ -69,6 +76,91 @@ window.__ModuleLoader__.load({
       P0: 'var(--dsw-alias-state-error-primary, #e5484d)',
       P1: 'var(--dsw-alias-state-warn-primary, #e8a33d)',
       P2: 'var(--dsw-alias-state-business-primary, #4f8ef7)',
+    }
+
+    // ---- 工作流步骤条（前端静态定义，纯展示；后端不动） ----------------------
+    // 各类型的真实流程步骤（与 agent-workflow/workflows/{dev,debug,docs}.md 对应）
+    const WORKFLOW_STEPS = {
+      dev: [
+        { key: 'claimed', label: '认领' },
+        { key: 'plan', label: '方案' },
+        { key: 'impl', label: '实现' },
+        { key: 'verify', label: '验证' },
+        { key: 'review', label: 'Review' },
+        { key: 'archived', label: '归档' },
+      ],
+      debug: [
+        { key: 'claimed', label: '认领' },
+        { key: 'diagnose', label: '选择诊断方式' },
+        { key: 'collect', label: '收集证据' },
+        { key: 'hypothesis', label: '验证假设' },
+        { key: 'fix', label: '修复与回归' },
+        { key: 'archived', label: '归档' },
+      ],
+      docs: [
+        { key: 'claimed', label: '认领' },
+        { key: 'outline', label: '大纲与核实' },
+        { key: 'write', label: '撰写' },
+        { key: 'review', label: '审阅' },
+        { key: 'archived', label: '归档' },
+      ],
+    }
+
+    // 状态 → 阶段 key（按类型；active=主工作阶段、review=Review/审阅、verify=验证等）
+    const STATUS_STAGE = {
+      active: { dev: 'impl', debug: 'collect', docs: 'write' },
+      verify: { dev: 'verify', debug: 'hypothesis', docs: 'review' },
+      review: { dev: 'review', debug: 'fix', docs: 'review' },
+      handoff: { dev: 'review', debug: 'fix', docs: 'review' },
+      // blocked：无独立阶段，停在 active 对应阶段并标注「暂停」
+    }
+
+    /**
+     * 由任务字段推断当前所在工作流阶段（纯函数，可单测）。
+     * @returns {null | {steps, index, paused}} steps=该类型步骤数组、
+     *   index=当前阶段下标（0..len-1）、paused=是否处于暂停（blocked）
+     */
+    function inferWorkflowStage(t) {
+      const type = t && t.type
+      const steps = WORKFLOW_STEPS[type]
+      if (!steps || !steps.length) return null
+      const status = (t && t.status) || 'active'
+      const map = STATUS_STAGE[status] || STATUS_STAGE.active
+      const key = (map && map[type]) || STATUS_STAGE.active[type]
+      const index = steps.findIndex((s) => s.key === key)
+      return {
+        steps,
+        index: index < 0 ? 0 : index,
+        paused: status === 'blocked',
+        status,
+      }
+    }
+
+    // 卡片/行 hover 质感（AgentTeams 团队面板风格）；主题令牌兜底，纯手写 h() 下
+    // 用静态 <style> 注入一次（inline style 无 :hover 能力）
+    const AWF_HOVER_CSS =
+      '.awf-card{transition:border-color .15s ease,box-shadow .15s ease,transform .12s ease}' +
+      '.awf-card:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary,#5b8cff) 45%,transparent);' +
+      'box-shadow:0 4px 14px color-mix(in srgb,rgba(8,12,22,.16) 60%,transparent);transform:translateY(-1px)}' +
+      '.awf-row{transition:background .12s ease}' +
+      '.awf-row:hover{background:color-mix(in srgb,var(--dsw-alias-interactive-bg-hover,rgba(120,126,140,.08)) 60%,transparent)}' +
+      '.awf-badge-row{transition:gap .12s ease}'
+
+    // 回退文件改动状态徽标（dry-run 返回 {path, status}）
+    const FILE_STATUS_STYLE = {
+      modified: { label: '已修改', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
+      untracked: { label: '未跟踪', color: 'var(--dsw-alias-brand-primary, #4f8ef7)' },
+      added: { label: '新增', color: 'var(--dsw-alias-state-success-primary, #3ecf8e)' },
+      deleted: { label: '已删除', color: 'var(--dsw-alias-state-error-primary, #e5484d)' },
+      staged: { label: '已暂存', color: 'var(--dsw-alias-state-success-primary, #3ecf8e)' },
+      unmodified: { label: '未修改', color: 'var(--dsw-alias-label-tertiary, #b3bac4)' },
+    }
+
+    // 无法回退的说明文案（dry-run reason → 用户可读）
+    const DELETE_REASON_TEXT = {
+      'not-git': '该项目不是 git 仓库，无法回退未提交修改。',
+      'no-scope': '任务块未记录修改范围，无法确定需要回退的文件。',
+      'clean': '修改范围内没有未提交的修改，无需回退。',
     }
 
     const D = (v, fb) => (v === undefined || v === null ? fb : v)
@@ -94,6 +186,42 @@ window.__ModuleLoader__.load({
       fontWeight: 600, lineHeight: '16px', whiteSpace: 'nowrap',
       transition: 'background .15s ease, border-color .15s ease',
     })
+
+    /** 危险实心按钮：删除并回退修改（destroy 语义）。 */
+    const dangerSolid = {
+      fontSize: 11.5, padding: '5px 14px', borderRadius: 8, cursor: 'pointer',
+      border: '1px solid ' + C.error, background: C.error, color: '#fff',
+      fontWeight: 700, lineHeight: '18px', whiteSpace: 'nowrap',
+      transition: 'opacity .15s ease',
+    }
+
+    /** 危险文字按钮：当前任务卡上的「删除」。 */
+    const dangerTextStyle = {
+      fontSize: 10.5, padding: '1px 10px', borderRadius: 999, cursor: 'pointer',
+      border: '1px solid color-mix(in srgb, ' + C.error + ' 45%, transparent)',
+      background: 'color-mix(in srgb, ' + C.error + ' 8%, transparent)',
+      color: C.error, fontWeight: 600, lineHeight: '15px', whiteSpace: 'nowrap',
+    }
+
+    /** 表单输入（含 select）：主题令牌 + 紧凑尺寸。 */
+    const inputStyle = {
+      fontSize: 11.5, padding: '3px 8px', borderRadius: 6,
+      background: C.surface, color: C.text,
+      border: '1px solid ' + C.border, outline: 'none',
+    }
+
+    /** 卡片内小型文字操作按钮（编辑 / 暂停 / 继续）。 */
+    const tinyBtn = (busy) => Object.assign(buttonStyle(), {
+      fontSize: 10, padding: '1px 9px',
+      opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer',
+    })
+
+    const overlayStyle = {
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20, boxSizing: 'border-box',
+    }
 
     /** 语义色胶囊：彩色文字 + 同色系淡底 + 描边；可选前置圆点。 */
     function Pill({ color, children, dot }) {
@@ -132,6 +260,40 @@ window.__ModuleLoader__.load({
           : null)
     }
 
+    /** 模态弹层外壳：遮罩 + 居中卡片 + 标题栏 + 关闭按钮。 */
+    function ModalShell({ title, onClose, children, width }) {
+      return h('div', {
+        style: overlayStyle,
+        onClick: (e) => { if (e.target === e.currentTarget && typeof onClose === 'function') onClose() },
+      },
+        h('div', {
+          style: {
+            width: width || 460, maxWidth: 'calc(100vw - 40px)', maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column',
+            background: 'var(--dsw-alias-bg-layer-3, #ffffff)',
+            border: '1px solid ' + C.border, borderRadius: C.radius,
+            boxShadow: '0 12px 40px rgba(0,0,0,0.35)', overflow: 'hidden',
+          },
+        },
+          h('div', {
+            style: {
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              padding: '9px 14px', borderBottom: '1px solid ' + C.hairline, flexShrink: 0,
+            },
+          },
+            h('div', { style: { fontSize: 13.5, fontWeight: 800, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
+            h('button', {
+              onClick: onClose,
+              style: Object.assign(buttonStyle(), {
+                padding: '0 7px', fontSize: 11, lineHeight: '17px', flexShrink: 0,
+                background: 'transparent', borderColor: 'transparent',
+              }),
+            }, '✕')),
+          h('div', {
+            style: { padding: '12px 14px', overflowY: 'auto', fontSize: 12.5, color: C.text },
+          }, children)))
+    }
+
     function fmtTime(iso) {
       if (!iso) return '—'
       const d = new Date(iso)
@@ -139,12 +301,40 @@ window.__ModuleLoader__.load({
       return `${d.getMonth() + 1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
     }
 
-    async function getJson(url) {
-      const r = await fetch(url, { cache: 'no-store' })
-      if (!r.ok) throw new Error('HTTP ' + r.status)
-      const data = await r.json()
-      if (data && data.ok === false) throw new Error((data.error && data.error.message) || '请求失败')
+    // ---- 请求封装（fetchImpl 可注入，供测试 mock） --------------------------
+
+    /**
+     * 解析 fetch 响应：HTTP 非 2xx 或 {ok:false} 一律抛错。
+     * 错误对象带 .code / .status / .message（优先取 body error 字段，回退 HTTP 状态）。
+     */
+    async function parseResponse(r) {
+      let data = null
+      try { data = await r.json() } catch { /* 非 JSON 响应 */ }
+      if (!r.ok || (data && data.ok === false)) {
+        const info = (data && data.error) || {}
+        const err = new Error(info.message || info.code || 'HTTP ' + r.status)
+        err.code = info.code || ''
+        err.status = r.status
+        throw err
+      }
       return data
+    }
+
+    async function getJson(url, fetchImpl) {
+      const f = fetchImpl || fetch
+      const r = await f(url, { cache: 'no-store' })
+      return parseResponse(r)
+    }
+
+    async function postJson(url, body, fetchImpl) {
+      const f = fetchImpl || fetch
+      const r = await f(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+        cache: 'no-store',
+      })
+      return parseResponse(r)
     }
 
     function readLocalSelection() {
@@ -219,6 +409,199 @@ window.__ModuleLoader__.load({
       return resolveAnchorRoot(workspacesSnap, sessionSnap, sessionsSnap, props.scope || null, sessionId)
     }
 
+    // ---- 未初始化判定 / todo 行 / 删除回退视图（纯函数，导出供测试） --------
+
+    /**
+     * 判定项目是否未初始化：
+     *   - ledger 响应带 uninitialized / doesNotExist 标识（后端契约）；
+     *   - 否则缺省回退：/awf/ledger 报错且错误含 project.yaml / 未初始化 字样
+     *     （服务端对非项目根目录的 400 bad-request）。
+     * @param {object|null} data /awf/ledger 的 ok 响应体
+     * @param {object|null} err getJson 抛出的错误
+     * @returns {boolean}
+     */
+    function detectNotInitialized(data, err) {
+      if (data) {
+        const L = data.ledger
+        if (L && (L.uninitialized === true || L.doesNotExist === true)) return true
+        if (data.uninitialized === true || data.doesNotExist === true) return true
+      }
+      if (err) {
+        const code = err.code || ''
+        const msg = String(err.message || '')
+        if (code === 'not-initialized' || code === 'uninitialized') return true
+        if (msg.indexOf('project.yaml') !== -1 || msg.indexOf('未初始化') !== -1) return true
+      }
+      return false
+    }
+
+    /**
+     * 收集「未开始任务」可操作列表（todo 表格行）。
+     * 优先读 ledger.todoRows（[{type, rows:[{id,prio,desc,date}]}]，后端契约）；
+     * 缺省回退读 ledger.todo[i].rows；都没有则返回空数组（渲染时仅保留进度条）。
+     * @param {object|null} ledger
+     * @returns {Array<{type:string,id:string,prio:string,desc:string,date:string}>}
+     */
+    function collectTodoRows(ledger) {
+      const out = []
+      const push = (type, rows) => {
+        if (!Array.isArray(rows)) return
+        for (const r of rows) {
+          if (!r || typeof r.id !== 'string' || !r.id) continue
+          out.push({
+            type: (type || '') + '',
+            id: r.id,
+            prio: r.prio || '',
+            desc: r.desc || '',
+            date: r.date || '',
+          })
+        }
+      }
+      if (!ledger) return out
+      if (Array.isArray(ledger.todoRows)) {
+        for (const item of ledger.todoRows) push(item && item.type, item && item.rows)
+        return out
+      }
+      if (Array.isArray(ledger.todo)) {
+        for (const item of ledger.todo) push(item && item.type, item && item.rows)
+      }
+      return out
+    }
+
+    /**
+     * 把 dry-run 响应规整为删除确认框视图模型：
+     *   {rollbackable:boolean, files:[{path,status}], reason:string}
+     * files 只保留有 path 的条目；rollbackable 缺省 = 有文件且服务端未否定。
+     * @param {object|null} dryRun /awf/task/delete/dry-run 的 dryRun 字段
+     */
+    function buildDeleteView(dryRun) {
+      const d = dryRun || {}
+      const files = (Array.isArray(d.files) ? d.files : [])
+        .filter((f) => f && typeof f.path === 'string' && f.path)
+        .map((f) => ({ path: f.path, status: String(f.status || 'modified') }))
+      const rollbackable = !!(d.rollbackable && files.length > 0)
+      let reason = ''
+      if (!rollbackable) {
+        reason = d.reason || (files.length === 0 ? 'no-scope' : 'unknown')
+      }
+      return { rollbackable, files, reason }
+    }
+
+    /** 无法回退原因 → 用户可读文案。 */
+    function deleteReasonText(reason) {
+      if (reason && DELETE_REASON_TEXT[reason]) return DELETE_REASON_TEXT[reason]
+      return reason
+        ? '无法自动回退未提交修改：' + reason + '。'
+        : '无法自动回退未提交修改。'
+    }
+
+    /** 文件改动状态徽标文案。 */
+    function fileStatusLabel(status) {
+      const st = FILE_STATUS_STYLE[status]
+      return st ? st.label : (status || '已修改')
+    }
+
+    /**
+     * 删除任务回退流程（前端契约，fetchImpl 可注入）：
+     *   1) POST /awf/task/delete/dry-run → {ok, dryRun:{rollbackable, files:[{path,status}], reason}}
+     *   2) 把 dryRun 交给 confirm 回调（UI 展示确认框），用户返回
+     *      'rollback' | 'ledger-only' | null（取消）
+     *   3) 仅当用户确认（非 null）后才 POST /awf/task/delete/execute（mode=用户选择）
+     * @param {object} o {path, type, id, workspaceRoot?, confirm, fetchImpl?}
+     * @returns {Promise<{cancelled:boolean, dryRun?:object, result?:object}>}
+     */
+    async function runDeleteFlow(o) {
+      const { path, type, id, workspaceRoot, confirm, fetchImpl } = o || {}
+      const dryRunResp = await postJson('/awf/task/delete/dry-run',
+        { path, type, id, workspaceRoot }, fetchImpl)
+      const dryRun = (dryRunResp && dryRunResp.dryRun) || {}
+      const choice = typeof confirm === 'function' ? await confirm(dryRun) : null
+      if (!choice) return { cancelled: true, dryRun }
+      const result = await postJson('/awf/task/delete/execute',
+        { path, type, id, mode: choice, workspaceRoot }, fetchImpl)
+      return { cancelled: false, dryRun, result }
+    }
+
+    // ---- t5：todo / 当前任务 CRUD 纯函数（导出供测试） -----------------------
+
+    /** 任务状态可选值（铁律：只写 active/blocked/review/verify/handoff）。 */
+    const STATUS_OPTIONS = ['active', 'blocked', 'review', 'verify', 'handoff']
+
+    /** 服务端错误码 → 用户可读文案（code → 前缀；bad-request/internal 追加服务端明细）。 */
+    const ERROR_COPY = {
+      'not-found': '未找到目标（可能已被移除，请刷新后重试）。',
+      'duplicate': '已存在同 ID 的待办行，请换一个 ID。',
+      'invalid-id': '任务 ID 需为 TYPE-xxx 格式（如 DEV-001）。',
+      'invalid-prio': '优先级需为 P0–P3。',
+      'not-git-repo': '该目录不是 git 仓库，无法查询/回退修改。',
+      'nothing-to-revert': '修改范围为空或无未提交改动，没有可回退的文件。',
+      'path-not-allowed': '路径不在白名单：必须位于全局项目索引或当前工作区根。',
+      'forbidden': '无权限：认证未通过，请先登录。',
+      'already-initialized': '该项目已初始化过工作流，无需重复初始化。',
+      'bad-request': '请求不合法：',
+      'internal': '服务端处理失败：',
+    }
+
+    /**
+     * 错误 → 友好文案。已知错误码用 ERROR_COPY，未知回退 fallback + message。
+     * @param {Error} e getJson/postJson 抛出的错误（带 .code/.message）
+     * @param {string} [fallback] 未知错误的前缀
+     */
+    function apiErrorText(e, fallback) {
+      const code = e && e.code
+      const msg = String((e && e.message) || '').trim()
+      if (code && ERROR_COPY[code]) {
+        const base = ERROR_COPY[code]
+        if (code === 'bad-request' || code === 'internal') return base + msg
+        if (msg) return base + '（' + msg + '）'
+        return base
+      }
+      return (fallback || '操作失败') + '：' + (msg || code || String(e))
+    }
+
+    /**
+     * 调用 POST /awf/todo（todo CRUD）。
+     * body: {path, type, action: add|update|delete, row:{id, 优先级?, 描述?, date?}, workspaceRoot?}
+     */
+    async function runTodoAction(o) {
+      const { path, type, action, row, workspaceRoot, fetchImpl } = o || {}
+      return postJson('/awf/todo',
+        { path, type, action, row: row || {}, workspaceRoot }, fetchImpl)
+    }
+
+    /**
+     * 调用 POST /awf/task（当前任务 update/pause/resume）。
+     * body: {path, type, id, action, fields?, workspaceRoot?}；update 必须带非空 fields。
+     */
+    async function runTaskAction(o) {
+      const { path, type, id, action, fields, workspaceRoot, fetchImpl } = o || {}
+      const body = { path, type, id, action, workspaceRoot }
+      if (action === 'update') body.fields = fields || {}
+      return postJson('/awf/task', body, fetchImpl)
+    }
+
+    /**
+     * 调用 GET /awf/source（只读 .md 源文件）。
+     * 返回 {ok:true, source:{type,file,absPath,content}}；路由未就绪（404）抛错
+     * code='not-found'，由调用方映射「源文件接口未就绪」。
+     */
+    async function fetchSource(o) {
+      const { path, type, file, fetchImpl } = o || {}
+      const q = new URLSearchParams({ path: path || '', type: type || '', file: file || '' }).toString()
+      return getJson('/awf/source?' + q, fetchImpl)
+    }
+
+    /** 复制文本：优先 clipboard API，缺省（测试/非安全上下文）回退无操作并置 copied。 */
+    function copyText(text, onDone) {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(String(text || '')).then(
+          () => onDone && onDone(true),
+          () => onDone && onDone(false))
+        return
+      }
+      onDone && onDone(true)
+    }
+
     // ---- 看板组件 ---------------------------------------------------------
 
     /** todo 进度条：圆角轨道 + 渐变填充；100% 完成态换成功渐变并带 ✓。 */
@@ -249,43 +632,162 @@ window.__ModuleLoader__.load({
         })))
     }
 
-    /** 当前任务卡：ID / 类型·状态·优先级徽章 / 标题 / Owner / 更新。 */
-    function TaskCard({ t }) {
+    /**
+     * 当前任务卡：徽章行 / 标题 / Owner·更新 / 操作按钮（编辑 · 暂停/继续 · 删除）。
+     * 编辑时原位展开表单改字段（优先级/状态/Owner/修改范围/描述）。
+     */
+    function TaskCard({ t, onDelete, deleting, onEdit, editing, editForm, onEditChange, onEditSave, onEditCancel, onPause, onResume, working, onOpenSource }) {
       const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
       const prioColor = PRIO_COLOR[t.prio] || C.faint
-      return h('div', { style: cardStyle },
-        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 5 } },
+      const delBusy = !!deleting
+      const work = working || {}
+      const busy = delBusy || (work.id === t.id)
+      const blocked = t.status === 'blocked'
+      const ef = editForm || {}
+      const editBusy = !!ef.busy
+
+      const badgeRow = h('div', { className: 'awf-badge-row', style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' } },
+        h(Pill, { color: type.color }, type.label),
+        StatusBadge({ status: t.status }),
+        t.prio ? h(Pill, { color: prioColor }, t.prio) : null,
+        // Owner 也入徽章行：类型 × 状态 × 优先级 × Owner 多徽章布局（AgentTeams 风格）
+        t.owner
+          ? h(Pill, { color: C.accent, dot: true },
+              h('span', { title: 'Owner', style: { maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis' } }, t.owner))
+          : null)
+
+      // ---- 编辑模式：原位表单（优先级 / 状态 / Owner / 描述 / 修改范围）
+      if (editing) {
+        return h('div', { className: 'awf-card', style: Object.assign({}, cardStyle, { padding: '10px 12px 9px' }) },
+          h('div', {
+            style: {
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+              paddingBottom: 6, marginBottom: 7,
+              borderBottom: '1px solid ' + C.hairline,
+            },
+          },
+            h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 12, color: C.text } }, t.id || '?'),
+            badgeRow),
+          h('div', { style: row({ gap: 6, flexWrap: 'wrap' }) },
+            h('select', {
+              value: ef.prio || t.prio || 'P2', disabled: editBusy,
+              onChange: (e) => onEditChange('prio', e.target.value), style: inputStyle,
+            }, ['P0', 'P1', 'P2', 'P3'].map((p) => h('option', { key: p, value: p }, p))),
+            h('select', {
+              value: ef.status || t.status || 'active', disabled: editBusy,
+              onChange: (e) => onEditChange('status', e.target.value), style: inputStyle,
+            }, STATUS_OPTIONS.map((s) => h('option', { key: s, value: s }, s))),
+            h('input', {
+              value: ef.owner || '', placeholder: 'Owner', disabled: editBusy,
+              onChange: (e) => onEditChange('owner', e.target.value),
+              style: Object.assign({}, inputStyle, { width: 96 }),
+            })),
+          h('input', {
+            value: ef.desc || '', placeholder: '描述（任务块标题）', disabled: editBusy,
+            onChange: (e) => onEditChange('desc', e.target.value),
+            style: Object.assign({}, inputStyle, { width: '100%', marginTop: 6, boxSizing: 'border-box' }),
+          }),
+          h('input', {
+            value: ef.scope || '', placeholder: '修改范围（如 lib/client.js，逗号分隔；留空不变）', disabled: editBusy,
+            onChange: (e) => onEditChange('scope', e.target.value),
+            style: Object.assign({}, inputStyle, { width: '100%', marginTop: 6, boxSizing: 'border-box' }),
+          }),
+          ef.error
+            ? h('div', { style: { marginTop: 6, fontSize: 11, color: C.error, wordBreak: 'break-all' } }, '⚠️ ' + ef.error)
+            : null,
+          h('div', { style: row({ gap: 6, justifyContent: 'flex-end', marginTop: 8 }) },
+            typeof onOpenSource === 'function'
+              ? h('button', {
+                  onClick: onOpenSource, disabled: editBusy, title: '只读查看 current.md 源文件',
+                  style: tinyBtn(editBusy),
+                }, '打开源文件')
+              : null,
+            h('button', {
+              onClick: editBusy ? undefined : onEditSave, disabled: editBusy,
+              style: Object.assign(buttonStyle(true), { opacity: editBusy ? 0.55 : 1, cursor: editBusy ? 'default' : 'pointer' }),
+            }, editBusy ? '保存中…' : '保存'),
+            h('button', { onClick: onEditCancel, disabled: editBusy, style: buttonStyle() }, '取消')))
+      }
+
+      // ---- 正常模式
+      return h('div', { className: 'awf-card', style: Object.assign({}, cardStyle, { padding: '10px 12px 9px' }) },
+        h('div', {
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+            paddingBottom: 6, marginBottom: 6,
+            borderBottom: '1px solid ' + C.hairline,
+          },
+        },
           h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 12, color: C.text } }, t.id || '?'),
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' } },
-            h(Pill, { color: type.color }, type.label),
-            StatusBadge({ status: t.status }),
-            t.prio ? h(Pill, { color: prioColor }, t.prio) : null)),
+          badgeRow),
         h('div', { style: { fontSize: 12.5, fontWeight: 600, color: C.text, marginBottom: 5, lineHeight: 1.45 } },
           t.title || '（无标题）'),
-        h('div', { style: Object.assign(row({ gap: 8 }), { flexWrap: 'wrap', fontSize: 11, color: C.dim }) },
-          t.owner
-            ? h('span', { style: row({ gap: 4 }) },
-                h('span', {
-                  style: {
-                    width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
-                    background: 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
-                    color: C.accent, fontSize: 9, fontWeight: 700, display: 'inline-flex',
-                    alignItems: 'center', justifyContent: 'center',
-                  },
-                }, (t.owner[0] || '?').toUpperCase()),
-                h('span', {}, 'Owner · ' + t.owner))
-            : null,
-          t.updated ? h('span', { style: row({ gap: 4 }) },
-            h('span', { style: { color: C.faint } }, '↻'), h('span', {}, '更新 ' + t.updated)) : null,
-          t.mode ? h('span', { style: { color: C.faint } }, t.mode) : null))
+        h(TaskCheckProgress, { items: t.checkItems }),
+        h(WorkflowSteps, { t }),
+        h('div', {
+          style: Object.assign(
+            { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+            { flexWrap: 'wrap' }),
+        },
+          h('div', { style: row({ gap: 8, flexWrap: 'wrap', fontSize: 11, color: C.dim }) },
+            t.owner
+              ? h('span', { style: row({ gap: 4 }) },
+                  h('span', {
+                    style: {
+                      width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+                      background: 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
+                      color: C.accent, fontSize: 9, fontWeight: 700, display: 'inline-flex',
+                      alignItems: 'center', justifyContent: 'center',
+                    },
+                  }, (t.owner[0] || '?').toUpperCase()),
+                  h('span', {}, 'Owner · ' + t.owner))
+              : null,
+            t.updated ? h('span', { style: row({ gap: 4 }) },
+              h('span', { style: { color: C.faint } }, '↻'), h('span', {}, '更新 ' + t.updated)) : null,
+            t.mode ? h('span', { style: { color: C.faint } }, t.mode) : null),
+          h('div', { style: row({ gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }) },
+            typeof onEdit === 'function'
+              ? h('button', {
+                  onClick: busy ? undefined : () => onEdit(t),
+                  disabled: busy,
+                  title: '编辑任务字段',
+                  style: tinyBtn(busy),
+                }, '编辑')
+              : null,
+            blocked
+              ? (typeof onResume === 'function' ? h('button', {
+                  onClick: busy ? undefined : () => onResume(t),
+                  disabled: busy,
+                  title: '开始（恢复进行中，状态 → active）',
+                  style: tinyBtn(busy),
+                }, work.id === t.id ? '开始中…' : '开始') : null)
+              : (typeof onPause === 'function' ? h('button', {
+                  onClick: busy ? undefined : () => onPause(t),
+                  disabled: busy,
+                  title: '暂停（状态 → blocked）',
+                  style: tinyBtn(busy),
+                }, work.id === t.id ? '暂停中…' : '暂停') : null),
+            typeof onDelete === 'function'
+              ? h('button', {
+                  onClick: busy ? undefined : () => onDelete(t),
+                  disabled: busy,
+                  title: '删除任务（回退修改需二次确认）',
+                  style: Object.assign(dangerTextStyle, { opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }),
+                }, delBusy ? '删除中…' : '删除')
+              : null)))
     }
 
-    /** 最近完成行：完成标记 / 日期 / ID / 描述，hairline 分隔。 */
-    function RecentRow({ r }) {
+    /** 最近完成行：完成标记 / 日期 / ID / 描述，可点击查看归档。 */
+    function RecentRow({ r, onOpen }) {
+      const clickable = typeof onOpen === 'function'
       return h('div', {
+        className: 'awf-row',
+        onClick: clickable ? () => onOpen(r) : undefined,
+        title: clickable ? '点击查看归档' : undefined,
         style: {
           display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px',
           borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+          cursor: clickable ? 'pointer' : 'default',
         },
       },
         h('span', { style: { color: C.success, fontSize: 11, flexShrink: 0, fontWeight: 700 } }, '✓'),
@@ -296,7 +798,536 @@ window.__ModuleLoader__.load({
             color: C.dim, overflow: 'hidden', textOverflow: 'ellipsis',
             whiteSpace: 'nowrap', flex: 1, minWidth: 0,
           },
-        }, r.desc || '—'))
+        }, r.desc || '—'),
+        clickable ? h('span', { style: { color: C.faint, fontSize: 12, flexShrink: 0 } }, '›') : null)
+    }
+
+    /**
+     * 待办行（含 CRUD）：开始 / 编辑（原位表单）/ 删除（行内二次确认）。
+     * 参数：{row, onStart, starting} 基础；编辑态 {editing, editForm, onEditChange, onEditSave, onEditCancel}；
+     *      删除确认态 {deleting, onDeleteConfirm, onDeleteCancel, busy}。
+     */
+    function TodoRow({ row, onStart, starting, onEdit, editing, editForm, onEditChange, onEditSave, onEditCancel, onDelete, deleting, onDeleteConfirm, onDeleteCancel, busy, onOpenSource }) {
+      const key = row.type + ':' + row.id
+      const startBusy = !!(starting && starting.key === key)
+      const rowBusy = !!busy // 删除执行中
+      const anyBusy = startBusy || rowBusy
+      const typeStyle = TYPE_STYLE[row.type] || { color: C.faint }
+
+      // ---- 编辑模式：原位表单（优先级 select + 描述 input + 保存/取消）
+      if (editing) {
+        const f = editForm || {}
+        const editBusy = !!f.busy
+        return h('div', {
+          className: 'awf-row',
+          style: {
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+            padding: '6px 0', borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+          },
+        },
+          h(Pill, { color: typeStyle.color }, TYPE_LABEL(row.type)),
+          h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.faint, flexShrink: 0 } }, row.id),
+          h('select', {
+            value: f.prio || row.prio || 'P2', disabled: editBusy,
+            onChange: (e) => onEditChange('prio', e.target.value), style: inputStyle,
+          }, ['P0', 'P1', 'P2', 'P3'].map((p) => h('option', { key: p, value: p }, p))),
+          h('input', {
+            value: f.desc || '', placeholder: '描述', disabled: editBusy,
+            onChange: (e) => onEditChange('desc', e.target.value),
+            style: Object.assign({}, inputStyle, { flex: '1 1 130px', minWidth: 0 }),
+          }),
+          h('button', {
+            onClick: editBusy ? undefined : onEditSave, disabled: editBusy,
+            style: Object.assign(buttonStyle(true), { opacity: editBusy ? 0.55 : 1, cursor: editBusy ? 'default' : 'pointer' }),
+          }, editBusy ? '保存中…' : '保存'),
+          h('button', { onClick: onEditCancel, disabled: editBusy, style: buttonStyle() }, '取消'),
+          typeof onOpenSource === 'function'
+            ? h('button', {
+                onClick: onOpenSource, disabled: editBusy,
+                title: '只读查看该类型 todo.md 源文件',
+                style: tinyBtn(editBusy),
+              }, '打开源文件')
+            : null,
+          f.error
+            ? h('span', { style: { width: '100%', fontSize: 11, color: C.error, wordBreak: 'break-all' } }, '⚠️ ' + f.error)
+            : null)
+      }
+
+      // ---- 删除二次确认：行内警示 + 删除/取消
+      if (deleting) {
+        return h('div', {
+          className: 'awf-row',
+          style: {
+            display: 'flex', alignItems: 'center', gap: 8, padding: '5px 4px 5px 8px',
+            borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+            borderLeft: '3px solid ' + C.error, marginLeft: 1,
+          },
+        },
+          h('span', { style: { color: C.error, fontWeight: 700, fontSize: 11, flex: 1, minWidth: 0 } },
+            '确认删除待办 ' + row.id + '？'),
+          h('button', {
+            onClick: rowBusy ? undefined : onDeleteConfirm, disabled: rowBusy,
+            style: Object.assign(dangerTextStyle, { opacity: rowBusy ? 0.55 : 1, cursor: rowBusy ? 'default' : 'pointer' }),
+          }, rowBusy ? '删除中…' : '删除'),
+          h('button', { onClick: onDeleteCancel, disabled: rowBusy, style: buttonStyle() }, '取消'))
+      }
+
+      // ---- 正常模式
+      return h('div', {
+        className: 'awf-row',
+        style: {
+          display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0 5px 2px',
+          borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+        },
+      },
+        h(Pill, { color: typeStyle.color }, TYPE_LABEL(row.type)),
+        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text, flexShrink: 0 } }, row.id),
+        h('span', {
+          style: {
+            color: C.dim, overflow: 'hidden', textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap', flex: 1, minWidth: 0,
+          },
+        }, row.desc || '—'),
+        row.prio ? h(Pill, { color: PRIO_COLOR[row.prio] || C.faint }, row.prio) : null,
+        typeof onStart === 'function'
+          ? h('button', {
+              onClick: anyBusy ? undefined : () => onStart(row),
+              disabled: anyBusy,
+              style: Object.assign(buttonStyle(true), { opacity: anyBusy ? 0.55 : 1, cursor: anyBusy ? 'default' : 'pointer' }),
+            }, startBusy ? '开始中…' : '开始')
+          : null,
+        typeof onEdit === 'function'
+          ? h('button', {
+              onClick: anyBusy ? undefined : () => onEdit(row),
+              disabled: anyBusy,
+              style: tinyBtn(anyBusy),
+            }, '编辑')
+          : null,
+        typeof onDelete === 'function'
+          ? h('button', {
+              onClick: anyBusy ? undefined : () => onDelete(row),
+              disabled: anyBusy,
+              style: Object.assign(dangerTextStyle, { opacity: anyBusy ? 0.55 : 1, cursor: anyBusy ? 'default' : 'pointer' }),
+            }, '删除')
+          : null)
+    }
+
+    /**
+     * 待办类型三态切换器（dev/debug/docs）。todo.md 是表格行格式、无 checkbox，
+     * 不再渲染进度条；各类型按 toggle 展示自己的未开始任务行。
+     */
+    function TypeToggle({ value, onChange }) {
+      const items = [['dev', '开发'], ['debug', '调试'], ['docs', '文档']]
+      return h('div', {
+        style: {
+          display: 'inline-flex', padding: 2, borderRadius: 8,
+          background: 'color-mix(in srgb, ' + C.raised + ' 55%, transparent)',
+          border: '1px solid ' + C.hairline, gap: 2,
+        },
+      },
+        items.map(([v, label]) => h('button', {
+          key: v,
+          onClick: () => onChange(v),
+          style: {
+            fontSize: 11, padding: '2px 12px', borderRadius: 6, cursor: 'pointer',
+            border: '1px solid ' + (value === v ? 'color-mix(in srgb, ' + C.accent + ' 40%, transparent)' : 'transparent'),
+            background: value === v ? 'color-mix(in srgb, ' + C.accent + ' 18%, transparent)' : 'transparent',
+            color: value === v ? C.accent : C.sub,
+            fontWeight: value === v ? 700 : 500,
+          },
+        }, label)))
+    }
+
+    /** 当前任务块内的验收勾选框进度（仅当后端/账本提供 checkItems 时渲染；无则纯徽章）。 */
+    function TaskCheckProgress({ items }) {
+      if (!items || !items.length) return null
+      const done = items.filter((i) => i && i.done).length
+      const pct = Math.round((done / items.length) * 100)
+      return h('div', { style: { marginBottom: 6 } },
+        h('div', { style: row({ gap: 6, fontSize: 11, color: C.sub }) },
+          h('span', { style: { fontWeight: 600, color: C.text } }, '验收进度'),
+          h('span', {}, String(done) + '/' + String(items.length) + ' · ' + String(pct) + '%')),
+        h('div', {
+          style: {
+            marginTop: 3, height: 4, borderRadius: 99, overflow: 'hidden',
+            background: 'color-mix(in srgb, ' + C.faint + ' 22%, transparent)',
+          },
+        },
+          h('div', {
+            style: {
+              height: '100%', width: pct + '%',
+              background: pct >= 100 ? C.success : C.accent,
+              transition: 'width 0.3s ease',
+            },
+          })))
+    }
+
+    /**
+     * 工作流步骤条（AgentTeams 面板视觉语言，t8 重构）：
+     * 横向阶段轨道——圆形状态节点（完成=实心填充+✓、当前=强调色+光圈、未到=空心置灰）
+     * + 连接线（已完成段强调色、未到段灰）+ 节点下方标签；按任务类型（dev/debug/docs）展示，
+     * 当前阶段由状态推断；blocked 在当前位置标注「暂停」。
+     */
+    function WorkflowSteps({ t }) {
+      const info = inferWorkflowStage(t)
+      if (!info || !info.steps || info.steps.length < 2) return null
+      const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
+      const { steps, index, paused } = info
+      const activeStep = steps[Math.min(index, steps.length - 1)] || steps[0]
+
+      const nodeStyle = (i) => {
+        const done = i < index
+        const cur = i === index
+        const base = {
+          width: 13, height: 13, borderRadius: '50%', flexShrink: 0, boxSizing: 'border-box',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 7.5, fontWeight: 800, lineHeight: 1,
+        }
+        if (cur) {
+          return Object.assign(base, {
+            background: C.accent, border: '1px solid ' + C.accent, color: '#fff',
+            boxShadow: '0 0 0 3px color-mix(in srgb, ' + C.accent + ' 24%, transparent)',
+          })
+        }
+        if (done) {
+          return Object.assign(base, {
+            background: 'color-mix(in srgb, ' + C.accent + ' 26%, transparent)',
+            border: '1px solid color-mix(in srgb, ' + C.accent + ' 60%, transparent)',
+            color: C.accent,
+          })
+        }
+        return Object.assign(base, {
+          background: 'transparent',
+          border: '1px solid color-mix(in srgb, ' + C.faint + ' 45%, transparent)',
+          color: C.faint,
+        })
+      }
+      const lineStyle = (i) => ({
+        flex: '1 1 10px', minWidth: 8, height: 2, borderRadius: 99,
+        alignSelf: 'flex-start', marginTop: 6,
+        background: i < index
+          ? 'color-mix(in srgb, ' + C.accent + ' 50%, transparent)'
+          : 'color-mix(in srgb, ' + C.faint + ' 24%, transparent)',
+      })
+
+      const trackChildren = []
+      steps.forEach((s, i) => {
+        const done = i < index
+        const cur = i === index
+        if (i > 0) trackChildren.push(h('span', { key: 'ln' + i, style: lineStyle(i - 1) }))
+        trackChildren.push(h('div', {
+          key: s.key,
+          className: 'awf-step' + (cur ? ' awf-step-cur' : done ? ' awf-step-done' : ' awf-step-pend'),
+          style: { display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 },
+        },
+          h('span', { style: nodeStyle(i), title: s.label },
+            cur ? (paused ? '⏸' : '●') : done ? '✓' : ''),
+          h('span', {
+            style: {
+              marginTop: 3, fontSize: 8.5, whiteSpace: 'nowrap',
+              fontWeight: cur ? 700 : 600,
+              color: cur ? C.accent : done ? C.sub : C.faint,
+            },
+          }, s.label)))
+      })
+
+      return h('div', {
+        className: 'awf-track',
+        style: {
+          marginTop: 8, padding: '8px 10px', borderRadius: 8,
+          background: 'color-mix(in srgb, ' + C.surface + ' 45%, transparent)',
+          border: '1px solid ' + C.hairline,
+        },
+      },
+        h('div', { style: Object.assign({ justifyContent: 'space-between' }, row({ marginBottom: 6 })) },
+          h('span', { style: row({ gap: 6, fontSize: 10, fontWeight: 700, color: C.dim }) },
+            h('span', { style: { color: type.color } }, type.label),
+            h('span', {}, '流程')),
+          paused
+            ? h('span', { style: { fontSize: 10, fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
+                '已暂停于「' + activeStep.label + '」')
+            : h('span', { style: { fontSize: 10, color: C.faint, whiteSpace: 'nowrap' } },
+                '当前阶段 · ' + activeStep.label)),
+        h('div', { style: { display: 'flex', alignItems: 'flex-start', overflowX: 'auto', paddingBottom: 2 } },
+          trackChildren))
+    }
+
+    /**
+     * 新增待办行表单（todo CRUD add）。form: {type, id, prio, desc, busy, error}。
+     */
+    function TodoAddForm({ form, onChange, onSave, onCancel }) {
+      const f = form || {}
+      const busy = !!f.busy
+      return h('div', {
+        style: {
+          marginTop: 8, padding: '9px 11px', borderRadius: 8,
+          border: '1px dashed ' + C.accent,
+          background: 'color-mix(in srgb, ' + C.accent + ' 6%, transparent)',
+        },
+      },
+        h('div', { style: { fontSize: 11.5, fontWeight: 700, color: C.text, marginBottom: 7 } }, '＋ 新增待办行'),
+        h('div', { style: row({ gap: 6, flexWrap: 'wrap' }) },
+          h('select', {
+            value: f.type || 'dev', disabled: busy,
+            onChange: (e) => onChange('type', e.target.value), style: inputStyle,
+          }, ['dev', 'debug', 'docs'].map((t) => h('option', { key: t, value: t }, TYPE_LABEL(t)))),
+          h('input', {
+            value: f.id || '', placeholder: '任务 ID（如 DEV-200）', disabled: busy,
+            onChange: (e) => onChange('id', e.target.value),
+            style: Object.assign({}, inputStyle, { width: 128 }),
+          }),
+          h('select', {
+            value: f.prio || 'P2', disabled: busy,
+            onChange: (e) => onChange('prio', e.target.value), style: inputStyle,
+          }, ['P0', 'P1', 'P2', 'P3'].map((p) => h('option', { key: p, value: p }, p)))),
+        h('input', {
+          value: f.desc || '', placeholder: '描述（可留空，默认与 ID 一致）', disabled: busy,
+          onChange: (e) => onChange('desc', e.target.value),
+          style: Object.assign({}, inputStyle, { width: '100%', marginTop: 6, boxSizing: 'border-box' }),
+        }),
+        f.error
+          ? h('div', { style: { marginTop: 6, fontSize: 11, color: C.error, wordBreak: 'break-all' } }, '⚠️ ' + f.error)
+          : null,
+        h('div', { style: row({ gap: 6, justifyContent: 'flex-end', marginTop: 8 }) },
+          h('button', {
+            onClick: busy ? undefined : onSave, disabled: busy,
+            style: Object.assign(buttonStyle(true), { opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }),
+          }, busy ? '保存中…' : '保存'),
+          h('button', { onClick: onCancel, disabled: busy, style: buttonStyle() }, '取消')))
+    }
+
+    /**
+     * 源文件查看面板（只读）：README/任务字段编辑态的「打开源文件」目标。
+     * 展示本地绝对路径（可复制）+ macOS「在访达显示」提示 + .md 原文（等宽、可滚动）。
+     * src: {type, file, busy, data:{absPath,content}, error}
+     */
+    function SourcePanel({ src, onClose, onCopy }) {
+      const s = src || {}
+      const data = s.data || null
+      return h(ModalShell, {
+        title: '源文件 · ' + (s.type || '') + '/' + (s.file || '') + '.md',
+        onClose, width: 520,
+      },
+        s.busy
+          ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: 12 } }, '加载中…')
+          : s.error
+            ? h('div', { style: { padding: '12px', color: C.error, fontSize: 12, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
+            : data
+              ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                  h('div', {
+                    style: {
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                      padding: '6px 9px', borderRadius: 6,
+                      background: 'color-mix(in srgb, ' + C.surface + ' 70%, transparent)',
+                      border: '1px solid ' + C.hairline, flexWrap: 'wrap',
+                    },
+                  },
+                    h('span', {
+                      style: {
+                        fontFamily: C.mono, fontSize: 10.5, color: C.dim,
+                        wordBreak: 'break-all', minWidth: 0, flex: 1,
+                      },
+                    }, data.absPath || ''),
+                    h('button', {
+                      onClick: () => onCopy && onCopy(data.absPath),
+                      title: '复制绝对路径到剪贴板，供系统编辑器打开',
+                      style: tinyBtn(false),
+                    }, s.copied ? '已复制 ✓' : '复制路径')),
+                  h('div', {
+                    style: {
+                      fontSize: 10.5, color: C.faint, lineHeight: 1.5,
+                      padding: '0 2px',
+                    },
+                  }, '提示：复制路径后在访达（Finder）按 ⌘⇧G 粘贴直达，或粘贴到任意编辑器打开查看。'),
+                  h('pre', {
+                    style: {
+                      margin: 0, padding: '10px 12px', borderRadius: 6,
+                      fontFamily: C.mono, fontSize: 11, lineHeight: 1.6,
+                      color: 'var(--dsw-alias-label-primary, #2c3138)',
+                      background: 'color-mix(in srgb, ' + C.surface + ' 45%, transparent)',
+                      border: '1px solid ' + C.hairline,
+                      maxHeight: '46vh', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    },
+                  }, data.content || ''))
+              : h('div', { style: { padding: '12px', color: C.dim, fontSize: 12 } }, '无内容'))
+    }
+
+    /** 删除任务二次确认弹框。state: {task, view, busy, error}；handlers: {onRollback, onLedgerOnly, onCancel}。 */
+    function renderDeleteModal(state, handlers) {
+      const s = state || {}
+      const H = handlers || {}
+      const task = s.task || {}
+      const view = s.view
+      const busy = !!s.busy
+
+      const errorLine = s.error
+        ? h('div', { key: 'err', style: { fontSize: 11.5, color: C.error, marginTop: 10, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
+        : null
+
+      const actionButtons = (withRollback) => h('div', {
+        style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14, flexWrap: 'wrap' },
+      },
+        withRollback
+          ? h('button', {
+              onClick: busy ? undefined : H.onRollback,
+              disabled: busy,
+              autoFocus: false,
+              style: Object.assign(dangerSolid, { opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }),
+            }, busy ? '处理中…' : '删除并回退修改')
+          : null,
+        h('button', {
+          onClick: busy ? undefined : H.onLedgerOnly,
+          disabled: busy,
+          style: Object.assign(buttonStyle(), { opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }),
+        }, '仅删除账本'),
+        h('button', {
+          onClick: H.onCancel,
+          disabled: busy,
+          autoFocus: true, // 默认聚焦取消，防止误触危险动作
+          style: buttonStyle(true),
+        }, '取消'))
+
+      let body
+      if (!view) {
+        // dry-run 失败（如后端路由未就绪 / 服务端报错）：只给「取消」
+        body = h('div', {},
+          h('div', {
+            style: {
+              display: 'flex', gap: 8, alignItems: 'center', padding: '9px 11px', borderRadius: 8,
+              border: '1px solid color-mix(in srgb, ' + C.error + ' 45%, transparent)',
+              background: 'color-mix(in srgb, ' + C.error + ' 8%, transparent)',
+            },
+          },
+            h('span', { style: { fontSize: 15 } }, '⚠️'),
+            h('span', { style: { fontSize: 12.5, color: C.error, fontWeight: 600 } }, '无法获取回退文件清单')),
+          errorLine,
+          h('div', { style: { textAlign: 'center', marginTop: 14 } },
+            h('button', { onClick: H.onCancel, style: buttonStyle() }, '取消')))
+      } else if (view.rollbackable) {
+        body = h('div', {},
+          h('div', {
+            style: {
+              display: 'flex', gap: 8, alignItems: 'flex-start', padding: '9px 11px', borderRadius: 8,
+              border: '1px solid color-mix(in srgb, ' + C.error + ' 50%, transparent)',
+              background: 'color-mix(in srgb, ' + C.error + ' 10%, transparent)',
+            },
+          },
+            h('span', { style: { fontSize: 15 } }, '⚠️'),
+            h('span', {
+              style: { fontSize: 12.5, color: C.error, fontWeight: 700, lineHeight: 1.5 },
+            }, '删除后将回退这些文件的未提交修改，不可恢复')),
+          h('div', { style: { fontSize: 11.5, color: C.sub, margin: '10px 0 6px' } },
+            '将回退以下 ' + view.files.length + ' 个文件：'),
+          h('div', { style: { border: '1px solid ' + C.border, borderRadius: 8, overflow: 'hidden' } },
+            view.files.map((f, i) => {
+              const st = FILE_STATUS_STYLE[f.status] || { color: C.faint }
+              return h('div', {
+                key: i,
+                style: {
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '5px 9px', fontSize: 12,
+                  borderBottom: i < view.files.length - 1 ? '1px solid ' + C.hairline : 'none',
+                  background: C.surface,
+                },
+              },
+                h(Pill, { color: st.color }, fileStatusLabel(f.status)),
+                h('span', {
+                  style: {
+                    fontFamily: C.mono, fontSize: 10.5, color: C.text,
+                    wordBreak: 'break-all', flex: 1, minWidth: 0,
+                  },
+                }, f.path))
+            })),
+          errorLine,
+          actionButtons(true))
+      } else {
+        body = h('div', {},
+          h('div', {
+            style: {
+              display: 'flex', gap: 8, alignItems: 'flex-start', padding: '9px 11px', borderRadius: 8,
+              border: '1px solid color-mix(in srgb, ' + C.warn + ' 50%, transparent)',
+              background: 'color-mix(in srgb, ' + C.warn + ' 10%, transparent)',
+            },
+          },
+            h('span', { style: { fontSize: 15 } }, '⚠️'),
+            h('div', {},
+              h('div', { style: { fontSize: 12.5, color: C.warn, fontWeight: 700 } }, '无法回退未提交修改'),
+              h('div', { style: { fontSize: 11.5, color: C.sub, marginTop: 3, lineHeight: 1.5 } },
+                deleteReasonText(view.reason)))),
+          h('div', { style: { fontSize: 11.5, color: C.sub, marginTop: 10, lineHeight: 1.5 } },
+            '仍可「仅删除账本」：跳过回退，只从账本中移除该任务块（done.md 记「已撤销」）。'),
+          errorLine,
+          actionButtons(false))
+      }
+
+      return h(ModalShell, { title: '删除任务确认 · ' + (task.id || ''), onClose: H.onCancel, width: 480 }, body)
+    }
+
+    /** 归档查看弹层。state: {id, busy, data:{type,row,block}, error}。 */
+    function renderArchiveModal(state, onClose) {
+      const s = state || {}
+      let body
+      if (s.busy) {
+        body = h('div', { style: { textAlign: 'center', color: C.dim, padding: '14px 0' } }, '加载归档…')
+      } else if (s.error) {
+        body = h('div', { style: { textAlign: 'center', color: C.error, padding: '10px 0' } },
+          h('div', { style: { fontSize: 13, fontWeight: 700 } }, '归档读取失败'),
+          h('div', { style: muted({ marginTop: 6, wordBreak: 'break-all' }) }, s.error))
+      } else if (s.data) {
+        const doneRow = s.data.row || {}
+        const typeStyle = TYPE_STYLE[s.data.type] || { color: C.faint }
+        body = h('div', {},
+          h('div', { style: row({ gap: 8, flexWrap: 'wrap' }) },
+            h(Pill, { color: typeStyle.color }, TYPE_LABEL(s.data.type)),
+            doneRow.prio ? h(Pill, { color: PRIO_COLOR[doneRow.prio] || C.faint }, doneRow.prio) : null,
+            doneRow.date ? h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, '完成于 ' + doneRow.date) : null),
+          h('div', { style: { fontSize: 13, fontWeight: 700, color: C.text, marginTop: 8, lineHeight: 1.5 } },
+            doneRow.desc || '（无描述）'),
+          h('div', { style: { fontSize: 11.5, fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
+            '任务块原文（markdown）'),
+          h('pre', {
+            style: {
+              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 320,
+              background: C.raised, border: '1px solid ' + C.hairline,
+              fontFamily: C.mono, fontSize: 11.5, lineHeight: 1.55,
+              color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            },
+          }, s.data.block || '（该任务归档时未保留详细任务块，仅摘要）'),
+          h('div', { style: { textAlign: 'center', marginTop: 12 } },
+            h('button', { onClick: onClose, style: buttonStyle() }, '关闭')))
+      } else {
+        body = h('div', { style: { textAlign: 'center', color: C.dim, padding: '14px 0' } }, '（无归档数据）')
+      }
+      return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 520 }, body)
+    }
+
+    /** 未初始化引导卡：图标 + 文案 + 「初始化工作流」按钮。 */
+    function renderInitCard({ busy, error, onInit }) {
+      return h('div', {
+        style: {
+          display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
+          padding: '20px 16px', borderRadius: C.radius,
+          border: '1px dashed ' + C.accent,
+          background: 'color-mix(in srgb, ' + C.accent + ' 5%, transparent)',
+        },
+      },
+        h('span', { style: { fontSize: 26, lineHeight: 1 } }, '🚀'),
+        h('div', { style: { fontWeight: 800, fontSize: 13.5, color: C.text, marginTop: 10 } }, '工作流未初始化'),
+        h('div', { style: muted({ marginTop: 6, maxWidth: 260 }) },
+          '该项目尚未初始化 agent-workflow。点击下方按钮生成骨架：project.yaml + tasks/{dev,debug,docs}/{todo,current,done}.md + status.md。'),
+        typeof onInit === 'function'
+          ? h('button', {
+              onClick: busy ? undefined : onInit,
+              disabled: busy,
+              style: Object.assign(buttonStyle(true), {
+                marginTop: 12, padding: '5px 16px', fontSize: 12,
+                opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
+              }),
+            }, busy ? '初始化中…' : '初始化工作流')
+          : null,
+        error
+          ? h('div', { style: { marginTop: 10, fontSize: 11.5, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
+              '⚠️ ' + error)
+          : null)
     }
 
     // ---- 看板主体 ---------------------------------------------------------
@@ -310,8 +1341,25 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = useState('')
       const [auto, setAuto] = useState(false) // 当前选中是否来自自动锚定
       const [ledger, setLedger] = useState(null)
+      const [notInit, setNotInit] = useState(false) // 选中项目未初始化 → 引导卡
       const [error, setError] = useState(null)
       const [loading, setLoading] = useState(false)
+      const [initBusy, setInitBusy] = useState(false)
+      const [initError, setInitError] = useState(null)
+      const [starting, setStarting] = useState(null) // {type,id,key} 开始任务中
+      const [actionError, setActionError] = useState(null) // 开始/操作失败提示
+      const [archive, setArchive] = useState(null) // {id,busy,data,error}
+      const [delModal, setDelModal] = useState(null) // 删除二次确认 {task,busy,view,error}
+
+      // t5：todo / 当前任务 CRUD 交互状态
+      const [addForm, setAddForm] = useState(null) // 新增待办表单 {type,id,prio,desc,busy,error} | null
+      const [todoEdits, setTodoEdits] = useState({}) // key='type:id' → {prio,desc,busy,error}
+      const [todoDeleteKey, setTodoDeleteKey] = useState(null) // 行内删除确认中的 key
+      const [todoBusyKey, setTodoBusyKey] = useState(null) // 删除执行中的 key
+      const [todoType, setTodoType] = useState('dev') // 待办区类型切换（默认 dev）
+      const [taskEdit, setTaskEdit] = useState(null) // 当前任务编辑表单 {id,type,prio,status,owner,scope,desc,busy,error} | null
+      const [taskWorking, setTaskWorking] = useState(null) // 暂停/继续中 {id, action} | null
+      const [source, setSource] = useState(null) // 源文件面板 {type,file,busy,data,copied,error} | null
 
       // 1) 项目索引（只读）
       useEffect(() => {
@@ -354,8 +1402,29 @@ window.__ModuleLoader__.load({
         let alive = true
         setLoading(true)
         getJson('/awf/ledger?path=' + encodeURIComponent(selected))
-          .then((data) => { if (alive) { setLedger(data.ledger); setError(null) } })
-          .catch((e) => { if (alive) setError(String((e && e.message) || e)) })
+          .then((data) => {
+            if (!alive) return
+            if (detectNotInitialized(data, null)) {
+              setNotInit(true)
+              setLedger(null)
+            } else {
+              setNotInit(false)
+              setLedger(data.ledger || null)
+            }
+            setError(null)
+          })
+          .catch((e) => {
+            if (!alive) return
+            if (detectNotInitialized(null, e)) {
+              // 缺省回退：400 bad-request（缺 project.yaml）= 未初始化
+              setNotInit(true)
+              setLedger(null)
+              setError(null)
+            } else {
+              setNotInit(false)
+              setError(String((e && e.message) || e))
+            }
+          })
           .finally(() => { if (alive) setLoading(false) })
         return () => { alive = false }
       }, [selected, indexReady])
@@ -371,13 +1440,345 @@ window.__ModuleLoader__.load({
         const v = e.target.value
         setSelected(v)
         setAuto(false)
+        setNotInit(false)
+        setLedger(null)
+        setError(null)
+        setArchive(null)
+        setDelModal(null)
+        setAddForm(null)
+        setTodoEdits({})
+        setTodoDeleteKey(null)
+        setTodoBusyKey(null)
+        setTodoType('dev')
+        setTaskEdit(null)
+        setTaskWorking(null)
+        setSource(null)
+        setActionError(null)
         try { localStorage.setItem(LS_KEY, v) } catch { /* 忽略 */ }
       }
 
+      // 5) 初始化工作流（未初始化引导）
+      const handleInit = useCallback(async () => {
+        if (!selected || initBusy) return
+        setInitBusy(true)
+        setInitError(null)
+        const row = (projects || []).find((pr) => pr && pr.path === selected)
+        try {
+          await postJson('/awf/init', {
+            path: selected,
+            workspaceRoot: anchorRoot || undefined,
+            name: (row && row.id) || undefined,
+            purpose: (row && row.aliases) || undefined,
+          })
+          loadLedger() // 成功后重新加载账本，显示正常看板
+        } catch (e) {
+          if (e.code === 'already-initialized') {
+            loadLedger() // 已在别处初始化：直接刷新账本
+          } else if (e.code === 'path-not-allowed') {
+            setInitError('路径不在白名单：必须位于全局项目索引或当前工作区根。')
+          } else if (e.code === 'forbidden') {
+            setInitError('无权限：认证未通过，请先登录。')
+          } else if (e.code === 'bad-request') {
+            setInitError('请求不合法：' + String(e.message || e))
+          } else {
+            setInitError('初始化失败：' + String((e && e.message) || e))
+          }
+        } finally {
+          setInitBusy(false)
+        }
+      }, [selected, initBusy, anchorRoot, projects, loadLedger])
+
+      // 6) 开始任务（todo 行 → current.md）
+      const handleStart = useCallback(async (row) => {
+        if (!selected || !row || !row.id || !row.type) return
+        const key = row.type + ':' + row.id
+        if (starting && starting.key === key) return
+        setStarting({ type: row.type, id: row.id, key })
+        setActionError(null)
+        try {
+          await postJson('/awf/task/start', {
+            path: selected, type: row.type, id: row.id,
+            workspaceRoot: anchorRoot || undefined,
+          })
+          loadLedger()
+        } catch (e) {
+          if (e.code === 'not-found') {
+            setActionError('未在 todo.md 中找到该任务：' + row.id + '（可能已被移除，请刷新）')
+          } else if (e.code === 'path-not-allowed') {
+            setActionError('路径不在白名单，无法开始任务。')
+          } else {
+            setActionError('开始任务失败：' + String((e && e.message) || e))
+          }
+        } finally {
+          setStarting(null)
+        }
+      }, [selected, starting, anchorRoot, loadLedger])
+
+      // 7) 归档查看
+      const handleOpenArchive = useCallback(async (r) => {
+        const id = r && r.id
+        if (!selected || !id || archive) return
+        setArchive({ id, busy: true, data: null, error: null })
+        try {
+          const data = await getJson('/awf/archive?path=' + encodeURIComponent(selected) + '&id=' + encodeURIComponent(id))
+          setArchive({ id, busy: false, data: (data && data.done) || null, error: null })
+        } catch (e) {
+          setArchive({
+            id, busy: false, data: null,
+            error: e.code === 'not-found'
+              ? '归档中未找到该任务：' + id
+              : ('归档读取失败：' + String((e && e.message) || e)),
+          })
+        }
+      }, [selected, archive])
+
+      // 8) 删除任务：先 dry-run 拿回退清单，弹框二次确认后才 execute
+      const handleDeleteClick = useCallback(async (t) => {
+        if (!selected || !t || !t.id || delModal) return
+        setDelModal({ task: t, busy: true, view: null, error: null })
+        try {
+          const data = await postJson('/awf/task/delete/dry-run', {
+            path: selected, type: t.type, id: t.id,
+            workspaceRoot: anchorRoot || undefined,
+          })
+          setDelModal((cur) => (cur ? Object.assign({}, cur, { busy: false, view: buildDeleteView(data && data.dryRun) }) : cur))
+        } catch (e) {
+          setDelModal((cur) => (cur ? Object.assign({}, cur, {
+            busy: false,
+            error: '无法获取回退清单：' + String((e && e.message) || e),
+          }) : cur))
+        }
+      }, [selected, anchorRoot, delModal])
+
+      const handleDeleteConfirm = useCallback(async (mode) => {
+        const cur = delModal
+        if (!cur || !cur.task || cur.busy) return
+        setDelModal(Object.assign({}, cur, { busy: true, error: null }))
+        try {
+          await postJson('/awf/task/delete/execute', {
+            path: selected, type: cur.task.type, id: cur.task.id, mode,
+            workspaceRoot: anchorRoot || undefined,
+          })
+          setDelModal(null)
+          loadLedger()
+        } catch (e) {
+          setDelModal((prev) => (prev ? Object.assign({}, prev, {
+            busy: false,
+            error: '删除失败：' + String((e && e.message) || e),
+          }) : prev))
+        }
+      }, [selected, anchorRoot, delModal, loadLedger])
+
+      // ---- t5：todo CRUD ---------------------------------------------------
+
+      // 新增：打开表单
+      const openAddForm = useCallback(() => {
+        setAddForm({ type: 'dev', id: '', prio: 'P2', desc: '', busy: false, error: null })
+      }, [])
+      const onAddFormChange = useCallback((field, value) => {
+        setAddForm((f) => (f ? Object.assign({}, f, { [field]: value }) : f))
+      }, [])
+      const closeAddForm = useCallback(() => setAddForm(null), [])
+
+      // 新增：提交（POST /awf/todo add）
+      const handleTodoAddSave = useCallback(async () => {
+        const f = addForm
+        if (!f || !selected || f.busy) return
+        const id = String(f.id || '').trim()
+        if (!/^[A-Z]+-[0-9]+$/.test(id)) {
+          setAddForm(Object.assign({}, f, { error: '任务 ID 需为 TYPE-xxx 格式（如 DEV-001）。' }))
+          return
+        }
+        setAddForm(Object.assign({}, f, { busy: true, error: null }))
+        try {
+          await runTodoAction({
+            path: selected, type: f.type, action: 'add', workspaceRoot: anchorRoot || undefined,
+            row: { id, 优先级: f.prio, 描述: String(f.desc || '').trim() || id },
+          })
+          setAddForm(null)
+          loadLedger()
+        } catch (e) {
+          setAddForm((cur) => (cur ? Object.assign({}, cur, { busy: false, error: apiErrorText(e, '新增失败') }) : cur))
+        }
+      }, [addForm, selected, anchorRoot, loadLedger])
+
+      // 编辑：打开原位表单（ID 不可改，仅优先级/描述）
+      const handleTodoEdit = useCallback((row) => {
+        const key = row.type + ':' + row.id
+        setTodoEdits((m) => Object.assign({}, m, {
+          [key]: { prio: row.prio || 'P2', desc: row.desc || '', busy: false, error: null },
+        }))
+      }, [])
+      const onTodoEditChange = useCallback((key, field, value) => {
+        setTodoEdits((m) => {
+          const cur = m[key]
+          if (!cur) return m
+          return Object.assign({}, m, { [key]: Object.assign({}, cur, { [field]: value }) })
+        })
+      }, [])
+      const closeTodoEdit = useCallback((key) => {
+        setTodoEdits((m) => {
+          const n = Object.assign({}, m)
+          delete n[key]
+          return n
+        })
+      }, [])
+
+      // 编辑：保存（POST /awf/todo update）
+      const handleTodoEditSave = useCallback(async (key) => {
+        const cur = todoEdits[key]
+        if (!cur || !selected || cur.busy) return
+        const parts = key.split(':')
+        const type = parts[0]
+        const id = parts[1]
+        setTodoEdits((m) => Object.assign({}, m, { [key]: Object.assign({}, m[key], { busy: true, error: null }) }))
+        try {
+          await runTodoAction({
+            path: selected, type, action: 'update', workspaceRoot: anchorRoot || undefined,
+            row: { id, 优先级: cur.prio, 描述: String(cur.desc || '').trim() },
+          })
+          closeTodoEdit(key)
+          loadLedger()
+        } catch (e) {
+          setTodoEdits((m) => Object.assign({}, m, { [key]: Object.assign({}, m[key], { busy: false, error: apiErrorText(e, '保存失败') }) }))
+        }
+      }, [todoEdits, selected, anchorRoot, loadLedger, closeTodoEdit])
+
+      // 删除：进入行内二次确认 → 确认后 POST /awf/todo delete
+      const handleTodoDeleteAsk = useCallback((row) => {
+        setTodoDeleteKey(row.type + ':' + row.id)
+      }, [])
+      const handleTodoDeleteCancel = useCallback(() => setTodoDeleteKey(null), [])
+      const handleTodoDeleteConfirm = useCallback(async (key) => {
+        if (!selected || todoBusyKey === key) return
+        const parts = key.split(':')
+        const type = parts[0]
+        const id = parts[1]
+        setTodoBusyKey(key)
+        setActionError(null)
+        try {
+          await runTodoAction({ path: selected, type, action: 'delete', row: { id }, workspaceRoot: anchorRoot || undefined })
+          setTodoDeleteKey(null)
+          loadLedger()
+        } catch (e) {
+          setActionError('删除待办失败：' + apiErrorText(e, '删除失败'))
+          setTodoDeleteKey(null)
+        } finally {
+          setTodoBusyKey(null)
+        }
+      }, [selected, todoBusyKey, anchorRoot, loadLedger])
+
+      // ---- t5：当前任务编辑 / 暂停 / 继续 -----------------------------------
+
+      const handleTaskEdit = useCallback((t) => {
+        setTaskEdit({
+          id: t.id, type: t.type,
+          prio: t.prio || 'P2', status: t.status || 'active',
+          owner: t.owner || '', scope: '', desc: t.title || '',
+          busy: false, error: null,
+        })
+      }, [])
+      const onTaskEditChange = useCallback((field, value) => {
+        setTaskEdit((f) => (f ? Object.assign({}, f, { [field]: value }) : f))
+      }, [])
+      const closeTaskEdit = useCallback(() => setTaskEdit(null), [])
+
+      // 编辑：保存（POST /awf/task update；fields 用中文键，描述→标题）
+      const handleTaskEditSave = useCallback(async () => {
+        const f = taskEdit
+        if (!f || !selected || f.busy) return
+        const fields = {}
+        if (String(f.prio || '')) fields['优先级'] = f.prio
+        if (String(f.status || '')) fields['状态'] = f.status
+        if (String(f.owner || '').trim()) fields['Owner'] = String(f.owner).trim()
+        if (String(f.scope || '').trim()) fields['修改范围'] = String(f.scope).trim()
+        if (String(f.desc || '').trim()) fields['描述'] = String(f.desc).trim()
+        if (Object.keys(fields).length === 0) {
+          setTaskEdit(Object.assign({}, f, { error: '没有可保存的字段变更。' }))
+          return
+        }
+        setTaskEdit(Object.assign({}, f, { busy: true, error: null }))
+        try {
+          await runTaskAction({
+            path: selected, type: f.type, id: f.id, action: 'update',
+            fields, workspaceRoot: anchorRoot || undefined,
+          })
+          setTaskEdit(null)
+          loadLedger()
+        } catch (e) {
+          setTaskEdit((cur) => (cur ? Object.assign({}, cur, { busy: false, error: apiErrorText(e, '保存失败') }) : cur))
+        }
+      }, [taskEdit, selected, anchorRoot, loadLedger])
+
+      // 暂停 / 继续（active↔blocked）
+      const handleTaskToggle = useCallback(async (t, action) => {
+        if (!selected || !t || !t.id || (taskWorking && taskWorking.id === t.id)) return
+        setTaskWorking({ id: t.id, action })
+        setActionError(null)
+        try {
+          await runTaskAction({
+            path: selected, type: t.type, id: t.id, action,
+            workspaceRoot: anchorRoot || undefined,
+          })
+          loadLedger()
+        } catch (e) {
+          setActionError((action === 'pause' ? '暂停失败：' : '恢复失败：') + apiErrorText(e, '操作失败'))
+        } finally {
+          setTaskWorking(null)
+        }
+      }, [selected, taskWorking, anchorRoot, loadLedger])
+      const handleTaskPause = useCallback((t) => handleTaskToggle(t, 'pause'), [handleTaskToggle])
+      const handleTaskResume = useCallback((t) => handleTaskToggle(t, 'resume'), [handleTaskToggle])
+
+      // ---- t5：待办类型切换 / 源文件查看 ------------------------------------
+
+      const handleTodoTypeChange = useCallback((v) => {
+        setTodoType(v === 'debug' || v === 'docs' ? v : 'dev')
+        setAddForm(null)
+        setTodoEdits({})
+        setTodoDeleteKey(null)
+      }, [])
+
+      // 打开源文件面板：GET /awf/source（只读）；404 → 「源文件接口未就绪」
+      const openSource = useCallback(async (type, file) => {
+        const t = type === 'debug' || type === 'docs' ? type : 'dev'
+        const f = (file === 'current' || file === 'done') ? file : 'todo'
+        if (!selected) {
+          setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '未选择项目，无法读取源文件。' })
+          return
+        }
+        setSource({ type: t, file: f, busy: true, data: null, copied: false, error: null })
+        try {
+          const res = await fetchSource({ path: selected, type: t, file: f })
+          const src = (res && res.source) || null
+          if (!src || !src.content) {
+            setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '源文件为空或返回异常。' })
+            return
+          }
+          setSource({ type: t, file: f, busy: false, data: src, copied: false, error: null })
+        } catch (e) {
+          const code = e && e.code
+          setSource({
+            type: t, file: f, busy: false, data: null, copied: false,
+            error: code === 'not-found'
+              ? '源文件接口未就绪（GET /awf/source 不存在或文件缺失）。'
+              : apiErrorText(e, '读取源文件失败'),
+          })
+        }
+      }, [selected])
+
+      const closeSource = useCallback(() => setSource(null), [])
+
+      const copySourcePath = useCallback((pathStr) => {
+        copyText(pathStr, (ok) => {
+          setSource((s) => (s ? Object.assign({}, s, { copied: ok }) : s))
+        })
+      }, [])
+
       const header = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 } },
         h('div', { style: { minWidth: 0 } },
-          h('div', { style: { fontWeight: 800, fontSize: 14, color: C.text } }, '工作流进度'),
-          h('div', { style: { fontSize: 10.5, color: C.faint, marginTop: 1, letterSpacing: '.02em' } }, 'agent-workflow 账本 · 只读')),
+          h('div', { style: { fontWeight: 800, fontSize: 14, color: C.text } }, 'Agent Workflow'),
+          h('div', { style: { fontSize: 10.5, color: C.faint, marginTop: 1, letterSpacing: '.02em' } }, 'agent-workflow 账本看板')),
         h('button', {
           onClick: loadLedger,
           disabled: loading,
@@ -403,18 +1804,71 @@ window.__ModuleLoader__.load({
           (projects || []).map((pr) => h('option', { key: pr.path, value: pr.path },
             `${pr.id}（${pr.path}）`))))
 
-      const body = error
-        ? renderErrorBody(error, loadLedger)
-        : ledger
-          ? renderLedgerBody(ledger)
-          : renderEmptyBody(projects)
+      const body = notInit
+        ? renderInitCard({ busy: initBusy, error: initError, onInit: handleInit })
+        : error
+          ? renderErrorBody(error, loadLedger)
+          : ledger
+            ? renderLedgerBody(ledger, {
+                onStart: handleStart,
+                starting,
+                onOpenArchive: handleOpenArchive,
+                onDelete: handleDeleteClick,
+                deleting: delModal && delModal.task ? delModal.task.id : null,
+                actionError,
+
+                // t5：todo CRUD
+                onTodoAdd: openAddForm,
+                onTodoAddChange: onAddFormChange,
+                onTodoAddSave: handleTodoAddSave,
+                onTodoAddCancel: closeAddForm,
+                todoAddForm: addForm,
+                todoType,
+                onTodoTypeChange: handleTodoTypeChange,
+                onTodoEdit: handleTodoEdit,
+                onTodoEditChange: onTodoEditChange,
+                onTodoEditSave: handleTodoEditSave,
+                onTodoEditCancel: closeTodoEdit,
+                todoEdits,
+                onTodoDelete: handleTodoDeleteAsk,
+                onTodoDeleteConfirm: handleTodoDeleteConfirm,
+                onTodoDeleteCancel: handleTodoDeleteCancel,
+                todoDeleteKey,
+                todoBusyKey,
+
+                // t5：当前任务编辑 / 暂停 / 继续
+                onTaskEdit: handleTaskEdit,
+                onTaskEditChange: onTaskEditChange,
+                onTaskEditSave: handleTaskEditSave,
+                onTaskEditCancel: closeTaskEdit,
+                onTaskPause: handleTaskPause,
+                onTaskResume: handleTaskResume,
+                taskEdit,
+                taskWorking,
+
+                // t5：源文件查看
+                onOpenSource: openSource,
+                source,
+                onCloseSource: closeSource,
+                onCopySourcePath: copySourcePath,
+              })
+            : renderEmptyBody(projects)
 
       return h('div', {
         style: {
           fontSize: 13, color: C.text, height: '100%', overflowY: 'auto',
           padding: '12px 12px 20px', boxSizing: 'border-box',
         },
-      }, header, selector, body)
+      },
+        // 卡片/行 hover 质感：一次性注入静态样式（纯手写 h() 无构建）
+        h('style', { key: 'awf-hover-css' }, AWF_HOVER_CSS),
+        header, selector, body,
+        archive ? renderArchiveModal(archive, () => setArchive(null)) : null,
+        delModal ? renderDeleteModal(delModal, {
+          onRollback: () => handleDeleteConfirm('rollback'),
+          onLedgerOnly: () => handleDeleteConfirm('ledger-only'),
+          onCancel: () => setDelModal(null),
+        }) : null)
     }
 
     // ---- 纯渲染函数（导出于 module.exports，供测试直接调用） ----------------
@@ -463,11 +1917,39 @@ window.__ModuleLoader__.load({
         h('span', { style: { fontSize: 24, lineHeight: 1 } }, '📭'),
         h('div', { style: { fontWeight: 700, fontSize: 13, color: C.text, marginTop: 10 } }, '项目索引为空'),
         h('div', { style: muted({ marginTop: 6, maxWidth: 240 }) },
-          '先运行 `awf register` 登记项目，再回来查看工作流进度。'))
+          '先运行 `awf register` 登记项目，再回来查看 Agent Workflow 账本。'))
     }
 
-    function renderLedgerBody(ledger) {
+    /**
+     * 账本看板主体。
+     * @param {object} ledger /awf/ledger 的 ledger 字段
+     * @param {object} [ui] 交互回调（均可选）：
+     *   t2：{onStart, starting, onOpenArchive, onDelete, deleting, actionError}
+     *   t5 todo CRUD：{todoType, onTodoTypeChange, onTodoAdd, todoAddForm, onTodoAddChange,
+     *                  onTodoAddSave, onTodoAddCancel, onTodoEdit, todoEdits, onTodoEditChange,
+     *                  onTodoEditSave, onTodoEditCancel, onTodoDelete, todoDeleteKey, todoBusyKey,
+     *                  onTodoDeleteConfirm, onTodoDeleteCancel}
+     *   t5 任务 CRUD：{onTaskEdit, taskEdit, onTaskEditChange, onTaskEditSave, onTaskEditCancel,
+     *                  onTaskPause, onTaskResume, taskWorking}
+     *   t5 源文件：{onOpenSource(type,file), source, onCloseSource, onCopySourcePath}
+     */
+    function renderLedgerBody(ledger, ui) {
       const items = []
+      const U = ui || {}
+      const recent = (Array.isArray(ledger.recent) ? ledger.recent : []).slice(0, 5) // DEV-022：只显示最近 5 条
+      const todoRows = collectTodoRows(ledger)
+
+      if (U.actionError) {
+        items.push(h('div', {
+          key: 'action-error',
+          style: {
+            display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, padding: '7px 10px',
+            borderRadius: 8, fontSize: 11.5, color: C.error, wordBreak: 'break-all',
+            border: '1px solid color-mix(in srgb, ' + C.error + ' 40%, transparent)',
+            background: 'color-mix(in srgb, ' + C.error + ' 7%, transparent)',
+          },
+        }, h('span', {}, '⚠️'), h('span', {}, U.actionError)))
+      }
 
       // ---- 项目卡：名称 / 路径 / purpose / 新鲜度徽章 / 更新提示
       const fresh = ledger.status && ledger.status.fresh
@@ -511,7 +1993,22 @@ window.__ModuleLoader__.load({
       items.push(h(SectionTitle, { key: 'cur-h', label: '当前任务', count: ledger.current.length }))
       if (ledger.current.length > 0) {
         ledger.current.forEach((t, i) => {
-          items.push(h(TaskCard, { key: 'cur-' + i, t }))
+          const editingThis = !!(U.taskEdit && U.taskEdit.id === t.id)
+          items.push(h(TaskCard, {
+            key: 'cur-' + i, t,
+            onDelete: U.onDelete,
+            deleting: U.onDelete && U.deleting === t.id,
+            onEdit: U.onTaskEdit,
+            editing: editingThis,
+            editForm: editingThis ? U.taskEdit : null,
+            onEditChange: U.onTaskEditChange,
+            onEditSave: U.onTaskEditSave,
+            onEditCancel: U.onTaskEditCancel,
+            onPause: U.onTaskPause,
+            onResume: U.onTaskResume,
+            working: U.taskWorking,
+            onOpenSource: typeof U.onOpenSource === 'function' ? (() => U.onOpenSource(t.type, 'current')) : undefined,
+          }))
         })
       } else {
         items.push(h('div', {
@@ -520,28 +2017,97 @@ window.__ModuleLoader__.load({
         }, '当前无进行中任务 · 全部空闲'))
       }
 
-      // ---- 待办进度
-      if (ledger.todo.length > 0) {
-        items.push(h(SectionTitle, { key: 'todo-h', label: '待办进度' }))
-        items.push(h('div', { key: 'todo', style: cardStyle },
-          h('div', { style: { paddingTop: 2 } },
-            ledger.todo.map((t) => TodoBar({
-              key: t.type, label: TYPE_LABEL(t.type), done: t.done, total: t.total,
-            })))))
+      // ---- 待办（类型 toggle + 该类型未开始任务行 CRUD；todo.md 是表格行，无进度条）
+      if (ledger.todo.length > 0 || todoRows.length > 0) {
+        const selType = (U.todoType && (U.todoType === 'dev' || U.todoType === 'debug' || U.todoType === 'docs')) ? U.todoType : 'dev'
+        const typeRows = todoRows.filter((r) => r.type === selType)
+        items.push(h(SectionTitle, { key: 'todo-h', label: '待办' }))
+        const cardChildren = []
+        cardChildren.push(h('div', { key: 'toggle', style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+          h(TypeToggle, { value: selType, onChange: U.onTodoTypeChange }),
+          typeof U.onTodoAdd === 'function'
+            ? h('button', {
+                onClick: U.todoAddForm ? U.onTodoAddCancel : U.onTodoAdd,
+                style: tinyBtn(!!U.todoAddForm),
+              }, U.todoAddForm ? '收起' : '＋ 新增')
+            : null))
+        cardChildren.push(h('div', {
+          key: 'rows-title',
+          style: {
+            display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8,
+            borderTop: '1px dashed ' + C.hairline,
+          },
+        },
+          h('span', { style: { fontSize: 11.5, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType)),
+          h('span', { style: { fontSize: 10.5, color: C.faint } }, String(typeRows.length))))
+        if (U.todoAddForm) {
+          cardChildren.push(h(TodoAddForm, {
+            key: 'todo-add-form',
+            form: U.todoAddForm,
+            onChange: U.onTodoAddChange,
+            onSave: U.onTodoAddSave,
+            onCancel: U.onTodoAddCancel,
+          }))
+        }
+        if (typeRows.length > 0) {
+          cardChildren.push(h('div', { key: 'rows' },
+            typeRows.map((r) => {
+              const key = r.type + ':' + r.id
+              const editing = !!(U.todoEdits && U.todoEdits[key] !== undefined)
+              const deleting = !!(U.todoDeleteKey && U.todoDeleteKey === key)
+              return h(TodoRow, {
+                key, row: r,
+                onStart: U.onStart, starting: U.starting,
+                onEdit: U.onTodoEdit,
+                editing,
+                editForm: editing ? U.todoEdits[key] : null,
+                onEditChange: U.onTodoEditChange ? ((f, v) => U.onTodoEditChange(key, f, v)) : undefined,
+                onEditSave: U.onTodoEditSave ? (() => U.onTodoEditSave(key)) : undefined,
+                onEditCancel: U.onTodoEditCancel ? (() => U.onTodoEditCancel(key)) : undefined,
+                onDelete: U.onTodoDelete,
+                deleting,
+                onDeleteConfirm: deleting && U.onTodoDeleteConfirm ? (() => U.onTodoDeleteConfirm(key)) : undefined,
+                onDeleteCancel: U.onTodoDeleteCancel,
+                busy: U.todoBusyKey === key,
+                onOpenSource: typeof U.onOpenSource === 'function'
+                  ? (() => U.onOpenSource(selType, 'todo')) : undefined,
+              })
+            })))
+        } else {
+          cardChildren.push(h('div', {
+            key: 'rows-empty',
+            style: {
+              marginTop: 8, padding: '14px 0', textAlign: 'center',
+              color: C.faint, fontSize: 11.5,
+              border: '1px dashed ' + C.hairline, borderRadius: 8,
+            },
+          }, '该类型暂无未开始任务' + (typeof U.onTodoAdd === 'function' ? '（可点「＋ 新增」登记）' : '')))
+        }
+        items.push(h('div', { key: 'todo', className: 'awf-card', style: cardStyle }, cardChildren))
       }
 
-      // ---- 最近完成
-      if (ledger.recent.length > 0) {
-        items.push(h(SectionTitle, { key: 'recent-h', label: '最近完成', count: ledger.recent.length }))
-        items.push(h('div', { key: 'recent', style: Object.assign({}, cardStyle, { padding: '4px 12px', marginBottom: 0 }) },
-          ledger.recent.map((r, i) => h(RecentRow, { key: 'recent-' + i, r }))))
+      // ---- 最近完成（仅 5 条，可点击查看归档）
+      if (recent.length > 0) {
+        items.push(h(SectionTitle, { key: 'recent-h', label: '最近完成', count: recent.length }))
+        items.push(h('div', { key: 'recent', className: 'awf-card', style: Object.assign({}, cardStyle, { padding: '4px 12px', marginBottom: 0 }) },
+          recent.map((r, i) => h(RecentRow, { key: 'recent-' + i, r, onOpen: U.onOpenArchive }))))
       }
 
       items.push(h('div', {
         key: 'foot',
         style: Object.assign(muted({ marginTop: 10 }), { textAlign: 'center' }),
       },
-        `数据来自 agent-workflow/tasks/*（只读，每 ${POLL_MS / 1000}s 自动刷新）`))
+        `账本数据来自 agent-workflow/tasks/*，每 ${POLL_MS / 1000}s 自动刷新`))
+
+      // 源文件查看面板（覆盖层；只读 .md 展示 + 复制路径）
+      if (U.source) {
+        items.push(h(SourcePanel, {
+          key: 'source-panel',
+          src: U.source,
+          onClose: U.onCloseSource,
+          onCopy: U.onCopySourcePath,
+        }))
+      }
 
       return h('div', { style: { marginTop: 6 } }, items)
     }
@@ -552,7 +2118,7 @@ window.__ModuleLoader__.load({
     }
 
     function TabTitle() {
-      return h('span', { style: { fontWeight: 600, fontSize: 12 } }, '工作流进度')
+      return h('span', { style: { fontWeight: 600, fontSize: 12 } }, 'Agent Workflow')
     }
 
     // ---- 插件体 -----------------------------------------------------------
@@ -599,8 +2165,8 @@ window.__ModuleLoader__.load({
           try {
             const end = better.registerTab({
               id: 'awf-dashboard',
-              title: '工作流进度',
-              description: 'agent-workflow 账本可视化：当前任务 / todo 进度 / 最近完成 / 新鲜度',
+              title: 'Agent Workflow',
+              description: 'agent-workflow 账本看板：当前任务 / todo 进度 / 最近完成 / 初始化引导 / 开始任务 / 归档查看',
               single: true,
               component: (tabProps) => h(Dashboard, tabProps || {}),
             })
@@ -617,8 +2183,25 @@ window.__ModuleLoader__.load({
     exports.renderLedgerBody = renderLedgerBody
     exports.renderErrorBody = renderErrorBody
     exports.renderEmptyBody = renderEmptyBody
+    exports.renderInitCard = renderInitCard
+    exports.renderArchiveModal = renderArchiveModal
+    exports.renderDeleteModal = renderDeleteModal
     exports.resolveDefaultProject = resolveDefaultProject
     exports.resolveAnchorRoot = resolveAnchorRoot
+    exports.detectNotInitialized = detectNotInitialized
+    exports.collectTodoRows = collectTodoRows
+    exports.buildDeleteView = buildDeleteView
+    exports.deleteReasonText = deleteReasonText
+    exports.getJson = getJson
+    exports.postJson = postJson
+    exports.runDeleteFlow = runDeleteFlow
+    exports.apiErrorText = apiErrorText
+    exports.runTodoAction = runTodoAction
+    exports.runTaskAction = runTaskAction
+    exports.fetchSource = fetchSource
+    exports.copyText = copyText
+    exports.WORKFLOW_STEPS = WORKFLOW_STEPS
+    exports.inferWorkflowStage = inferWorkflowStage
     return module.exports
   },
 })
