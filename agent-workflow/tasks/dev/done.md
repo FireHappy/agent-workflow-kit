@@ -29,3 +29,18 @@
 P2 后续批次：RT-3 区间归因（medium）、SKILL.md 同步（medium）、_legacy_candidates 死代码、headless 正文回退、模板 GUI/sessionId 措辞 + F5 正则。
 
 | DEV-013 | P1 | 架构审查 P1 修复批次：check 兜底×3 / approval 统一 / 模板中立 / 副本漂移 + 误吞会话 / headless 退出码 5 / 落地误判 | 2026-11-01 |
+## [DEV-014] P2 后续批次（RT-3 区间归因 + SKILL 同步 + 清理）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | archived |
+| Owner | lead |
+| 修改范围 | bin/awf-dispatch、skills/cross-project-dispatch/SKILL.md、templates/workflows/cross-project.md、test/smoke.sh、agent-workflow/ 双副本 |
+| 验收标准 | 5 项 P2 全部落地；smoke 113/113；check 全绿；captain 快验通过 |
+
+### 下一步
+无（P2 批次闭环）。跨项目 skill 分发副本（$DSH_HOME/skills）待下次 install 时同步。
+
+| DEV-014 | P2 | P2 后续批次：RT-3 区间归因 / SKILL.md 同步 / 死代码清理 / headless 回退 / 模板措辞 + F5 正则 | 2026-11-01 |
+
