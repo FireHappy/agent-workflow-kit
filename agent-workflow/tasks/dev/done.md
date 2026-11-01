@@ -131,6 +131,7 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 
 | DEV-018 | P1 | release-prep 0.5.0：一键发版装配 | 2026-11-01 |
 | DEV-019 | P1 | 工作流进度 DSH 插件：/awf/projects + /awf/ledger 只读账本路由、右侧边栏「工作流进度」页签（项目选择/状态徽章/todo 进度/最近完成/新鲜度/自动刷新）、ledger 单测；修复 better-sidebar 动态注入 | 2026-11-01 |
+| DEV-021 | P1 | 建队账本门禁：awf team-audit + check F7（扫 .agent-teams/ 引用 ID 校验账本登记，未登记 FAIL）+ AGENTS.md 铁律/team-flow §0 同步 | 2026-11-01 |
 
 ## [DEV-019] 工作流进度 DSH 插件（dsh-awf-dashboard）
 
@@ -160,3 +161,32 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 重启 DSH 验证：web 引导不再崩溃、「工作流进度」页签出现。若仍失败，把 `dsh.profile.bundles` 里的 `dsh-awf-dashboard` 移除即可恢复（依赖与副本已就绪）。
 
 > 事故记录（2026-11-01）：首次安装后 DSH web 引导崩溃（`web boot: 1 entry did not activate`，entry pending 等待 `@deepseek-ai/dsh-client-locale / dsh-client-ui-slots / dsh-client-ui-sidebar-right / dsh-client-modules`）。根因：`dsh.client.inject` 声明了宿主未提供的服务。修复：inject 收敛为 `locale + dsh-client-ui-slots`（与可正常启动的 dsh-at-file / dsh-builtin-browser 完全一致），删除 `manifestVersion`，peerDeps 对齐；客户端 chunk 的 `inject` 导出与 manifest 保持一致（测试自动校验两者相等）。
+
+## [DEV-021] 建队账本门禁：awf team-audit + check F7
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | wg-kit |
+| 协作模式 | single |
+| 来源任务 | 用户指摘（DEV-019 改进建队漏登记账本） |
+| 修改范围 | bin/awf（+agent-workflow/bin/awf 副本）、templates/AGENTS.md.tmpl（+agent-workflow/templates/ 副本）、AGENTS.md（bootstrap 重生成）、docs/team-flow.md |
+| 分支/工作区 | main（agent-workflow-kit） |
+| 依赖 | 无 |
+| 最近更新 | 2026-11-01 |
+
+### 目标
+把「建队前先登记账本」从文档建议升级为机械门禁：新增 `awf team-audit` 子命令 + `awf check` 的 F7 检查，扫描 `.agent-teams/*/team.json` 引用的任务 ID 是否已在账本登记；未登记即 FAIL。同步强化 templates/AGENTS.md.tmpl 铁律与 docs/team-flow.md §0。
+
+### 验收标准
+- [ ] awf team-audit：团队引用已登记 ID 时通过（exit 0）；引用未登记 ID 时报告并 exit 1
+- [ ] awf check：存在 .agent-teams/ 且未登记时 FAIL（F7）；登记正常时全部通过
+- [ ] 生成副本同步：bin/awf ↔ agent-workflow/bin/awf、两份 AGENTS.md.tmpl 无漂移
+- [ ] 模板铁律与 AGENTS.md（bootstrap 后）含建队登记条款；docs/team-flow.md §0 含门禁说明与验证命令
+- [ ] ./agent-workflow/check_workflow.sh 退出码 0；本地 commit 含 KIT-DEV-021（禁止 push）
+
+### 下一步
+归档本块；DEV-020 团队完成后按同样流程归档并 commit。
+
+> 背景（2026-11-01）：DEV-019 改进（DEV-020）建队时漏登记账本，用户指出「AGENTS.md 还有问题」。根因：team-flow.md §0 早已写明「先登记再建队」，但 check 无机楃验证 → 靠自觉必然漏。改为 F7 机械兜底。

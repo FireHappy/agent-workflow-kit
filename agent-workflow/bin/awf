@@ -919,6 +919,16 @@ agent-workflow/tasks/docs/done.md
     printf '%s\n' "$out" | grep -v '^$' || true
   fi
 
+  # F7：团队账本前置登记（存在 .agent-teams/ 时）——建队前必须先登记账本任务
+  if [ -d "$root/.agent-teams" ]; then
+    if out="$(cmd_team_audit 2>&1)" && ! printf '%s' "$out" | grep -q '未登记\|未发现任务 ID'; then
+      printf '%s\n' "$out" | grep '团队账本对账通过' || true
+    else
+      fails=$((fails + 1))
+      printf '%s\n' "$out" | sed 's/^WARN  /FAIL  /' || true
+    fi
+  fi
+
   if [ "$fails" -eq 0 ]; then
     say ""
     say "全部检查通过"
@@ -1536,6 +1546,46 @@ cmd_find() {
   '
 }
 
+# ---------------------------------------------------------------- 团队账本对账
+
+# 扫描 .agent-teams/ 下活跃团队，检查描述/任务里引用的任务 ID 是否已在账本登记。
+# 输出：每个未登记的团队一行；全部登记则静默成功（exit 0）。
+cmd_team_audit() {
+  local root teams team_desc ids missing cnt
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+  teams_dir="$root/.agent-teams"
+  [ -d "$teams_dir" ] || { say "没有活跃团队（.agent-teams/ 不存在）"; return 0; }
+
+  missing=0
+  for team_json in "$teams_dir"/*/team.json; do
+    [ -f "$team_json" ] || continue
+    # 描述 + 每个任务 subject + 每个任务 description，全量抽 ID
+    ids="$(awk '
+      function collect(s) {
+        while (match(s, /(DEV|DOCS|DEBUG|REVIEW)-[0-9]+/)) {
+          print toupper(substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH)
+        }
+      }
+      { collect($0) }
+    ' "$team_json" | sort -u)"
+    [ -n "$ids" ] || { warn "$(basename "$(dirname "$team_json")")：描述/任务中未发现任务 ID（DEV-xxx 等）——建队前先在 current.md 登记账本任务"; missing=$((missing + 1)) ; continue; }
+    # 校验每个 ID 是否已在 current.md 或 done.md 登记
+    for id in $ids; do
+      cnt="$(grep -l "^## \[$id\]" "$root"/agent-workflow/tasks/*/current.md "$root"/agent-workflow/tasks/*/done.md 2>/dev/null | wc -l | tr -d ' ')"
+      if [ "$cnt" -eq 0 ]; then
+        warn "团队 $(basename "$(dirname "$team_json")") 引用任务 ${id} 未在 tasks/*/current.md 或 done.md 登记"
+        missing=$((missing + 1))
+      fi
+    done
+  done
+  if [ "$missing" -gt 0 ]; then
+    say "团队账本对账发现 $missing 处未登记（缺失/无 ID）——先登记账本再建队/归档"
+    return 1
+  fi
+  say "团队账本对账通过"
+}
+
 # ---------------------------------------------------------------- main
 
 main() {
@@ -1550,10 +1600,11 @@ main() {
     register)  cmd_register ;;
     projects)  cmd_projects ;;
     find)      cmd_find "$@" ;;
+    team-audit) cmd_team_audit ;;
     release-prep) cmd_release_prep "$@" ;;
     upgrade)     cmd_upgrade "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / register / projects / find / release-prep / upgrade）" ;;
+    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / register / projects / find / team-audit / release-prep / upgrade）" ;;
   esac
 }
 

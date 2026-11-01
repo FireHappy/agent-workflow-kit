@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:3bde2fe1 -->
+<!-- awf:begin v1 digest:34ed01a1 -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -25,6 +25,7 @@
 - 只允许本地 commit，**禁止 push**；推送与合并由用户明确触发
 - 未验证的判断只能写“待确认”，不能写成结论
 - 验证命令不可用时，必须在任务块里写明阻塞原因，并置为 `blocked`
+- **建队/派发前必须先登记账本**：动手前把主任务写进 `agent-workflow/tasks/<type>/current.md`（任务 ID、Owner、验收标准）；`awf team-audit` 与 `awf check`（F7）会校验团队引用的任务 ID 已在账本——未登记直接 FAIL，不能以「建了团队」替代账本登记
 
 ## 任务路由（逐条决策）
 

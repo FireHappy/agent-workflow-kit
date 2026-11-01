@@ -9,12 +9,20 @@
 团队任务和 awf 账本是两套状态，必须显式对齐：
 
 1. **建队前**把主任务写进 `agent-workflow/tasks/<type>/current.md`：`Owner=队长`、`协作模式=team`、`来源任务=<团队名>`
-2. 团队名用 `<任务ID>-<slug>`（如 `DEV-005-team-flow`），归档后能按 ID 检索
+2. 团队名用 `<任务ID>-<slug>`（如 `DEV-005-team-flow`），归档后能按 ID 检索；**团队描述里必须含任务 ID（`DEV-xxx`/`DOCS-xxx`/`DEBUG-xxx`）**
 3. 成员**不写** `tasks/**`；只报告改动文件、命令输出、目标 HEAD
 4. 收尾时由队长把团队产出写进账本并归档：**归档 → check → awf status → commit**
 5. `.agent-teams/` 不入库；对账依据是 `dispatch/log.md` + 账本 + `git log`
 
-这一步是原来最大的缺口：团队"完成"很容易，账本里却查不到对应记录。
+**门禁（机械强制，不靠自觉）**：`awf team-audit`（及 `awf check` 的 F7）扫描 `.agent-teams/*/team.json` 的描述与任务 subject，抽取任务 ID，校验其已在 `tasks/*/current.md` 或 `done.md` 登记。未登记 → 退出码非 0，`check_workflow.sh` 直接 FAIL。建队后、归档前各跑一次：
+
+```sh
+./agent-workflow/bin/awf team-audit   # 通过则静默「团队账本对账通过」
+```
+
+没有任务 ID 或 ID 未登记的团队会被点名。所以**先写 current.md，再建队**；顺序反了就会被 F7 拦住。
+
+这一步是原有最大的缺口：团队"完成"很容易，账本里却查不到对应记录——现在由 F7 机械兜底（2026-11-01 教训：DEV-019 改进建队后账本无记录，靠补登 + F7 才闭环）。
 
 ## 1. 什么时候用
 
