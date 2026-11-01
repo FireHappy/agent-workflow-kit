@@ -44,3 +44,32 @@ P2 后续批次：RT-3 区间归因（medium）、SKILL.md 同步（medium）、
 
 | DEV-014 | P2 | P2 后续批次：RT-3 区间归因 / SKILL.md 同步 / 死代码清理 / headless 回退 / 模板措辞 + F5 正则 | 2026-11-01 |
 
+## [DEV-015] awf 全局索引写入并发安全（无丢失更新）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | wg-kit |
+| 协作模式 | single |
+| 来源任务 | 团队任务 t8（awf-update 批量升级 0.4.2 后修复） |
+| 修改范围 | bin/awf、agent-workflow/bin/awf、test/registry-concurrency.sh |
+| 分支/工作区 | main（agent-workflow-kit） |
+| 依赖 | t1–t7 全部完成（避免与并行 bootstrap 抢写全局索引） |
+| 最近更新 | 2026-11-01 |
+
+### 目标
+让 awf 全局索引写入（~/.agents/projects.tsv 与 AGENTS.md 受控区块）在多个进程并发执行 awf register/bootstrap 时无丢失更新：在 $AGENTS_HOME 下用互斥锁串行化读改写（优先 flock，退化为 mkdir 原子自旋锁 + 陈旧锁超时回收），锁内重新读 REGISTRY、按 P_ID 合并后原子替换，并同步生成副本与新增可重跑的并发回归测试。
+
+### 验收标准
+- [x] N≥4 个不同项目并行 register/bootstrap 后，projects.tsv 与 AGENTS.md 表格均含全部 N 行（test/registry-concurrency.sh 证明）
+- [x] 单项目 register/bootstrap/status/check 的行为与输出与修改前一致（test/smoke.sh 回归）
+- [x] 锁跨进程互斥、带超时与陈旧锁回收、不死锁；macOS（本机）验证可用，POSIX 兼容
+- [x] 修改后 bin/awf 与 agent-workflow/bin/awf 内容一致，check_workflow.sh 退出码 0
+- [x] 不 bump VERSION/CHANGELOG、不改 project.yaml、不 push
+
+### 下一步
+无（并发锁闭环）。Linux 环境可补 flock 分支实测。
+
+| DEV-015 | P1 | awf 全局索引写入并发安全：$AGENTS_HOME 互斥锁（flock / mkdir 自旋 + 陈旧回收）串行化读改写、按 P_ID 合并、test/registry-concurrency.sh 并发回归 | 2026-11-01 |
+

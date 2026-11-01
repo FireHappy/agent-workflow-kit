@@ -1193,13 +1193,88 @@ cmd_release_prep() {
 AGENTS_HOME="${DSH_AGENTS_HOME:-$HOME/.agents}"
 REGISTRY="$AGENTS_HOME/projects.tsv"
 REGISTRY_INDEX="$AGENTS_HOME/AGENTS.md"
+# 全局索引写锁（详见 registry_lock）：register / bootstrap 并发时串行化读改写
+REGISTRY_LOCK="$AGENTS_HOME/.awf-registry.lock"
+REGISTRY_LOCK_MODE=""          # 当前锁类型：flock | mkdir（空 = 未持有）
+REGISTRY_LOCK_TRY=100          # 获取锁的重试上限（次）
+REGISTRY_LOCK_SLEEP=0.3        # 重试间隔（秒）→ 总等待约 30s
+REGISTRY_LOCK_STALE=30         # mkdir 锁陈旧回收阈值（秒）
 
 trim() {
   printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+# 文件 mtime（epoch 秒）：Darwin 用 stat -f，其他平台用 stat -c
+file_mtime() {
+  local out
+  if [ "$(uname -s)" = "Darwin" ]; then
+    out="$(stat -f %m "$1" 2>/dev/null)" || out=0
+  else
+    out="$(stat -c %Y "$1" 2>/dev/null)" || out=0
+  fi
+  [ -n "$out" ] || out=0
+  printf '%s' "$out"
+}
+
+# 获取全局索引写锁：优先 flock（内核在进程退出时自动释放；Linux 默认路径）。
+# 不可用时退化为 mkdir 原子自旋锁（macOS 默认路径），带陈旧锁超时回收
+# （持有者超过 REGISTRY_LOCK_STALE 秒未释放视为崩溃，可回收）。
+# 持锁期间串行化对 REGISTRY / REGISTRY_INDEX 的全部读改写；进程退出由
+# EXIT trap 兜底释放。
+registry_lock() {
+  mkdir -p "$AGENTS_HOME"
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$REGISTRY_LOCK"
+    local i=0
+    while ! flock -n 9; do
+      i=$((i + 1))
+      if [ "$i" -ge "$REGISTRY_LOCK_TRY" ]; then
+        die "等待全局索引锁超时（flock 重试 ${REGISTRY_LOCK_TRY} 次）：$REGISTRY_LOCK"
+      fi
+      sleep "$REGISTRY_LOCK_SLEEP"
+    done
+    REGISTRY_LOCK_MODE=flock
+  else
+    local i=0
+    while ! mkdir "$REGISTRY_LOCK" 2>/dev/null; do
+      i=$((i + 1))
+      if [ -d "$REGISTRY_LOCK" ]; then
+        # 陈旧锁回收：超过阈值视为持有进程已崩溃/挂起，可安全抢占
+        if [ "$(($(date +%s) - $(file_mtime "$REGISTRY_LOCK")))" -gt "$REGISTRY_LOCK_STALE" ]; then
+          rmdir "$REGISTRY_LOCK" 2>/dev/null || true
+          continue
+        fi
+      fi
+      if [ "$i" -ge "$REGISTRY_LOCK_TRY" ]; then
+        die "等待全局索引锁超时（mkdir 自旋 ${REGISTRY_LOCK_TRY} 次）：$REGISTRY_LOCK"
+      fi
+      sleep "$REGISTRY_LOCK_SLEEP"
+    done
+    REGISTRY_LOCK_MODE=mkdir
+  fi
+  trap 'registry_unlock' EXIT
+}
+
+# 释放全局索引写锁（幂等；进程退出时由 EXIT trap 兜底调用）
+registry_unlock() {
+  if [ "$REGISTRY_LOCK_MODE" = flock ]; then
+    flock -u 9 2>/dev/null || true
+    exec 9>&- 2>/dev/null || true
+  elif [ "$REGISTRY_LOCK_MODE" = mkdir ]; then
+    rmdir "$REGISTRY_LOCK" 2>/dev/null || true
+  fi
+  REGISTRY_LOCK_MODE=""
+}
+
+# 重建 AGENTS.md 受控区块；write_registration 在持锁状态下调用。
+# 独立调用时也会自行取锁，保证该入口同样被串行化保护。
 write_registry_index() {
   local block="$AGENTS_HOME/.projects.block.tmp"
+  local hold=0
+  if [ -z "$REGISTRY_LOCK_MODE" ]; then
+    registry_lock
+    hold=1
+  fi
   mkdir -p "$AGENTS_HOME"
   {
     printf '## 项目索引（awf 生成，勿手改）\n\n'
@@ -1240,16 +1315,23 @@ write_registry_index() {
     } >> "$REGISTRY_INDEX"
   fi
   rm -f "$block"
+  if [ "$hold" -eq 1 ]; then
+    registry_unlock
+  fi
 }
 
-# 使用当前 P_* 与 $PWD；调用前必须已 load_project 且 cd 到项目根
+# 使用当前 P_* 与 $PWD；调用前必须已 load_project 且 cd 到项目根。
+# 全程持锁：锁内重新读取当前 REGISTRY、按 P_ID 合并本行后原子替换，
+# 再重建 AGENTS.md 受控区块，杜绝并发 register/bootstrap 的丢失更新。
 write_registration() {
+  registry_lock
   mkdir -p "$AGENTS_HOME"
   [ -f "$REGISTRY" ] || : > "$REGISTRY"
   grep -v -F "$P_ID |" "$REGISTRY" > "$REGISTRY.tmp" || true
   printf '%s | %s | %s | AGENTS.md\n' "$P_ID" "$P_ALIASES" "$PWD" >> "$REGISTRY.tmp"
   mv "$REGISTRY.tmp" "$REGISTRY"
   write_registry_index
+  registry_unlock
 }
 
 is_registered() {
