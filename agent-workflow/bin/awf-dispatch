@@ -11,6 +11,8 @@
 会话正在运行时先等它空闲再发送，没有可用会话时才新建。随后发送任务并立即返回
 （默认异步，不等待回合）。需要本回合结果时加 --wait；需要隔离/调试时加 --new；
 也可以用 --session <id> 直接续跑某个指定会话。会话留在 GUI 里，用户可以继续提细节。
+旧格式（无 [awf] 标记）会话默认不再自动迁移，避免误吞用户自建会话；确认要迁移时
+加 --allow-legacy-reuse（有派发任务包标记的旧会话仍会自动迁移）。
 
 模块来源：`--module` > 票据「模块：」行 > 默认「通用」；不同模块各自一个会话，不串上下文。
 
@@ -73,11 +75,13 @@ SESSION_GONE = object()
 ZOMBIE_TURN_SECONDS = 5.0
 # 回合结束后的落地轮询间隔（等目标 commit 或归档）。
 LANDING_POLL_SECONDS = 10.0
-# 退出码：0 成功；2 前置门/派发失败；3 等待或落地超时；4 疑似僵尸会话。
+# 退出码：0 成功；2 前置门/派发失败；3 等待或落地超时；4 疑似僵尸会话；
+# 5 headless --wait 子进程非零退出（独立状态，不再伪装成 3 的超时/未落地语义）。
 EXIT_OK = 0
 EXIT_FAIL = 2
 EXIT_TIMEOUT = 3
 EXIT_ZOMBIE = 4
+EXIT_HEADLESS_FAIL = 5
 DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
 
@@ -528,15 +532,48 @@ def _reuse_rank(row: dict):
     return (0 if idle else 1, -updated)
 
 
-def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT):
+def _legacy_candidates(rows, target: Path):
+    """项目里可迁移的旧格式会话：同 cwd、非空、空闲、标题形如 `<项目> · <任务>`。
+
+    项目里已存在任何 `[awf]` 规范会话时返回空列表（旧格式不迁移，避免串模块）。
+    """
+    project = Path(target).name
+    real = os.path.realpath(str(target))
+    canonical_exists = any(
+        isinstance(row, dict)
+        and (row.get("cwd") or "")
+        and os.path.realpath(row["cwd"]) == real
+        and session_title(row).startswith(AWF_TITLE_PREFIX)
+        for row in rows or []
+    )
+    if canonical_exists:
+        return []
+    return [
+        row
+        for row in rows or []
+        if isinstance(row, dict)
+        and (row.get("cwd") or "")
+        and os.path.realpath(row["cwd"]) == real
+        and row.get("blank") is not False
+        and row.get("running") is False
+        and is_legacy_session_title(session_title(row), project)
+    ]
+
+
+def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
+                         legacy_probe=None):
     """按「同 cwd + 标题等于 `[awf] <项目> · <模块>`」复用；没有候选返回 None。
 
     复用键是「项目 + 模块」：
     - 精确命中规范标题的会话优先；多个时先选空闲的，再取 updatedAt 最新；
     - `running=true` 的规范会话仍会被选中，由调用方等它空闲（不静默新建）；
     - 匹配不到时**不借用同项目其它模块的会话**，直接返回 None 让调用方新建；
-    - 唯一的迁移例外：项目里还没有任何 `[awf]` 规范会话、且恰好只有一个旧格式（无标记）
-      空闲会话时复用它，调用方会把标题改成规范格式。
+    - 旧格式迁移（RT-1）默认关闭：只有项目里没有任何 `[awf]` 规范会话、且恰好
+      只有一个旧格式空闲会话时，才调用 `legacy_probe(候选)` 确认——确认通过才复用
+      它（调用方随后把标题改成规范格式）。probe 返回 False 或抛异常都视为不迁移。
+      显式 `--allow-legacy-reuse` 把 probe 固定为 True；probe 探到会话消息含派发
+      任务包标记（旧版派发器在它里面派发过）也放行。用户自建的 `<项目> · xxx`
+      会话既无标记、也无显式放行，不会被复用/改名/注入。
     上下文压力不参与筛选：会话上下文是开发资产，收缩交给 harness 的压缩机制。
     """
     project = Path(target).name
@@ -557,8 +594,7 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT):
     if exact:
         return sorted(exact, key=_reuse_rank)[0]
 
-    # 迁移例外：项目还没有任何规范（[awf]）会话，且只有一个旧格式空闲会话时复用它。
-    # 一旦项目里已有规范会话，就只按模块精确匹配，绝不借用其它模块的上下文。
+    # 旧格式迁移（RT-1）：一旦项目里已有规范会话，就只按模块精确匹配，绝不借用。
     if any(session_title(row).startswith(AWF_TITLE_PREFIX) for row in same):
         return None
     legacy = [
@@ -567,7 +603,13 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT):
         if row.get("running") is False
         and is_legacy_session_title(session_title(row), project)
     ]
-    if len(legacy) == 1:
+    if len(legacy) == 1 and legacy_probe is not None:
+        try:
+            if not legacy_probe(legacy[0]):
+                return None
+        except Exception:
+            # 探子读不到消息记录（会话/page 失败等）：宁可不迁移，也不赌。
+            return None
         return legacy[0]
     return None
 
@@ -676,6 +718,38 @@ def latest_assistant(api: DshApi, row: dict):
     return texts[-1] if texts else None
 
 
+def _message_text(message: dict) -> str:
+    parts = []
+    for part in (message or {}).get("content") or []:
+        if part.get("type") == "text" and part.get("text"):
+            parts.append(part["text"])
+    return "\n".join(parts)
+
+
+DISPATCH_MARKER = "任务包开始"
+
+
+def session_has_dispatch_marker(api: DshApi, row: dict,
+                                marker: str = DISPATCH_MARKER) -> bool:
+    """会话消息里是否出现过派发任务包标记（= awf-dispatch 曾在它里面派发过）。
+
+    RT-1：旧格式会话能否迁移，必须确认标记或用户显式 `--allow-legacy-reuse`，
+    避免把用户自建的 `<项目> · xxx` 普通会话误当旧格式复用/改名/注入任务。
+    读不到消息记录（None）时返回 False——宁可不迁移，也不赌。
+    """
+    records = session_records(api, row)
+    if records is None:
+        return False
+    for record in records:
+        event = record.get("event") or {}
+        if "user" not in str(event.get("type") or "").lower():
+            continue
+        message = (event.get("data") or {}).get("message") or {}
+        if marker in _message_text(message):
+            return True
+    return False
+
+
 def turn_activity(api: DshApi, row: dict, since_ms: int = 0) -> dict:
     """统计「本回合」的活动证据：assistant 文本输出 / 工具调用。
 
@@ -747,6 +821,9 @@ def wait_for_landing(target: Path, task_id: str, initial_head, timeout: float,
 
     initial_head 为 None 表示不比较 HEAD（目标非 git 仓库，仅等归档）；
     轮询中的读取失败（None）只跳过本次，不能当作 HEAD 变化。
+    RT-3：HEAD 变化后还要归因——最新 commit 含本任务 ID 才算落地（commit）；
+    无关 commit（其它会话/用户提交）不判落地，继续等 done.md 或超时。
+    没有任务 ID 时退回旧语义（仅按 HEAD 变化判定），避免 ID 缺失票据永远不落地。
     返回 "commit" / "done" / None（超时未落地）。
     """
     deadline = time.time() + max(0.0, timeout)
@@ -757,7 +834,8 @@ def wait_for_landing(target: Path, task_id: str, initial_head, timeout: float,
             and current_head is not None
             and current_head != initial_head
         ):
-            return "commit"
+            if not task_id or commit_message_has_id(target, task_id):
+                return "commit"
         if task_id and ledger_has_id(target, task_id):
             return "done"
         if time.time() >= deadline:
@@ -809,6 +887,21 @@ def git_head_sha(target: Path):
         return None
     except OSError:
         return None
+
+
+def commit_message_has_id(target: Path, task_id: str) -> bool:
+    """最新 HEAD commit 的提交消息是否含本任务 ID（HEAD 变化时的落地归因）。
+
+    RT-3：落地等待期间其它会话或用户的无关 commit 不含本任务 ID，不得判成本任务
+    落地。没有任务 ID（task_id 为空）返回 False，调用方据此退回「仅 HEAD 变化」语义；
+    读不到消息（非 git 仓库、HEAD 为空等）也返回 False——不据不可靠信息判落地。
+    """
+    if not task_id:
+        return False
+    proc = run_git(["git", "-C", str(target), "log", "-1", "--format=%s%n%b", "HEAD"])
+    if proc.returncode != 0:
+        return False
+    return id_regex(task_id).search(proc.stdout) is not None
 
 
 def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
@@ -1187,19 +1280,6 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     api = state["api"]
     workspace = state["workspace"]
 
-    # 落地基线必须在发送前读取；读取失败时区分「目标非 git」与「仓库不可读」。
-    initial_head = None
-    if args.wait:
-        initial_head = git_head_sha(target)
-        if initial_head is None:
-            if (target / ".git").exists() or is_git_repo(target):
-                raise DispatchError(
-                    f"无法读取目标仓库初始 HEAD（{target}），落地判定不可靠；"
-                    "确认仓库可读（git -C <target> rev-parse HEAD）后重试，"
-                    "或去掉 --wait 仅发送任务"
-                )
-            emit("提示：目标不是 git 仓库，--wait 落地判定仅看 done.md 归档", args.json)
-
     # 会话标题约定：`[awf] <项目名> · <模块名>`；模块来自 --module / 票据「模块：」/ 默认「通用」。
     module = resolve_module(text, args.module)
     session_name = args.title or awf_session_title(target.name, module)
@@ -1230,7 +1310,12 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         reused = True
         source = "复用（--session 指定）"
     elif args.reuse:
-        row = select_reuse_session(rows, target, module)
+        def legacy_probe(row: dict) -> bool:
+            # RT-1：显式 --allow-legacy-reuse 直接放行；否则只有会话消息含
+            # 派发任务包标记（旧版派发器在里面派发过）才允许迁移复用。
+            return bool(args.allow_legacy_reuse) or session_has_dispatch_marker(api, row)
+
+        row = select_reuse_session(rows, target, module, legacy_probe=legacy_probe)
         if row is not None:
             session_id = row["sessionId"]
             reused = True
@@ -1301,6 +1386,22 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     if not task_id:
         match = TICKET_ID_RE.search(text or "")
         task_id = match.group(0) if match else ""
+
+    # 落地基线在 prompt 发送前一刻读取（RT-3）：idle-wait（最长 300s）期间其它
+    # 会话或用户的 commit 不再落入「初始 HEAD → 当前 HEAD」变化区间，误判窗口消除；
+    # 读取失败时区分「目标非 git」与「仓库不可读」。
+    initial_head = None
+    if args.wait:
+        initial_head = git_head_sha(target)
+        if initial_head is None:
+            if (target / ".git").exists() or is_git_repo(target):
+                raise DispatchError(
+                    f"无法读取目标仓库初始 HEAD（{target}），落地判定不可靠；"
+                    "确认仓库可读（git -C <target> rev-parse HEAD）后重试，"
+                    "或去掉 --wait 仅发送任务"
+                )
+            emit("提示：目标不是 git 仓库，--wait 落地判定仅看 done.md 归档", args.json)
+
     prompt_ms = int(time.time() * 1000)
     try:
         api.prompt(
@@ -1588,7 +1689,21 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
             print(f"已记录：{log_path}")
         return 0
 
+    # --wait：同步等待 + 落地校验（RT-2：与 --wait 会话模式契约一致）。
+    task_id = ticket_task_id(task.name) or ""
+    # 初始 HEAD 在进程启动前读取（RT-3 同契约）：等待期间无关 commit 不算落地。
+    initial_head = git_head_sha(target)
+    if initial_head is None:
+        if (target / ".git").exists() or is_git_repo(target):
+            raise DispatchError(
+                f"无法读取目标仓库初始 HEAD（{target}），落地判定不可靠；"
+                "确认仓库可读（git -C <target> rev-parse HEAD）后重试，"
+                "或去掉 --wait 仅发送任务"
+            )
+        emit("提示：目标不是 git 仓库，--wait headless 落地判定仅看 done.md 归档", args.json)
+
     proc = start_headless()
+    wait_started = time.time()
     try:
         returncode = proc.wait(timeout=args.timeout)
     except subprocess.TimeoutExpired:
@@ -1617,25 +1732,90 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
             print(f"状态：{status}")
             print(f"进程仍在后台运行（PID {proc.pid}），输出实时写入 {out_path}；需要终止：kill {proc.pid}")
             print(f"已记录：{log_path}")
-        return 3
+        return EXIT_TIMEOUT
 
     final_text = (
         out_path.read_text(encoding="utf-8", errors="replace").strip()
         if out_path.is_file()
         else ""
     )
-    status = "完成" if returncode == 0 else f"失败（exit {returncode}）"
+    if returncode != 0:
+        # RT-2：非零退出是「执行失败」，用独立退出码 5，不再伪装成 3（超时/未落地）。
+        status = f"失败（exit {returncode}）"
+        entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
+                          status, final_text, task)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "headless",
+            "status": status,
+            "waited": True,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "head": git_head(target),
+            "landed": None,
+            "exitCode": returncode,
+            "final": final_text,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(final_text)
+            print(f"输出：{out_path}")
+            print(f"已记录：{log_path}")
+        return EXIT_HEADLESS_FAIL
+
+    # 进程正常退出 ≠ 任务完成：仍要等目标落地（commit 含任务 ID / done.md 归档）。
+    remaining = max(0.0, args.timeout - (time.time() - wait_started))
+    landed = wait_for_landing(target, task_id, initial_head, remaining)
+    head = git_head(target)
+    if not landed:
+        status = "进程已正常退出但任务未落地（无 commit/未归档）"
+        message = (
+            "headless 进程已正常退出但任务未落地（无 commit/未归档）："
+            "可能还在等内部复核；可重新派发或查看输出文件确认进度"
+        )
+        entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
+                          status, final_text or "", task)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "headless",
+            "status": "not_landed",
+            "waited": True,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "head": head,
+            "landed": False,
+            "final": final_text,
+            "message": message,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(message, file=sys.stderr)
+            print(f"目标 HEAD：{head}")
+            print(f"输出：{out_path}")
+            print(f"已记录：{log_path}")
+        return EXIT_TIMEOUT
+
+    status = "完成（已落地：commit）" if landed == "commit" else "完成（已落地：归档）"
     entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
-                      status, final_text, task)
+                      status, final_text or "", task)
     log_path = append_log(entry)
     payload = {
-        "ok": returncode == 0,
+        "ok": True,
         "mode": "headless",
-        "status": status,
+        "status": "completed",
         "waited": True,
         "pid": proc.pid,
         "output": str(out_path),
-        "head": git_head(target),
+        "head": head,
+        "landed": landed,
         "final": final_text,
         "log": str(log_path),
     }
@@ -1643,10 +1823,16 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
         print(json.dumps(payload, ensure_ascii=False))
     else:
         print(f"状态：{status}")
-        print(final_text)
+        print(f"目标 HEAD：{head}")
+        if final_text:
+            excerpt = final_text.strip()
+            if len(excerpt) > 900:
+                excerpt = excerpt[:900] + "\n…（完整回报见输出文件）"
+            print("\n--- headless 输出（节选）---")
+            print(excerpt)
         print(f"输出：{out_path}")
         print(f"已记录：{log_path}")
-    return 0 if returncode == 0 else 3
+    return EXIT_OK
 
 
 def dispatch_handoff(target: Path, task: Path, text: str, title: str, args):
@@ -1701,7 +1887,9 @@ def main(argv=None) -> int:
             "        复用键 = 同 cwd + 标题等于「[awf] <项目名> · <模块名>」；\n"
             "        模块来源：--module > 票据「模块：」行 > 默认「通用」；\n"
             "        匹配不到时不借用同项目其它模块的会话，直接新建本模块会话（避免上下文串味）；\n"
-            "        项目里恰好只有一个旧格式（无 [awf] 标记）空闲会话时复用它并改名为规范标题；\n"
+            "        旧格式迁移（默认关闭）：项目里恰好只有一个旧格式（无 [awf] 标记）空闲会话时，\n"
+            "        仅当会话消息含派发任务包标记、或显式 --allow-legacy-reuse 才复用它并改名；\n"
+            "        用户自建的 <项目> · xxx 普通会话不会被复用/改名/注入；\n"
             "        不看上下文压力（上下文是开发资产，收缩交给 harness 压缩机制）；\n"
             "        复用时不新建会话，标题更新为「[awf] <项目名> · <模块名>」后直接 prompt。\n"
             "        选中的会话 running=true 时先等它空闲（--idle-wait，默认 300s），超时报错并建议 --new，\n"
@@ -1712,18 +1900,23 @@ def main(argv=None) -> int:
             "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
             "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
             "\n--wait 可靠性：\n"
-            "        回合结束后还要等落地：目标 HEAD 发生变化（commit）或账本 done.md 出现任务 ID（归档）\n"
-            "        才算完成；超时未落地返回 3，并提示可重新派发（--force 同名）或 --session 续跑。\n"
+            "        初始 HEAD 在 prompt 发送前一刻采集（idle-wait 期间的无关 commit 不落入判定区间）；\n"
+            "        回合结束后还要等落地：目标 HEAD 变化且最新 commit 含任务 ID（commit），\n"
+            "        或账本 done.md 出现任务 ID（归档）才算完成；无关 commit 不判落地。\n"
+            "        超时未落地返回 3，并提示可重新派发（--force 同名）或 --session 续跑。\n"
             "        回合 <5s 且零 assistant 输出、零工具调用 → 疑似僵尸会话（常见于复用旧会话），\n"
             "        立即返回 4，提示用 --new 重派或在 GUI 重开会话；不会空转到 --timeout。\n"
             "\n--headless：默认同样不等待（后台启动、立即返回输出文件路径）；\n"
-            "        加 --wait 才同步等待进程结束。--handoff 只生成交接单，本身不执行回合。\n"
+            "        加 --wait 才同步等待进程结束，并同样校验落地（初始 HEAD 在启动前采集，\n"
+            "        退出 0 后仍等 commit 含任务 ID / done.md 归档）；进程非零退出返回 5（独立于 3 的超时）。\n"
+            "        --handoff 只生成交接单，本身不执行回合。\n"
             "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
             "        先拆 2–3 个可并行子任务、声明依赖、队长汇总；插件不可用时目标 agent\n"
             "        忽略该节，按普通会话完成。缺省不追加，任务包与旧版一致。\n"
             "\n退出码：0 成功（--wait 时回合已结束且已落地；未等待时表示已发送）；\n"
-            "        2 前置门或派发失败；3 --wait 超时（回合未结束或已结束但未落地）；\n"
-            "        4 疑似僵尸会话（回合即时结束且零输出）；1 未预期异常。\n"
+            "        2 前置门或派发失败；3 --wait 超时（回合未结束、或已结束但未落地）；\n"
+            "        4 疑似僵尸会话（回合即时结束且零输出）；5 headless 子进程非零退出；\n"
+            "        1 未预期异常。\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1800,6 +1993,12 @@ def main(argv=None) -> int:
         help="兼容别名：等价于默认行为（只发送，不等待回合）",
     )
     parser.add_argument("--force", action="store_true", help="允许同名会话重复派发")
+    parser.add_argument(
+        "--allow-legacy-reuse",
+        action="store_true",
+        help="允许复用项目里唯一的旧格式（无 [awf] 标记）空闲会话并改名为规范标题；"
+        "默认只在会话消息含派发任务包标记时才迁移，用户自建的 <项目> · xxx 会话不会被复用",
+    )
     parser.add_argument("--allow-dirty", action="store_true", help="允许目标有已跟踪改动")
     parser.add_argument("--allow-active", action="store_true", help="允许目标已有 active 任务")
     parser.add_argument("--title", default="", help="会话标题（默认 [awf] <项目> · <模块>）")

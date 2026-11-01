@@ -281,7 +281,9 @@ def row(session_id, cwd=str(target), running=False, blank=False, title="",
 assert module.DEFAULT_REUSE is True, "默认必须复用"
 assert module.ZOMBIE_TURN_SECONDS == 5.0, "僵尸判定阈值必须是 5s"
 assert module.LANDING_POLL_SECONDS == 10.0, "落地轮询间隔必须是 10s"
-assert (module.EXIT_OK, module.EXIT_FAIL, module.EXIT_TIMEOUT, module.EXIT_ZOMBIE) == (0, 2, 3, 4)
+assert (module.EXIT_OK, module.EXIT_FAIL, module.EXIT_TIMEOUT, module.EXIT_ZOMBIE,
+        module.EXIT_HEADLESS_FAIL) == (0, 2, 3, 4, 5), \
+    "退出码契约：5 是 headless 子进程非零退出（独立于 3 的超时/未落地）"
 assert module.PRESSURE_HINT_LIMIT == 0.9, "压力只作 0.9 提示，不再作为轮换阈值"
 assert module.DEFAULT_IDLE_WAIT == 300, "running 等待默认 300s"
 assert module.MODULE_DEFAULT == "通用", "默认模块必须是「通用」"
@@ -316,19 +318,29 @@ newer = row("s-new", title=title, updated=20)
 assert module.select_reuse_session([older, newer], target, "工作流")["sessionId"] == "s-new"
 assert module.select_reuse_session([older, running_same], target, "工作流")["sessionId"] == "s-old"
 
-# 旧格式标题（无 [awf]）：单条空闲时迁移复用并改名；多条不猜；运行中不迁移
+# 旧格式标题（无 [awf]）：默认不再自动迁移（RT-1，防误吞用户自建会话）；
+# 只有 legacy_probe 确认（显式放行 / 消息含派发任务包标记）才复用；多条不猜；运行中不迁移
 legacy = row("s-legacy", title=f"{project} · 旧任务")
 assert module.is_legacy_session_title(f"{project} · 旧任务", project)
 assert not module.is_legacy_session_title(title, project)
-assert module.select_reuse_session([legacy], target, "工作流")["sessionId"] == "s-legacy"
+assert module.select_reuse_session([legacy], target, "工作流") is None, \
+    "默认不得复用以 <项目> · 开头的用户普通会话（RT-1）"
 assert module.reuse_rename_needed(legacy, title), "旧格式标题复用后必须改名"
 assert not module.reuse_rename_needed(same, title)
+assert module.select_reuse_session([legacy], target, "工作流",
+                                   legacy_probe=lambda r: True)["sessionId"] == "s-legacy", \
+    "probe 确认（--allow-legacy-reuse / 含派发标记）才迁移单一旧格式会话"
+assert module.select_reuse_session([legacy], target, "工作流",
+                                   legacy_probe=lambda r: False) is None, \
+    "probe 拒绝（无派发标记）不得迁移"
 legacy2 = row("s-legacy2", title=f"{project} · 另一个旧任务")
-assert module.select_reuse_session([legacy, legacy2], target, "工作流") is None, "多条旧格式不得猜"
+assert module.select_reuse_session([legacy, legacy2], target, "工作流",
+                                   legacy_probe=lambda r: True) is None, "多条旧格式不得猜"
 assert module.select_reuse_session([row("s-legacy-run", title=f"{project} · 旧", running=True)],
-                                   target, "工作流") is None
+                                   target, "工作流", legacy_probe=lambda r: True) is None
 # 项目已有规范会话时，旧格式也不迁移（避免串模块）
-assert module.select_reuse_session([other_module, legacy], target, "工作流") is None
+assert module.select_reuse_session([other_module, legacy], target, "工作流",
+                                   legacy_probe=lambda r: True) is None
 
 # 不兜底复用普通用户会话；不同 cwd / blank 跳过；无候选返回 None
 assert module.select_reuse_session([row("s-user", title="用户的会话")], target, "工作流") is None
@@ -464,13 +476,15 @@ def _args(**overrides):
         idle_wait=300, force=False, team=False, json=False, headless=False,
         handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
         allow_active=False, apply=False, prune=False, web_url="",
+        allow_legacy_reuse=False,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
 
 
 def run_dispatch(api, task_module, idle_wait=300, force=False, reuse=True,
-                 json_mode=False, expect_error=False, sessions_in_preflight=True):
+                 json_mode=False, expect_error=False, sessions_in_preflight=True,
+                 allow_legacy=False):
     logs = []
     output = io.StringIO()
     original = (module.preflight, module.append_log, module.emit)
@@ -481,7 +495,8 @@ def run_dispatch(api, task_module, idle_wait=300, force=False, reuse=True,
         f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n"
         f"- 模块：{task_module}\n"
     )
-    args = _args(reuse=reuse, idle_wait=idle_wait, force=force, json=json_mode)
+    args = _args(reuse=reuse, idle_wait=idle_wait, force=force, json=json_mode,
+                 allow_legacy_reuse=allow_legacy)
     try:
         with contextlib.redirect_stdout(output):
             try:
@@ -610,13 +625,22 @@ assert not history_activity["has_output"] and not history_activity["has_tool"], 
 unreadable = module.turn_activity(BrokenPageApi(), activity_row())
 assert unreadable["available"] is False, "读不到记录时不能判僵尸"
 
-orig_sha, orig_ledger = module.git_head_sha, module.ledger_has_id
+orig_sha, orig_ledger, orig_cmid = module.git_head_sha, module.ledger_has_id, module.commit_message_has_id
 try:
+    module.commit_message_has_id = lambda target, task_id: task_id == "TEST-001"
     heads = iter(["aaa", "aaa", "bbb"])
     module.git_head_sha = lambda target: next(heads)
     module.ledger_has_id = lambda target, task_id: False
     assert module.wait_for_landing(
         target, "TEST-001", "aaa", timeout=0.5, interval=0.01) == "commit"
+
+    # RT-3：HEAD 变化但最新 commit 不含任务 ID（无关 commit）→ 不判落地
+    module.git_head_sha = lambda target: "bbb"
+    module.commit_message_has_id = lambda target, task_id: False
+    assert module.wait_for_landing(
+        target, "TEST-001", "aaa", timeout=0.05, interval=0.01) is None, \
+        "无关 commit 不得判落地（RT-3）"
+    module.commit_message_has_id = lambda target, task_id: task_id == "TEST-001"
 
     module.git_head_sha = lambda target: "aaa"
     module.ledger_has_id = lambda target, task_id: task_id == "TEST-001"
@@ -636,7 +660,7 @@ try:
     assert module.wait_for_landing(
         target, "TEST-001", "aaa", timeout=0.5, interval=0.01) == "commit"
 
-    # 空仓库：初始 ""，首次 commit 后应正常判 landed
+    # 空仓库：初始 ""，首次 commit（消息含 ID）后应正常判 landed
     empty_heads = iter(["", "", "abc"])
     module.git_head_sha = lambda target: next(empty_heads)
     assert module.wait_for_landing(
@@ -647,7 +671,8 @@ try:
     assert module.wait_for_landing(
         target, "TEST-001", None, timeout=0.05, interval=0.01) is None
 finally:
-    module.git_head_sha, module.ledger_has_id = orig_sha, orig_ledger
+    module.git_head_sha, module.ledger_has_id, module.commit_message_has_id = (
+        orig_sha, orig_ledger, orig_cmid)
 
 
 TEXT_PAGE = {"records": [
@@ -668,14 +693,32 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
     subprocess.run(
         ["git", "-C", str(repo), "-c", "user.email=smoke@test",
-         "-c", "user.name=smoke", "commit", "-qm", "init"],
+         "-c", "user.name=smoke", "commit", "-qm", "fix: TEST-001 落地"],
         check=True,
     )
     sha = module.git_head_sha(repo)
     assert isinstance(sha, str) and len(sha) == 40, sha
+    assert module.commit_message_has_id(repo, "TEST-001") is True, "提交消息含任务 ID"
+    assert module.commit_message_has_id(repo, "TEST-999") is False, "无关 ID 不得命中"
     assert module.wait_for_landing(
         repo, "TEST-001", "", timeout=0.1, interval=0.01) == "commit"
     assert module.git_head_sha(repo / "missing") is None
+
+    # RT-3：无关 commit（提交消息不含任务 ID，如用户/其它会话的提交）不算本任务落地
+    unrelated = pathlib.Path(tmp) / "unrelated"
+    unrelated.mkdir()
+    subprocess.run(["git", "init", "-q", str(unrelated)], check=True)
+    (unrelated / "b.txt").write_text("b", encoding="utf-8")
+    subprocess.run(["git", "-C", str(unrelated), "add", "b.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(unrelated), "-c", "user.email=smoke@test",
+         "-c", "user.name=smoke", "commit", "-qm", "chore: 用户无关提交"],
+        check=True,
+    )
+    assert module.commit_message_has_id(unrelated, "TEST-001") is False
+    assert module.wait_for_landing(
+        unrelated, "TEST-001", "", timeout=0.1, interval=0.01) is None, \
+        "无关 commit 不得判落地（RT-3）"
 
 
 # 初始 HEAD 读取失败：git 仓库必须明确报错，且不发送任务
@@ -728,16 +771,35 @@ assert other_api.prompts[0][0] != "s-doc", "不得复用其它模块会话"
 assert ("s-created-1", title) in other_api.renamed, other_api.renamed
 assert "会话来源：新建" in logs[0]
 
-# 旧格式标题 → 复用并改名为规范标题；日志/JSON 必须用新标题（row 只是改名前的快照）
-legacy_api = FakeDispatchApi([row("s-legacy", title=f"{project} · 旧任务")])
-logs, _ = run_dispatch(legacy_api, "工作流")
-assert legacy_api.created == [], "旧格式单会话应迁移复用"
-assert ("s-legacy", title) in legacy_api.renamed, legacy_api.renamed
+# RT-1：用户自建旧格式会话（无派发任务包标记）不得被复用/改名/注入 → 新建
+user_legacy_api = FakeDispatchApi([row("s-user-legacy", title=f"{project} · 用户的分析记录")])
+logs, _ = run_dispatch(user_legacy_api, "工作流")
+assert user_legacy_api.created == ["s-created-1"], "用户普通会话不得迁移复用，应新建"
+assert all(sid != "s-user-legacy" for sid, _ in user_legacy_api.renamed), user_legacy_api.renamed
+assert all(sid != "s-user-legacy" for sid, _ in user_legacy_api.prompts), user_legacy_api.prompts
+assert "会话来源：新建" in logs[0]
+
+# RT-1：会话消息含派发任务包标记 → 旧格式迁移复用并改名（旧版派发器留存的会话）
+MARKER_PAGE = {"records": [{"event": {"type": "user/message", "seq": 1,
+    "data": {"message": {"content": [{"type": "text",
+        "text": "请执行下面的跨项目任务。\n----- 任务包开始 -----\n任务：TEST-001"}]}}}}]}
+marker_api = FakeDispatchApi([row("s-legacy-marker", title=f"{project} · 旧任务")], page=MARKER_PAGE)
+logs, _ = run_dispatch(marker_api, "工作流")
+assert marker_api.created == [], "含派发任务包标记的旧格式会话应迁移复用"
+assert ("s-legacy-marker", title) in marker_api.renamed, marker_api.renamed
+assert marker_api.prompts and marker_api.prompts[0][0] == "s-legacy-marker", marker_api.prompts
 assert f"（{title}）" in logs[0], logs[0]
 assert f"（{project} · 旧任务）" not in logs[0], logs[0]
 assert "会话来源：复用" in logs[0]
 
-legacy_json_api = FakeDispatchApi([row("s-legacy-json", title=f"{project} · 旧任务")])
+# RT-1：显式 --allow-legacy-reuse 无标记也迁移
+forc_api = FakeDispatchApi([row("s-legacy-forc", title=f"{project} · 旧任务")])
+logs, _ = run_dispatch(forc_api, "工作流", allow_legacy=True)
+assert forc_api.created == [], "显式放行应迁移复用"
+assert ("s-legacy-forc", title) in forc_api.renamed, forc_api.renamed
+assert forc_api.prompts and forc_api.prompts[0][0] == "s-legacy-forc", forc_api.prompts
+
+legacy_json_api = FakeDispatchApi([row("s-legacy-json", title=f"{project} · 旧任务")], page=MARKER_PAGE)
 _, legacy_json = run_dispatch(legacy_json_api, "工作流", json_mode=True)
 payload = json.loads(legacy_json)
 assert payload["reused"] is True and payload["sessionId"] == "s-legacy-json", payload
@@ -1402,6 +1464,279 @@ if ( cd "$RPD" && ./agent-workflow/bin/awf release-prep --root "$RPD" 0.5.0 >/de
   ok "F6 消除漂移后 release-prep 成功"
 else
   bad "F6 消除漂移后 release-prep 失败"
+fi
+
+# 20. RT-1：旧格式迁移默认关闭，--allow-legacy-reuse 显式放行（帮助与文档同步）
+if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--allow-legacy-reuse'; then
+  ok "RT-1 --help 列出 --allow-legacy-reuse"
+else
+  bad "RT-1 --help 未列出 --allow-legacy-reuse"
+fi
+if grep -q -- '--allow-legacy-reuse' docs/dispatch.md; then
+  ok "RT-1 docs/dispatch.md 同步 --allow-legacy-reuse"
+else
+  bad "RT-1 docs/dispatch.md 缺 --allow-legacy-reuse"
+fi
+
+# 20.1 RT-1/2/3 单元回归（mock API / 真实 git 仓库；不接触真实会话）
+if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+import argparse
+import contextlib
+import importlib.machinery
+import importlib.util
+import io
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_rt_under_test", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+
+def mkrow(session_id, cwd, title="", running=False, blank=False):
+    return {"sessionId": session_id, "cwd": cwd, "running": running, "blank": blank,
+            "updatedAt": 1,
+            "projections": {"values": {"title": title}, "asOfSeq": 1}}
+
+
+class FakeApi:
+    def __init__(self, rows, page=None):
+        self.rows = rows
+        self.page = page if page is not None else {"records": []}
+        self.created = []
+        self.renamed = []
+        self.prompts = []
+
+    def sessions(self):
+        return self.rows
+
+    def rpc(self, method, params, timeout=30):
+        if method != "session/page":
+            raise module.DispatchError(f"未知 RPC：{method}")
+        return self.page
+
+    def create_session(self, workspace_id):
+        sid = f"s-created-{len(self.created) + 1}"
+        self.created.append(sid)
+        return {"sessionId": sid}
+
+    def rename(self, session_id, title):
+        self.renamed.append((session_id, title))
+
+    def prompt(self, session_id, text, request_id):
+        self.prompts.append((session_id, text))
+
+
+class BrokenPageApi(FakeApi):
+    def rpc(self, method, params, timeout=30):
+        raise module.DispatchError("page 不可用")
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    proj = pathlib.Path(tmp) / "proj"
+    proj.mkdir()
+    module_awf = "工作流"
+    canonical = module.awf_session_title(proj.name, module_awf)
+    legacy = mkrow("s-legacy", str(proj), title=f"{proj.name} · 旧任务")
+    user = mkrow("s-user", str(proj), title=f"{proj.name} · 用户的分析记录")
+
+    # RT-1：用户普通会话默认不迁移；probe 确认才迁移
+    assert module.select_reuse_session([user], proj, module_awf) is None, \
+        "RT-1 默认不得复用用户自建 <项目> · xxx 会话"
+    assert module.select_reuse_session([legacy], proj, module_awf) is None, \
+        "RT-1 旧格式默认不自动迁移"
+    assert module.select_reuse_session([legacy], proj, module_awf,
+                                       legacy_probe=lambda r: True)["sessionId"] == "s-legacy"
+    assert module.select_reuse_session([legacy], proj, module_awf,
+                                       legacy_probe=lambda r: False) is None
+
+    # RT-1：标记探子——消息含派发任务包标记 → True；无标记/读不到 → False
+    marker = {"records": [{"event": {"type": "user/message", "seq": 1, "data": {
+        "message": {"content": [{"type": "text", "text": "----- 任务包开始 -----\n任务：TEST-1"}]}}}}]}
+    assert module.session_has_dispatch_marker(FakeApi([], page=marker), legacy) is True
+    assert module.session_has_dispatch_marker(FakeApi([], page={"records": []}), legacy) is False
+    assert module.session_has_dispatch_marker(BrokenPageApi([]), legacy) is False, \
+        "读不到记录不得赌迁移"
+
+    # RT-1：派发主流程——无标记的用户会话不迁移（新建、不注入）；
+    # 有标记 / --allow-legacy-reuse 才迁移复用并改名
+    def run_dispatch_rows(api, allow_legacy=False):
+        logs = []
+        original = (module.preflight, module.append_log, module.emit)
+        module.preflight = lambda target, args, need_channel: {
+            "api": api, "workspace": {"title": "w", "workspaceId": "id"}, "sessions": api.rows}
+        module.append_log = lambda entry: logs.append(entry) or pathlib.Path("/tmp/awf-dispatch-log.md")
+        module.emit = lambda message, json_mode=False: None
+        args = argparse.Namespace(
+            session="", reuse=True, module="", title="", wait=False, timeout=600,
+            idle_wait=300, force=False, team=False, json=True, headless=False,
+            handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
+            allow_active=False, apply=False, prune=False, web_url="",
+            allow_legacy_reuse=allow_legacy)
+        text = f"任务：TEST-001 冒烟\n\n- 目标项目：{proj.name}（{proj}）\n- 模块：{module_awf}\n"
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = module.dispatch_session(
+                proj, pathlib.Path("/tmp/TEST-001-task.md"), text,
+                f"{proj.name} · TEST-001", "dev", args)
+        module.preflight, module.append_log, module.emit = original
+        return code, logs
+
+    api = FakeApi([user])
+    code, _ = run_dispatch_rows(api)
+    assert code == 0 and api.created == ["s-created-1"], "用户会话不得迁移，必须新建"
+    assert all(sid != "s-user" for sid, _ in api.renamed), "用户会话不得被改名（RT-1）"
+    assert all(sid != "s-user" for sid, _ in api.prompts), "用户会话不得被注入任务（RT-1）"
+    assert api.prompts and api.prompts[0][0] == "s-created-1", api.prompts
+
+    api2 = FakeApi([mkrow("s-legacy-m", str(proj), title=f"{proj.name} · 旧任务")],
+                   page=marker)
+    code, _ = run_dispatch_rows(api2)
+    assert code == 0 and api2.created == [] and api2.prompts[0][0] == "s-legacy-m", \
+        "含派发标记的旧会话应迁移复用（RT-1）"
+    assert ("s-legacy-m", canonical) in api2.renamed
+
+    api3 = FakeApi([mkrow("s-legacy-f", str(proj), title=f"{proj.name} · 旧任务")])
+    code, _ = run_dispatch_rows(api3, allow_legacy=True)
+    assert code == 0 and api3.created == [] and api3.prompts[0][0] == "s-legacy-f", \
+        "--allow-legacy-reuse 应迁移复用（RT-1）"
+
+    # RT-2：headless --wait 非零退出 → 独立退出码 5；退出 0 仍走落地校验
+    class FakeProc:
+        def __init__(self, outcome):
+            self.pid = 4242
+            self._outcome = outcome
+
+        def wait(self, timeout=None):
+            if isinstance(self._outcome, BaseException):
+                raise self._outcome
+            return self._outcome
+
+    head_orig = (module.preflight, module.append_log, module.emit,
+                 module.git_head_sha, module.git_head, module.wait_for_landing,
+                 module.subprocess.Popen, os.environ.get("DSH_BIN"))
+    module.preflight = lambda target, args, need_channel: {"api": None, "workspace": {}, "sessions": []}
+    module.append_log = lambda entry: pathlib.Path("/tmp/awf-dispatch-log.md")
+    module.emit = lambda message, json_mode=False: None
+    module.git_head_sha = lambda target: "aaaa"
+    module.git_head = lambda target: "aaaa (HEAD -> main)"
+    module.subprocess.Popen = lambda *a, **k: FakeProc(7)
+    os.environ["DSH_BIN"] = "/bin/sh"
+    landing_calls = []
+    module.wait_for_landing = lambda target, task_id, initial_head, remaining: (
+        landing_calls.append({"task_id": task_id, "initial_head": initial_head}) or "commit")
+
+    def dispatch_headless_case(task_name, proc_outcome, wait_landing, timeout=5):
+        landing_calls.clear()
+        module.subprocess.Popen = lambda *a, **k: FakeProc(proc_outcome)
+        module.wait_for_landing = wait_landing
+        args = argparse.Namespace(
+            session="", reuse=True, module="", title="", wait=True, timeout=timeout,
+            idle_wait=300, force=False, team=False, json=True, headless=True,
+            handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
+            allow_active=False, apply=False, prune=False, web_url="",
+            allow_legacy_reuse=False)
+        with tempfile.TemporaryDirectory() as work, \
+             contextlib.redirect_stdout(io.StringIO()):
+            old_cwd = os.getcwd()
+            os.chdir(work)
+            try:
+                task = pathlib.Path(work) / task_name
+                task.write_text("任务：任务\n", encoding="utf-8")
+                code = module.dispatch_headless(
+                    pathlib.Path(work) / "tgt", task, "任务：任务",
+                    "headless 任务", args)
+            finally:
+                os.chdir(old_cwd)
+        return code
+
+    # 非零退出：独立码 5，不进落地校验
+    code = dispatch_headless_case("TEST-101-task.md", 7, lambda *a, **k: "commit")
+    assert code == module.EXIT_HEADLESS_FAIL == 5, f"非零退出应变 5，实际 {code}"
+    assert landing_calls == [], "非零退出不得走落地校验（RT-2）"
+
+    # 退出 0：仍走 wait_for_landing，初始 HEAD 在启动前采集（RT-3 同契约）
+    module.subprocess.Popen = lambda *a, **k: FakeProc(0)
+    code = dispatch_headless_case("TEST-102-task.md", 0,
+                                  lambda target, task_id, initial_head, remaining: (
+                                      landing_calls.append({"task_id": task_id,
+                                                            "initial_head": initial_head}) or "commit"))
+    assert code == module.EXIT_OK == 0, code
+    assert landing_calls and landing_calls[0]["task_id"] == "TEST-102", landing_calls
+    assert landing_calls[0]["initial_head"] == "aaaa", \
+        "初始 HEAD 必须在进程启动前采集（RT-2/RT-3）"
+
+    # 退出 0 但未落地：按超时语义返回 3（不假装成功）
+    seen = []
+    code = dispatch_headless_case(
+        "TEST-103-task.md", 0,
+        lambda target, task_id, initial_head, remaining: (seen.append(task_id) or None))
+    assert code == module.EXIT_TIMEOUT == 3, code
+    assert seen == ["TEST-103"], "退出 0 后必须校验落地（RT-2）"
+
+    # 进程等待超时仍为 3
+    code = dispatch_headless_case(
+        "TEST-104-task.md", subprocess.TimeoutExpired("dsh", 5),
+        lambda *a, **k: "commit")
+    assert code == module.EXIT_TIMEOUT == 3, "headless 进程超时仍为 3"
+
+    (module.preflight, module.append_log, module.emit,
+     module.git_head_sha, module.git_head, module.wait_for_landing,
+     module.subprocess.Popen) = head_orig[:7]
+    if head_orig[7] is None:
+        os.environ.pop("DSH_BIN", None)
+    else:
+        os.environ["DSH_BIN"] = head_orig[7]
+
+    # RT-3：wait_for_landing 落地归因（真实 git 仓库）
+    with tempfile.TemporaryDirectory() as repo_tmp:
+        repo = pathlib.Path(repo_tmp) / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "smoke@test"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "smoke"], check=True)
+        (repo / "a.txt").write_text("a", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fix: TEST-201 落地"], check=True)
+        base = module.git_head_sha(repo)
+        assert base and len(base) == 40
+        assert module.wait_for_landing(repo, "TEST-201", "", timeout=0.1, interval=0.01) == "commit"
+
+        (repo / "b.txt").write_text("b", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "b.txt"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "chore: 用户无关提交"], check=True)
+        assert module.commit_message_has_id(repo, "TEST-201") is False
+        assert module.commit_message_has_id(repo, "TEST-999") is False
+        assert module.wait_for_landing(repo, "TEST-201", base, timeout=0.1, interval=0.01) is None, \
+            "无关 commit 不得判落地（RT-3）"
+
+        (repo / "c.txt").write_text("c", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "c.txt"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fix: TEST-202 完成"], check=True)
+        assert module.wait_for_landing(repo, "TEST-202", base, timeout=0.1, interval=0.01) == "commit", \
+            "含任务 ID 的 commit 才判落地（RT-3）"
+PY
+then
+  ok "RT-1/2/3 单元回归全绿（用户会话不迁移 / headless 独立退出码 / 无关 commit 不落地）"
+else
+  bad "RT-1/2/3 单元回归失败（见上方 Traceback）"
+fi
+
+# 20.2 RT-2：docs/dispatch.md 退出码表同步 headless 独立码（5）
+if grep -q '^| 5 |' docs/dispatch.md && grep -q '非零退出' docs/dispatch.md; then
+  ok "RT-2 docs/dispatch.md 退出码表含 5（headless 非零退出）"
+else
+  bad "RT-2 docs/dispatch.md 退出码表未同步 headless 独立码"
+fi
+if grep -q '最新 commit 含本任务 ID' docs/dispatch.md; then
+  ok "RT-3 docs/dispatch.md 落地判定含 commit 归因"
+else
+  bad "RT-3 docs/dispatch.md 未写明 commit 归因"
 fi
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
