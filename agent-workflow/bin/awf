@@ -1191,6 +1191,12 @@ cmd_release_prep() {
     warn "CHANGELOG 没有 ## [Unreleased]，也没有 ## [$version]；请手动补版本条目"
   fi
 
+  # c2. 账本块刚写入 current.md → 先刷新 status.md，避免「status.md 新鲜度」门禁在 d 误拦截
+  #     （F1-F3 门禁加入后 release-prep 的顺序修复；已归档的幂等重跑无需刷新）
+  if [ -z "$(release_done_id)" ]; then
+    release_run ./agent-workflow/bin/awf status
+  fi
+
   # d. 校验（失败即停，账本保留在 current.md）
   release_run ./agent-workflow/check_workflow.sh
   release_run bash test/smoke.sh

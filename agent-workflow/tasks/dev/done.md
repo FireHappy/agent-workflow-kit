@@ -129,3 +129,4 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 
 | DEV-017 | P1 | 工作流路由与「项目升级」语义改进（KIT-DEV-017）：路由按目标仓库逐条决策（小任务单会话/可并行才团队/跨仓库默认 awf-dispatch、团队不承载跨仓库任务）；新增 awf upgrade + docs/upgrade.md；check 迁移 FAIL 输出修复指引（| Status | → | 状态 |） | 2026-11-01 |
 
+| DEV-018 | P1 | release-prep 0.5.0：一键发版装配 | 2026-11-01 |

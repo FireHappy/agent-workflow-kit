@@ -1,10 +1,11 @@
-## [Unreleased]
+## [0.5.0] - 2026-11-01
 
 ### Added
 - `check` 机械兜底（F1-F3）：状态字段枚举校验（`active/blocked/review/verify/handoff`，非法值即失败）；`status.md` 新鲜度校验（账本改动后未跑 `awf status` 即失败）；`done.md` 归档块/归档行校验（缺文件、非法 ID、缺优先级或完成日期即失败）
 - `check` 生成副本漂移检测（F6）：`bin/awf`、`bin/awf-dispatch`、`templates/` 与 `agent-workflow/` 对应副本不一致即失败
 - `release-prep` 生成副本漂移保护（F6）：先检测漂移再覆盖，有漂移拒绝执行，不再静默回滚 agent-workflow 侧改动
 - `awf-dispatch --allow-legacy-reuse`（RT-1）：显式放行旧格式会话迁移；默认仅当会话消息含派发任务包标记时自动迁移
+- `awf upgrade [目录] [--dry-run] [--force]`（KIT-DEV-017）：升级已有项目工作流的一等操作——同步 `bin/awf`、`bin/awf-dispatch`、模板与 workflows，保留 project.yaml / tasks / memory / tools / AGENTS.md 区块外内容，随后自动 `bootstrap` + `check`；自定义 `check_workflow.sh` 默认保留并告警、`--force` 才替换；配套 `docs/upgrade.md`（步骤 / 变更清单 / 保留清单 / 验证命令），并有可重跑的 `test/upgrade.sh` 回归
 
 ### Changed
 - 模板 harness 中立化落地（F5）：`templates/workflows/cross-project.md` 移除全部 DSH 专有词（workspace.json / headless / Ungrouped / 会话错误码），收敛为抽象步骤，细节下沉 `docs/dispatch.md` 与派发技能层；`templates/README.md`、`templates/AGENTS.md.tmpl` 同步收敛
@@ -15,12 +16,17 @@
 - headless 任务 ID 与会话模式对齐：文件名优先、票据正文回退（正文里的任务 ID 也能归因落地）
 - headless `--wait` 与会话模式契约对齐（RT-2）：进程退出 0 后仍校验落地（初始 HEAD 在启动前采集）；进程超时未结束仍为退出码 3
 - cross-project 模板措辞统一（F5 补全）：GUI×2 / sessionId×1 改为「图形界面 / 会话 ID」，smoke F5 门禁正则补 gui/sessionId
+- 任务路由改为「先判目标仓库」逐条决策（KIT-DEV-017，模板 + workflows/cross-project.md + README）：目标仓库 == 当前工作区 → 小任务单会话、可并行拆分才用团队；≠ → 默认 `awf-dispatch` 派到目标项目自己的工作区会话执行；**团队不承载跨仓库任务**（附 2026-11-01 七人团队改六仓库反例）；账本与 commit 始终归主线、只本地 commit 禁 push
+- `check` 迁移兼容与修复指引（KIT-DEV-017）：归档块缺「状态」字段或旧英文表头 `| Status |` 时 FAIL 并输出可直接执行的修复指引（`| Status |` → `| 状态 |`，保留归档原值）；`awf status` 兼容读取 `| Status |` 表头；字段检测锚定字段表行，任务块正文引用迁移字样不再污染状态列
 
 ### Fixed
 - 更正 0.4.0「模板中立化」名不副实：cross-project 模板当时仍含 DSH 专有词，本次全部移除并下沉文档与技能层
 - `awf-dispatch` headless 非零退出不再伪装成超时（RT-2）：新增独立退出码 5（执行失败），`docs/dispatch.md` 退出码表同步更新
 - 删除无调用点的 `_legacy_candidates`（旧格式迁移逻辑已内联在 `select_reuse_session` 的 probe 分支，死代码移除避免语义漂移）
 - `skills/cross-project-dispatch/SKILL.md` 同步新语义：--allow-legacy-reuse 参数、退出码 5、旧格式迁移需派发标记且默认关闭
+- 全局索引写入并发安全（DEV-015）：`register` / `bootstrap` 的全局索引写入加锁（flock 优先，本机无 flock 时 mkdir 自旋回退），N=8 并发 register/bootstrap 无丢失更新
+- `release-prep` 顺序修复（0.5.0 发版批次发现）：写账本块后先刷新 `status.md` 再校验，避免 F1-F3「status.md 新鲜度」门禁在发版装配时误拦截
+- `test/registry-concurrency.sh` 锁残留断言按锁模式放宽（DEV-016）：mkdir 模式断言无残留、flock 模式断言锁可正常获取/释放，消除 flock 平台误报
 
 ## [0.4.2] - 2026-10-31
 
