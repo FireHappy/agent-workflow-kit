@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:b644156a -->
+<!-- awf:begin v1 digest:3bde2fe1 -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -42,7 +42,7 @@
 ## 校验
 
 - 框架与入口：`./agent-workflow/check_workflow.sh`
-- 编译：`bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile bin/awf-dispatch`
+- 编译：`bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile bin/awf-dispatch && node --test dsh-plugin/test/ledger.test.js dsh-plugin/test/client-chunk.test.js`
 - 测试：`bash test/smoke.sh`
 
 ## 并行

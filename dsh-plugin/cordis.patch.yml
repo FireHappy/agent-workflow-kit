@@ -1,0 +1,8 @@
+# dsh-awf-dashboard bundle patch
+#
+# 被 `dsh.profile.bundles` 引用：profile 启动时把本行并入插件栈，
+# 加载 lib/index.js（服务端路由）与 lib/client.js（右侧边栏页签）。
+# 同名重复挂载会注册重复路由，安装时确保 bundles 里只有一个 dsh-awf-dashboard。
+- insert:
+    - id: awf-dashboard
+      name: 'dsh-awf-dashboard'

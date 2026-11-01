@@ -130,3 +130,33 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 | DEV-017 | P1 | 工作流路由与「项目升级」语义改进（KIT-DEV-017）：路由按目标仓库逐条决策（小任务单会话/可并行才团队/跨仓库默认 awf-dispatch、团队不承载跨仓库任务）；新增 awf upgrade + docs/upgrade.md；check 迁移 FAIL 输出修复指引（| Status | → | 状态 |） | 2026-11-01 |
 
 | DEV-018 | P1 | release-prep 0.5.0：一键发版装配 | 2026-11-01 |
+| DEV-019 | P1 | 工作流进度 DSH 插件：/awf/projects + /awf/ledger 只读账本路由、右侧边栏「工作流进度」页签（项目选择/状态徽章/todo 进度/最近完成/新鲜度/自动刷新）、ledger 单测；修复 better-sidebar 动态注入 | 2026-11-01 |
+
+## [DEV-019] 工作流进度 DSH 插件（dsh-awf-dashboard）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | wg-kit |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发（插件化工作流，DSH 可视化进度） |
+| 修改范围 | dsh-plugin/（package.json / cordis.patch.yml / src / lib / test / docs）、账本 |
+| 分支/工作区 | main（agent-workflow-kit） |
+| 依赖 | 无 |
+| 最近更新 | 2026-11-01 |
+
+### 目标
+把 agent-workflow 工作流插件化为 DSH 客户端插件 `dsh-awf-dashboard`：在处理需求时可在 DSH GUI 右侧边栏「工作流进度」页签可视化查看项目账本（当前任务状态 / todo 进度 / 最近完成 / status.md 新鲜度），源码与测试随 kit 分发，可安装进桌面 profile 的 bundles。
+
+### 验收标准
+- [ ] 服务端只读路由 /awf/projects + /awf/ledger 输出结构化的账本 JSON（解析复用 KIT-DEV-017 的字段表行锚定规则）
+- [ ] 客户端右侧边栏出现「工作流进度」页签：项目选择、当前任务状态徽章、todo 进度条、最近完成、新鲜度提示；自动刷新
+- [ ] ledger 解析器有可重跑单元测试（node:test，无需 GUI）
+- [ ] 安装进桌面 profile 后 GUI 验证通过；文档说明安装/卸载
+- [ ] ./agent-workflow/check_workflow.sh 退出码 0；改动全在 kit 仓库内；本地 commit 含 KIT-DEV-019
+
+### 下一步
+重启 DSH 验证：web 引导不再崩溃、「工作流进度」页签出现。若仍失败，把 `dsh.profile.bundles` 里的 `dsh-awf-dashboard` 移除即可恢复（依赖与副本已就绪）。
+
+> 事故记录（2026-11-01）：首次安装后 DSH web 引导崩溃（`web boot: 1 entry did not activate`，entry pending 等待 `@deepseek-ai/dsh-client-locale / dsh-client-ui-slots / dsh-client-ui-sidebar-right / dsh-client-modules`）。根因：`dsh.client.inject` 声明了宿主未提供的服务。修复：inject 收敛为 `locale + dsh-client-ui-slots`（与可正常启动的 dsh-at-file / dsh-builtin-browser 完全一致），删除 `manifestVersion`，peerDeps 对齐；客户端 chunk 的 `inject` 导出与 manifest 保持一致（测试自动校验两者相等）。

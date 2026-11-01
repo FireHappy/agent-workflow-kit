@@ -1,0 +1,36 @@
+{
+  "name": "dsh-awf-dashboard",
+  "version": "0.1.0",
+  "description": "agent-workflow 工作流进度看板：在 DSH 右侧边栏可视化项目账本（当前任务 / todo 进度 / 最近完成 / status.md 新鲜度）",
+  "keywords": ["dsh", "plugin", "agent-workflow", "awf", "dashboard"],
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "src", "cordis.patch.yml", "README.md"],
+  "scripts": {
+    "test": "node --test test/ledger.test.js test/client-chunk.test.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-client-locale": "^0.2.1-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-rc.1",
+    "react": "^18.2.0"
+  }
+}
