@@ -18,6 +18,7 @@
 |--------|--------|--------|------|----------|
 | docs | DOCS-003 | P1 | 默认路由：需求先转团队计划、主对话只做路由与验收，含 1 队/写点/跨项目约束 | 2026-10-31 |
 | docs | DOCS-005 | P1 | 派发即建队规则固化 + 模板 harness 中立化 + 两套五项术语统一；发版 0.4.0 | 2026-10-31 |
+| dev | DEV-023 | P1 | 步骤条 icon 裁剪修复（当前节点 CSS 白点 + 去 overflow 裁剪、✓/⏸/空心三态清晰）+ 顶部 已完成/当前/待办 计数 + 三态激活语义（active→实现/verify→验证/review→Review） | 2026-11-01 |
 | docs | DOCS-006 | P1 | 架构审查报告归档 | 2026-11-01 |
 | dev | DEV-021 | P1 | 建队账本门禁：awf team-audit + check F7（扫 .agent-teams/ 引用 ID 校验账本登记，未登记 FAIL）+ AGENTS.md 铁律/team-flow §0 同步 | 2026-11-01 |
 | dev | DEV-020 | P1 | 工作流进度页签改进：UI 重构（分层卡片/语义徽章/渐变进度条/空态错误态，DSH 主题令牌）+ 默认锚定当前会话项目（useWorkspaces/useSession，localStorage 用户选择优先），实现→复核全 pass | 2026-11-01 |
@@ -28,7 +29,6 @@
 | dev | DEV-018 | P1 | release-prep 0.5.0：一键发版装配 | 2026-11-01 |
 | dev | DEV-016 | P3 | registry-concurrency.sh 锁残留断言按锁模式放宽：mkdir 模式断言无残留、flock 模式断言锁文件可正常获取/释放，消除 flock 平台误报 | 2026-11-01 |
 | dev | DEV-015 | P1 | awf 全局索引写入并发安全：$AGENTS_HOME 互斥锁（flock / mkdir 自旋 + 陈旧回收）串行化读改写、按 P_ID 合并、test/registry-concurrency.sh 并发回归 | 2026-11-01 |
-| dev | DEV-014 | P2 | P2 后续批次：RT-3 区间归因 / SKILL.md 同步 / 死代码清理 / headless 回退 / 模板措辞 + F5 正则 | 2026-11-01 |
 
-*最后更新：2026-11-01 21:48*
+*最后更新：2026-11-01 22:28*
 <!-- awf:status:end -->

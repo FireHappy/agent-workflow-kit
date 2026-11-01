@@ -1005,26 +1005,30 @@ test('t7 步骤条渲染：进行中任务显示流程步骤与当前阶段；bl
   const tree = collectTexts(mod.renderLedgerBody(crudLedger()), []).join('|')
   // dev active 任务（DEV-100）：流程标题 + dev 六步 + 当前阶段
   assert.ok(tree.includes('开发') && tree.includes('流程'), '步骤条带类型徽章与流程标题')
-  assert.ok(tree.includes('当前阶段 · 实现'), 'active → 标注当前阶段 实现')
+  assert.ok(tree.includes('当前 · 实现'), 'active → 标注当前阶段 实现')
+  assert.ok(tree.includes('已完成 2') && tree.includes('待办 3'), '步骤计数：已完成/待办明确表达')
   assert.ok(tree.includes('认领') && tree.includes('方案') && tree.includes('验证') && tree.includes('Review') && tree.includes('归档'), 'dev 六步渲染')
   // dev blocked 任务（DEV-101）：暂停位置标注
-  assert.ok(tree.includes('已暂停于「实现」'), 'blocked → 暂停位置标注')
-  // 轨道节点符号：当前=●、已完成=✓、暂停=⏸（节点内符号 + 标签分离）
-  assert.ok(tree.includes('●') && tree.includes('✓') && tree.includes('⏸'), '轨道节点符号齐全（● 当前/✓ 完成/⏸ 暂停）')
+  assert.ok(tree.includes('已暂停 · 实现'), 'blocked → 暂停位置标注')
+  assert.ok(tree.includes('待办 '), 'blocked 也带待办计数')
+  // 轨道节点符号：当前=内嵌 CSS 白点（不再用 7.5px ● 字形，防深色主题裁剪/看不清）、
+  // 已完成=✓、暂停=⏸（节点内符号 + 标签分离）
+  assert.ok(tree.includes('✓') && tree.includes('⏸'), '轨道节点符号齐全（✓ 完成/⏸ 暂停）')
+  assert.ok(!tree.includes('●'), '当前节点不再使用 7.5px ● 字形（防裁剪）')
 
   // debug 类型任务展示 debug 流程
   const dbg = crudLedger()
   dbg.current = [{ type: 'debug', id: 'DBG-1', title: '调试任务', prio: 'P1', status: 'active', owner: '', mode: '', updated: '' }]
   const dbgTree = collectTexts(mod.renderLedgerBody(dbg), []).join('|')
   assert.ok(dbgTree.includes('选择诊断方式') && dbgTree.includes('收集证据') && dbgTree.includes('验证假设') && dbgTree.includes('修复与回归'), 'debug 流程步骤')
-  assert.ok(dbgTree.includes('当前阶段 · 收集证据'), 'debug active 阶段')
+  assert.ok(dbgTree.includes('当前 · 收集证据'), 'debug active 阶段')
 
   // docs 类型任务展示 docs 流程
   const dc = crudLedger()
   dc.current = [{ type: 'docs', id: 'DOCS-1', title: '文档任务', prio: 'P2', status: 'review', owner: '', mode: '', updated: '' }]
   const dcTree = collectTexts(mod.renderLedgerBody(dc), []).join('|')
   assert.ok(dcTree.includes('大纲与核实') && dcTree.includes('撰写') && dcTree.includes('审阅'), 'docs 流程步骤')
-  assert.ok(dcTree.includes('当前阶段 · 审阅'), 'docs review 阶段')
+  assert.ok(dcTree.includes('当前 · 审阅'), 'docs review 阶段')
   delete global.window
 })
 
@@ -1042,7 +1046,8 @@ test('t8 步骤条布局：横向阶段轨道（awf-track + 步骤节点 + 连�
   const track = findNode(tree, (n) => typeof n.type === 'string' && n.props && n.props.className === 'awf-track')
   assert.ok(track, 'awf-track 节点存在')
   const trackTexts = collectTexts(track, [])
-  assert.ok(trackTexts.join('|').includes('●') && trackTexts.join('|').includes('✓'), '轨道内有当前/完成节点符号')
+  assert.ok(trackTexts.join('|').includes('✓'), '轨道内有完成节点符号')
+  assert.ok(!trackTexts.join('|').includes('●'), '当前节点用 CSS 白点而非 ● 字形')
   delete global.window
 })
 

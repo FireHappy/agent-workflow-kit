@@ -979,20 +979,21 @@ window.__ModuleLoader__.load({
         const done = i < index
         const cur = i === index
         const base = {
-          width: 13, height: 13, borderRadius: '50%', flexShrink: 0, boxSizing: 'border-box',
+          width: 15, height: 15, borderRadius: '50%', flexShrink: 0, boxSizing: 'border-box',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 7.5, fontWeight: 800, lineHeight: 1,
+          fontSize: 9, fontWeight: 800, lineHeight: 1,
+          // 不设 overflow:hidden——它会裁掉 boxShadow 光圈/字形上沿（用户反馈「最上面被裁剪」）
         }
         if (cur) {
           return Object.assign(base, {
             background: C.accent, border: '1px solid ' + C.accent, color: '#fff',
-            boxShadow: '0 0 0 3px color-mix(in srgb, ' + C.accent + ' 24%, transparent)',
+            boxShadow: '0 0 0 3px color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
           })
         }
         if (done) {
           return Object.assign(base, {
-            background: 'color-mix(in srgb, ' + C.accent + ' 26%, transparent)',
-            border: '1px solid color-mix(in srgb, ' + C.accent + ' 60%, transparent)',
+            background: 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
+            border: '1px solid color-mix(in srgb, ' + C.accent + ' 55%, transparent)',
             color: C.accent,
           })
         }
@@ -1001,6 +1002,30 @@ window.__ModuleLoader__.load({
           border: '1px solid color-mix(in srgb, ' + C.faint + ' 45%, transparent)',
           color: C.faint,
         })
+      }
+      // 节点内 icon：不用微型字形（7.5px ●/✓ 上沿易被裁、深色主题看不清），
+      // 改为 CSS 绘制——当前=白色实心圆点（居中，不裁剪），完成=✓，未到=空。
+      const nodeIcon = (i) => {
+        const done = i < index
+        const cur = i === index
+        if (cur && !paused) {
+          // 当前激活：内嵌白色实心圆点，margin auto 双居中保证不偏移、不被裁
+          return h('span', {
+            style: {
+              width: 6, height: 6, borderRadius: '50%',
+              background: '#fff', display: 'block', flexShrink: 0,
+              margin: 'auto',
+            },
+          })
+        }
+        if (cur && paused) {
+          return h('span', { style: { fontSize: 9, fontWeight: 800, lineHeight: 1, margin: 'auto' } }, '⏸')
+        }
+        if (done) {
+          return h('span', { style: { fontSize: 10, fontWeight: 900, lineHeight: 1 } }, '✓')
+        }
+        // 未到：空心节点不放内容
+        return null
       }
       const lineStyle = (i) => ({
         flex: '1 1 10px', minWidth: 8, height: 2, borderRadius: 99,
@@ -1020,8 +1045,7 @@ window.__ModuleLoader__.load({
           className: 'awf-step' + (cur ? ' awf-step-cur' : done ? ' awf-step-done' : ' awf-step-pend'),
           style: { display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 },
         },
-          h('span', { style: nodeStyle(i), title: s.label },
-            cur ? (paused ? '⏸' : '●') : done ? '✓' : ''),
+          h('span', { style: nodeStyle(i), title: s.label }, nodeIcon(i)),
           h('span', {
             style: {
               marginTop: 3, fontSize: 8.5, whiteSpace: 'nowrap',
@@ -1043,11 +1067,16 @@ window.__ModuleLoader__.load({
           h('span', { style: row({ gap: 6, fontSize: 10, fontWeight: 700, color: C.dim }) },
             h('span', { style: { color: type.color } }, type.label),
             h('span', {}, '流程')),
-          paused
-            ? h('span', { style: { fontSize: 10, fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
-                '已暂停于「' + activeStep.label + '」')
-            : h('span', { style: { fontSize: 10, color: C.faint, whiteSpace: 'nowrap' } },
-                '当前阶段 · ' + activeStep.label)),
+          h('span', { style: row({ gap: 8, fontSize: 10 }) },
+            h('span', { style: { color: C.success, fontWeight: 600, whiteSpace: 'nowrap' } },
+              '✓ 已完成 ' + index),
+            paused
+              ? h('span', { style: { fontSize: 10, fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
+                  '已暂停 · ' + activeStep.label)
+              : h('span', { style: { fontSize: 10, color: C.accent, fontWeight: 600, whiteSpace: 'nowrap' } },
+                  '当前 · ' + activeStep.label),
+            h('span', { style: { color: C.faint, fontWeight: 600, whiteSpace: 'nowrap' } },
+              '待办 ' + Math.max(0, steps.length - index - 1)))),
         h('div', { style: { display: 'flex', alignItems: 'flex-start', overflowX: 'auto', paddingBottom: 2 } },
           trackChildren))
     }

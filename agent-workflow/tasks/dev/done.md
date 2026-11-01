@@ -285,3 +285,39 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 > 需求补充 7（2026-11-01）：**待办区优化**——按任务类型分类（dev/debug/docs）用 toggle 切换展示；**去掉待办的进度条**（todo.md 为表格行、无 checkbox，进度恒 0/0 无意义）；确有进度语义时进度条只用于「当前进行中任务」的完成度（如含 - [ ] 子项的 current 任务块）。
 > 需求补充 8（2026-11-01）：**编辑任务时可直接打开对应的 .md 源文件**（current.md / todo.md / done.md）——提供「打开源文件」入口：优先调宿主能力打开文件；不可行则前端内展示源文件只读内容 + 本地路径（供系统编辑器打开）。
 > 需求补充 9（2026-11-01）：**流程步骤条/任务看板布局难看**——参考 DSH AgentTeams 面板的实际布局重构（卡片×徽章×状态点×分组的视觉语言），不用「一排小圆粒」式步骤条；布局与间距按 AgentTeams 面板质感对齐。
+
+## [DEV-023] 步骤条 icon 裁剪修复与三态激活语义
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | done |
+| Owner | agent |
+| 协作模式 | single |
+| 来源任务 | 用户反馈（2026-11-01） |
+| 修改范围 | dsh-plugin/lib/client.js（步骤条节点样式与计数）、dsh-plugin/test/client-chunk.test.js |
+| 分支/工作区 | 主分支 |
+| 依赖 | 无 |
+| 最近更新 | 2026-11-01 |
+| 完成日期 | 2026-11-01 |
+
+### 目标
+
+修复用户反馈的步骤条问题：① 当前节点「最上面被裁剪」；② 激活 icon 显示不清；③ 补上「已完成/当前/待办」计数，让验证/Review/归档三态的「未到（灰色）」与「未激活（异常）」语义明确区分。
+
+### 验收标准
+
+- [x] 当前节点改用 CSS 白点（6px，margin auto 双居中）且不再有 overflow:hidden 裁剪，节点完整显示
+- [x] 完成节点用清晰 ✓，暂停节点用 ⏸，未到节点空心
+- [x] 步骤条顶部显示「✓ 已完成 N / 当前 · 阶段 / 待办 N」计数
+- [x] active→实现、verify→验证、review→Review、blocked→暂停 的状态映射正确
+- [x] 测试全绿：`node --test dsh-plugin/test/ledger.test.js dsh-plugin/test/client-chunk.test.js` 58 项通过
+- [x] profile 副本同步：`bash dsh-plugin/scripts/sync-profile.sh desktop`
+
+### 下一步
+
+- [x] 验证 1：跑单元测试 58/58 全绿
+- [x] 验证 2：GUI 实测（当前节点白点完整、计数显示、三态类名）
+- [x] 验证 3：归档并提交（本地 commit，禁 push）
+
+| DEV-023 | P1 | 步骤条 icon 裁剪修复（当前节点 CSS 白点 + 去 overflow 裁剪、✓/⏸/空心三态清晰）+ 顶部 已完成/当前/待办 计数 + 三态激活语义（active→实现/verify→验证/review→Review） | 2026-11-01 |
