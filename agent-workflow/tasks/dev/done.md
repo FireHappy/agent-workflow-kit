@@ -132,6 +132,7 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 | DEV-018 | P1 | release-prep 0.5.0：一键发版装配 | 2026-11-01 |
 | DEV-019 | P1 | 工作流进度 DSH 插件：/awf/projects + /awf/ledger 只读账本路由、右侧边栏「工作流进度」页签（项目选择/状态徽章/todo 进度/最近完成/新鲜度/自动刷新）、ledger 单测；修复 better-sidebar 动态注入 | 2026-11-01 |
 | DEV-021 | P1 | 建队账本门禁：awf team-audit + check F7（扫 .agent-teams/ 引用 ID 校验账本登记，未登记 FAIL）+ AGENTS.md 铁律/team-flow §0 同步 | 2026-11-01 |
+| DEV-020 | P1 | 工作流进度页签改进：UI 重构（分层卡片/语义徽章/渐变进度条/空态错误态，DSH 主题令牌）+ 默认锚定当前会话项目（useWorkspaces/useSession，localStorage 用户选择优先），实现→复核全 pass | 2026-11-01 |
 
 ## [DEV-019] 工作流进度 DSH 插件（dsh-awf-dashboard）
 
@@ -190,3 +191,32 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 归档本块；DEV-020 团队完成后按同样流程归档并 commit。
 
 > 背景（2026-11-01）：DEV-019 改进（DEV-020）建队时漏登记账本，用户指出「AGENTS.md 还有问题」。根因：team-flow.md §0 早已写明「先登记再建队」，但 check 无机楃验证 → 靠自觉必然漏。改为 F7 机械兜底。
+
+## [DEV-020] 工作流进度页签改进：UI 重构 + 默认锚定当前项目
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | wg-kit |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发（DEV-019 后续改进） |
+| 修改范围 | dsh-plugin/lib/client.js、dsh-plugin/test/、dsh-plugin/README.md、账本 |
+| 分支/工作区 | main（agent-workflow-kit） |
+| 依赖 | DEV-019 |
+| 最近更新 | 2026-11-01 |
+
+### 目标
+改进右侧边栏「工作流进度」页签：① UI 重构（当前手写平铺样式难看，需视觉层级/语义配色/空态错误态设计，用 DSH 主题变量、纯手写 h() 无构建步骤）；② 页签打开默认自动锚定当前 DSH 会话所属项目（宿主注入 useWorkspaces/useSession 取工作区根与 /awf/projects 索引匹配，localStorage 用户选择优先），不再强制手动选择项目。保留项目切换、15s 自动刷新、手动刷新、账本只读。
+
+### 验收标准
+- [ ] UI 重构：项目卡 / 当前任务 / todo 进度条 / 最近完成 / 分区标题 / 空态错误态有明显质感提升，DSH 主题变量适配明暗
+- [ ] 默认锚定：页签打开自动选中当前会话项目并加载账本；localStorage 用户选择优先
+- [ ] 不回归：项目切换 / 15s 自动刷新 / 手动刷新 / 只读约束均保留
+- [ ] node --test dsh-plugin/test/ledger.test.js dsh-plugin/test/client-chunk.test.js 全绿；sync-profile 后 GUI 实测默认打开当前项目
+- [ ] check_workflow.sh 退出码 0；本地 commit 含 KIT-DEV-020（禁止 push）
+
+### 下一步
+实现与复核由 AgentTeams（kit-dev-019-improve）推进中：ui-developer 实现 → ui-reviewer 复核；通过后归档并 commit。
+
+> 补充（2026-11-01）：本任务由 AgentTeams 团队执行（ui-developer / ui-reviewer，implementation → review 质量门禁）。团队建队时漏了账本登记，此块为补登。

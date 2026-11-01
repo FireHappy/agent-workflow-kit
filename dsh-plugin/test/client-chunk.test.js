@@ -123,7 +123,7 @@ test('客户端 chunk：apply 的注册组件是函数（可渲染的 React 组�
   const code = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
   assert.ok(/sidebar\.right\.pane\.tab['"]/.test(code))
   assert.ok(/key: 'awf-dashboard'/.test(code))
-  assert.ok(/function Dashboard\(\)/.test(code))
+  assert.ok(/function Dashboard\(/.test(code))
   assert.ok(/function TabTitle\(\)/.test(code))
 })
 
@@ -150,12 +150,20 @@ function loadChunk() {
 }
 function fakeWindowOr(w) { return w } // 占位：保留 window 全局
 
-// 收集元素树中的全部文本（支持嵌套 children 数组）
+// 收集元素树中的全部文本（支持嵌套 children 数组）。
+// 桩 createElement 不会渲染函数组件，这里遇到函数类型节点时自行展开其渲染输出：
+// 把第三方 children 并入 props.children（真实 React 的 h(type, props, ...children)
+// 会把 children 写进 props.children），再调用 type(props)。
 function collectTexts(node, out) {
   if (node == null || typeof node === 'boolean') return out
   if (Array.isArray(node)) { for (const n of node) collectTexts(n, out); return out }
   if (typeof node === 'string' || typeof node === 'number') { out.push(String(node)); return out }
   if (node && typeof node === 'object') {
+    if (typeof node.type === 'function') {
+      const props = Object.assign({}, node.props || {}, { children: node.children })
+      collectTexts(node.type(props), out)
+      return out
+    }
     collectTexts(node.children, out)
   }
   return out
@@ -210,5 +218,45 @@ test('renderLedgerBody：fresh=true 与空状态', () => {
   assert.ok(t4.join('|').includes('boom'))
 
   // 清理 window
+  delete global.window
+})
+
+test('默认锚定：resolveDefaultProject 精确匹配 / 最长前缀 / 容器歧义', () => {
+  const { mod } = loadChunk()
+  const projects = [
+    { id: 'a', path: '/Users/x/GitHub/a' },
+    { id: 'kit', path: '/Users/x/GitHub/agent-workflow-kit' },
+    { id: 'b', path: '/Users/x/GitHub/b' },
+  ]
+  // 精确匹配（当前会话工作区根 == 项目路径）
+  assert.equal(mod.resolveDefaultProject(projects, '/Users/x/GitHub/agent-workflow-kit'), '/Users/x/GitHub/agent-workflow-kit')
+  // 项目路径是 cwd 的最长前缀（会话在项目根下的子目录）
+  assert.equal(mod.resolveDefaultProject(projects, '/Users/x/GitHub/agent-workflow-kit/sub/dir'), '/Users/x/GitHub/agent-workflow-kit')
+  // 容器目录下悬挂多个项目 → 歧义，不自动选中
+  assert.equal(mod.resolveDefaultProject(projects, '/Users/x/GitHub'), '')
+  // 容器目录下只有唯一项目 → 自动选中
+  const solo = [{ id: 'only', path: '/Users/x/GitHub/only' }]
+  assert.equal(mod.resolveDefaultProject(solo, '/Users/x/GitHub'), '/Users/x/GitHub/only')
+  // 无匹配 / 空索引
+  assert.equal(mod.resolveDefaultProject(projects, '/elsewhere'), '')
+  assert.equal(mod.resolveDefaultProject(null, '/elsewhere'), '')
+  assert.equal(mod.resolveDefaultProject(projects, ''), '')
+  delete global.window
+})
+
+test('默认锚定：resolveAnchorRoot 优先级（工作区成员 > 会话 cwd > 会话快照 > scope.cwd）', () => {
+  const { mod } = loadChunk()
+  // 1) useWorkspaces 快照：sessionIds 命中 → workspace.path 最权威
+  const wss = { items: [{ path: '/ws-root', sessionIds: ['s1'] }, { path: '/other-ws', sessionIds: [] }] }
+  assert.equal(mod.resolveAnchorRoot(wss, null, null, null, 's1'), '/ws-root')
+  assert.equal(mod.resolveAnchorRoot(wss, null, null, null, 's9'), '')
+  // 2) useSessions 快照 byId[sessionId].cwd
+  assert.equal(mod.resolveAnchorRoot(null, null, { byId: { s9: { cwd: '/sess-cwd' } } }, null, 's9'), '/sess-cwd')
+  // 3) 会话快照 cwd（含 header.cwd 兼容）
+  assert.equal(mod.resolveAnchorRoot(null, { cwd: '/snap-cwd' }, null, null, 's1'), '/snap-cwd')
+  assert.equal(mod.resolveAnchorRoot(null, { header: { cwd: '/snap-header-cwd' } }, null, null, 's1'), '/snap-header-cwd')
+  // 4) better-sidebar 通道 scope.cwd（无宿主标准 hooks 时兜底）
+  assert.equal(mod.resolveAnchorRoot(null, null, null, { sessionId: 's1', cwd: '/scope-cwd' }, 's1'), '/scope-cwd')
+  assert.equal(mod.resolveAnchorRoot(null, null, null, null, ''), '')
   delete global.window
 })
