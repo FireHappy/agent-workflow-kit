@@ -119,7 +119,8 @@ export function countTodo(md) {
 }
 
 /**
- * 解析任务块（原文）内的验收勾选子项（`### 验收标准` 下或块内任意 `- [ ]` / `- [x]` 行）。
+ * 解析任务块（原文）内的验收勾选子项（仅 `### 验收标准` 段内，`### 下一步` 起停止计数——
+ * 「下一步」是执行动作清单，不是验收条件，计入会虚增分母，如 14/17 实为 14/14）。
  * 只有 checkbox 行，无勾选子项时返回 null（前端据此不渲染验收进度条）。
  * HTML 注释（`<!-- ... -->`）内的 checkbox 不计入（骨架自带的示例块不会污染计数）。
  * @param {string} blockText 任务块原文（findBlock 输出）
@@ -128,12 +129,15 @@ export function countTodo(md) {
 export function parseCheckItems(blockText) {
   const items = []
   let inComment = false
+  let inNext = false // 已越过「### 下一步」：其后的 checkbox 是动作清单，不计入
   for (const line of String(blockText || '').split('\n')) {
     if (!inComment && /<!--/.test(line) && !/-->/.test(line)) { inComment = true; continue }
     if (inComment) {
       if (/-->/.test(line)) inComment = false
       continue
     }
+    if (/^###\s*下一步/.test(line)) { inNext = true; continue }
+    if (inNext) continue
     const m = /^\s*-\s*\[([ xX])\]\s+(.*)$/.exec(line)
     if (m) items.push({ checked: m[1].toLowerCase() === 'x', text: trim(m[2]) })
   }
@@ -306,9 +310,17 @@ export function parseTodoRows(md) {
 export function findBlock(md, id) {
   const lines = String(md).split('\n')
   let start = -1
+  let inComment = false
   for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // 跳过 HTML 注释区（骨架「任务块格式示例 / DEV-XXX」模板不会被误当成真任务）
+    if (!inComment && /<!--/.test(line) && !/-->/.test(line)) { inComment = true; continue }
+    if (inComment) {
+      if (/-->/.test(line)) inComment = false
+      continue
+    }
     // ID 已校验为 [A-Z]+-[0-9]+，无正则元字符，可安全嵌入
-    if (lines[i] === `## [${id}]` || lines[i].startsWith(`## [${id}] `)) { start = i; break }
+    if (line === `## [${id}]` || line.startsWith(`## [${id}] `)) { start = i; break }
   }
   if (start === -1) return null
   const out = [lines[start]]

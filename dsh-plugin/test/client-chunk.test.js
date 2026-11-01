@@ -300,7 +300,8 @@ test('未初始化引导：detectNotInitialized 判定 + renderInitCard 文案',
   assert.ok(idle.join('|').includes('初始化工作流'))
   assert.ok(idle.join('|').includes('project.yaml'))
   const busy = collectTexts(mod.renderInitCard({ busy: true, error: null, onInit() {} }), [])
-  assert.ok(busy.join('|').includes('初始化中…'))
+  assert.ok(busy.join('|').includes('初始化工作流'), 'busy 时按钮仍显示原名「初始化工作流」（无中间状态文案）')
+  assert.ok(!busy.join('|').includes('初始化中…'), '按钮不显示中间状态文案')
   const failed = collectTexts(mod.renderInitCard({ busy: false, error: '路径不在白名单：必须位于全局项目索引或当前工作区根。', onInit() {} }), [])
   assert.ok(failed.join('|').includes('路径不在白名单'))
   // 无 onInit 时不渲染按钮（只读预览场景）
@@ -734,17 +735,19 @@ test('t5 当前任务：编辑按钮 + 暂停/开始按钮（active→暂停、b
   assert.ok(!tree.includes('继续'), '恢复按钮不叫继续，叫开始')
   assert.ok(!tree.includes('暂停中…'), '无进行中操作时无 loading 文案')
 
-  // 暂停执行中：active 卡按钮 loading
+  // 暂停执行中：active 卡按钮文案不变（无「暂停中…」中间状态），仅禁用+降透明
   const working = collectTexts(mod.renderLedgerBody(crudLedger(), Object.assign({}, ui, {
     taskWorking: { id: 'DEV-100', action: 'pause' },
   })), []).join('|')
-  assert.ok(working.includes('暂停中…'), '暂停请求中按钮禁用文案')
+  assert.ok(working.includes('暂停'), '暂停请求中按钮仍显示原名「暂停」')
+  assert.ok(!working.includes('暂停中…'), '按钮不显示中间状态文案（避免文字闪变跳动）')
 
-  // 开始执行中：blocked 卡按钮 loading
+  // 开始执行中：blocked 卡按钮文案不变
   const resuming = collectTexts(mod.renderLedgerBody(crudLedger(), Object.assign({}, ui, {
     taskWorking: { id: 'DEV-101', action: 'resume' },
   })), []).join('|')
-  assert.ok(resuming.includes('开始中…'), '恢复请求中按钮禁用文案')
+  assert.ok(resuming.includes('开始'), '恢复请求中按钮仍显示原名「开始」')
+  assert.ok(!resuming.includes('开始中…'), '按钮不显示中间状态文案')
 
   // 编辑态：DEV-100 原位表单（优先级/状态/Owner/描述/修改范围 + 保存/取消）
   const editUi = Object.assign({}, ui, {
@@ -861,18 +864,23 @@ test('t5 Dashboard 接线：暂停/开始/任务编辑回调必须传入 renderL
 test('t5 当前任务验收进度：任务块含 checkItems 时显示完成度，无子项不渲染进度条', () => {
   const { mod } = loadChunk()
   const ledger = crudLedger()
+  // active（实现阶段）→「实现进度」
   ledger.current[0].checkItems = [
     { done: true, text: '实现 A' },
     { done: false, text: '实现 B' },
     { done: false, text: '测试 C' },
   ]
   const tree = collectTexts(mod.renderLedgerBody(ledger), []).join('|')
-  assert.ok(tree.includes('验收进度'), 'checkItems 存在时显示验收进度标题')
+  assert.ok(tree.includes('实现进度'), 'active 实现阶段显示「实现进度」标题')
   assert.ok(tree.includes('1/3'), '进度计数 done/total')
   assert.ok(tree.includes('33'), '进度百分比')
-  // 无 checkItems 的任务：不渲染「验收进度」（仅徽章）
+  // verify（验证阶段）→「验收进度」
+  ledger.current[0].status = 'verify'
+  const vTree = collectTexts(mod.renderLedgerBody(ledger), []).join('|')
+  assert.ok(vTree.includes('验收进度'), 'verify 验证阶段显示「验收进度」标题')
+  // 无 checkItems 的任务：不渲染进度（仅徽章）
   const plain = collectTexts(mod.renderLedgerBody(crudLedger()), []).join('|')
-  assert.ok(!plain.includes('验收进度'), '无子项任务不渲染进度')
+  assert.ok(!plain.includes('实现进度') && !plain.includes('验收进度'), '无子项任务不渲染进度')
   delete global.window
 })
 
@@ -1076,5 +1084,80 @@ test('t7 看板质感：任务卡 awf-card、行 awf-row 与 Owner 徽章入徽�
   const texts = collectTexts(tree, []).join('|')
   // Owner 徽章进入徽章行（类型×状态×优先级×Owner 多徽章布局）
   assert.ok(texts.includes('wg'), 'Owner 徽章展示 Owner 名')
+  delete global.window
+})
+
+// ---- DEV-024：整体 UI 优化后的视觉契约（t9，类名/样式/文案） ----------------
+
+test('t9 验收进度：服务端对象形态 checkItems={done,total,items} 渲染进度（修复集成断链）', () => {
+  const { mod } = loadChunk()
+  const ledger = crudLedger()
+  // verify 阶段：验收进度（对象形态）
+  ledger.current[0].status = 'verify'
+  ledger.current[0].checkItems = {
+    done: 2, total: 4,
+    items: [
+      { checked: true, text: 'A' }, { checked: true, text: 'B' },
+      { checked: false, text: 'C' }, { checked: false, text: 'D' },
+    ],
+  }
+  const tree = mod.renderLedgerBody(ledger)
+  const texts = collectTexts(tree, []).join('|')
+  assert.ok(texts.includes('验收进度'), '对象形态渲染验收进度标题（verify 阶段）')
+  assert.ok(texts.includes('2/4'), '对象形态计数 done/total')
+  assert.ok(texts.includes('50'), '对象形态百分比')
+  const classes = collectClassNames(tree, [])
+  assert.ok(classes.includes('awf-check'), '验收进度容器带 awf-check 类')
+  assert.ok(classes.includes('awf-progress'), '进度条轨道带 awf-progress 类')
+  // 数组形态（旧单测形态）仍兼容；active 阶段显示「实现进度」
+  ledger.current[0].status = 'active'
+  ledger.current[0].checkItems = [
+    { done: true, text: 'A' }, { done: false, text: 'B' },
+  ]
+  const arrTexts = collectTexts(mod.renderLedgerBody(ledger), []).join('|')
+  assert.ok(arrTexts.includes('1/2'), '数组形态仍兼容渲染')
+  assert.ok(arrTexts.includes('实现进度'), 'active 阶段数组形态显示实现进度')
+  delete global.window
+})
+
+test('t9 徽章语义：handoff 环形 + 类型中性 chip + 优先级统一 soft（awf-pill-* 变体类）', () => {
+  const { mod } = loadChunk()
+  const ledger = crudLedger()
+  ledger.current = [
+    { type: 'dev', id: 'DEV-900', title: '交接任务', prio: 'P0', status: 'handoff', owner: 'a', mode: '', updated: '' },
+    { type: 'docs', id: 'DOCS-900', title: '文档任务', prio: 'P3', status: 'review', owner: '', mode: '', updated: '' },
+  ]
+  const classes = collectClassNames(mod.renderLedgerBody(ledger), [])
+  assert.ok(classes.includes('awf-pill-ring'), 'handoff 状态徽章为环形变体（与 review 区分）')
+  assert.ok(classes.includes('awf-pill-soft'), 'P0 优先级徽章为 soft 浅底（与 P1/P2/P3 统一尺寸，仅颜色区分）')
+  assert.ok(!classes.includes('awf-pill-solid'), '不再使用实底白字变体（P0 视觉偏大问题）')
+  assert.ok(classes.includes('awf-pill-chip'), '类型徽章为中性 chip 变体（不占用语义色）')
+  const texts = collectTexts(mod.renderLedgerBody(ledger), []).join('|')
+  assert.ok(texts.includes('交接'), 'handoff 徽章文案「交接」')
+  delete global.window
+})
+
+test('t9 布局层次：当前任务区 awf-tasks 单列容器；空态/错误/引导 awf-empty 统一容器', () => {
+  const { mod } = loadChunk()
+  const classes = collectClassNames(mod.renderLedgerBody(crudLedger()), [])
+  assert.ok(classes.includes('awf-tasks'), '当前任务区为 awf-tasks 单列容器（任务卡高度一致）')
+  assert.ok(classes.includes('awf-toggle'), '待办类型切换器带 awf-toggle 容器类')
+  assert.ok(collectClassNames(mod.renderEmptyBody(null), []).includes('awf-empty'), '索引为空态带 awf-empty')
+  assert.ok(collectClassNames(mod.renderEmptyBody([]), []).includes('awf-empty'), '未选择项目态带 awf-empty')
+  assert.ok(collectClassNames(mod.renderErrorBody('boom'), []).includes('awf-empty'), '错误态带 awf-empty')
+  assert.ok(collectClassNames(mod.renderInitCard({ busy: false, error: null, onInit() {} }), []).includes('awf-empty'), '未初始化引导卡带 awf-empty')
+  delete global.window
+})
+
+test('t9 步骤条：paused 当前节点附加 awf-step-paused 类；节点符号仍无 ● 字形', () => {
+  const { mod } = loadChunk()
+  const tree = mod.renderLedgerBody(crudLedger()) // DEV-101 = blocked
+  const classes = collectClassNames(tree, [])
+  assert.ok(classes.includes('awf-step-paused'), 'blocked 任务当前节点带 awf-step-paused')
+  const texts = collectTexts(tree, []).join('|')
+  assert.ok(!texts.includes('●'), '当前节点不使用 ● 字形（防裁剪）')
+  // 步骤标签可读性契约：按文本抓取轨道内标签，全部不再出现 8.5px 老档（无样式可断言的替代：
+  // 轨道头部计数文案完整保留）
+  assert.ok(texts.includes('✓ 已完成 ') && texts.includes('待办 '), '轨道计数文案完整')
   delete global.window
 })

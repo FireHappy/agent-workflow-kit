@@ -39,6 +39,8 @@ window.__ModuleLoader__.load({
     const LS_KEY = 'dsh-awf-dashboard.project'
 
     // DSH 主题令牌：宿主 Web 均定义。带回退值（缺令牌时仍可用），白天/暗色自动跟随。
+    // DEV-024 扩展：idle=流转中状态（handoff）、bgMask=模态遮罩、radiusSm=小控件圆角、
+    // *T=主题自带语义色淡底变体令牌（替代手调 color-mix 配方）、hoverAccent=强调悬停底。
     const C = {
       text: 'var(--dsw-alias-label-primary, #2c3138)',
       sub: 'var(--dsw-alias-label-secondary, #8a919c)',
@@ -53,29 +55,46 @@ window.__ModuleLoader__.load({
       warn: 'var(--dsw-alias-state-warn-primary, #e8a33d)',
       error: 'var(--dsw-alias-state-error-primary, #e5484d)',
       business: 'var(--dsw-alias-state-business-primary, #4f8ef7)',
+      idle: 'var(--dsw-alias-state-idle-primary, #9aa0a6)',
       hover: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.08))',
+      hoverAccent: 'var(--dsw-alias-interactive-bg-hover-accent, color-mix(in srgb, #4f8ef7 16%, transparent))',
+      bgMask: 'var(--dsw-alias-bg-mask-1, rgba(0,0,0,0.45))',
       radius: 'var(--dsl-web-radius, 10px)',
+      radiusSm: 6,
+      businessT: 'var(--dsw-alias-state-business-tertiary, color-mix(in srgb, #4f8ef7 13%, transparent))',
+      successT: 'var(--dsw-alias-state-success-tertiary, color-mix(in srgb, #3ecf8e 13%, transparent))',
+      warnT: 'var(--dsw-alias-state-warn-tertiary, color-mix(in srgb, #e8a33d 13%, transparent))',
+      errorT: 'var(--dsw-alias-state-error-tertiary, color-mix(in srgb, #e5484d 13%, transparent))',
+      // 复核（review）类型专属色：DSH 无紫色业务令牌，集中在此、浅底由 tintOf 派生
+      typeReview: '#a78bfa',
       mono: 'var(--dsl-terminal-font, ui-monospace, SFMono-Regular, Menlo, monospace)',
     }
 
+    // 类型徽章：dev/debug/docs 中性化（不再占用语义色，状态/优先级独占色系；
+    // color 仍保留给步骤条头部类型标签的强调色）。
     const TYPE_STYLE = {
       dev: { label: '开发', color: 'var(--dsw-alias-state-business-primary, #4f8ef7)' },
       debug: { label: '调试', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
       docs: { label: '文档', color: 'var(--dsw-alias-state-success-primary, #3ecf8e)' },
-      review: { label: '复核', color: '#a78bfa' },
+      review: { label: '复核', color: C.typeReview },
     }
+    // 状态徽章语义（DEV-024）：active=蓝 / verify=绿 / review=琥珀 / blocked=红 /
+    // handoff=中性流转（idle + ring 环形样式，与 review 彻底区分，不再同色）。
     const STATUS_STYLE = {
       active: { label: '进行中', color: 'var(--dsw-alias-state-business-primary, #4f8ef7)' },
       review: { label: '待复核', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
       verify: { label: '验证', color: 'var(--dsw-alias-state-success-primary, #3ecf8e)' },
       blocked: { label: '已暂停', color: 'var(--dsw-alias-state-error-primary, #e5484d)' },
-      handoff: { label: '交接', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
+      handoff: { label: '交接', color: C.idle, ring: true },
       archived: { label: '已归档', color: 'var(--dsw-alias-label-tertiary, #b3bac4)' },
     }
-    const PRIO_COLOR = {
-      P0: 'var(--dsw-alias-state-error-primary, #e5484d)',
-      P1: 'var(--dsw-alias-state-warn-primary, #e8a33d)',
-      P2: 'var(--dsw-alias-state-business-primary, #4f8ef7)',
+    // 优先级（DEV-024）：P0/P1/P2 全部走统一 soft 浅底（仅颜色区分等级，不再实底——
+    // 用户反馈实底白字视觉偏大；同尺寸、同内边距、仅色相不同），P3 中性浅底。
+    const PRIO_STYLE = {
+      P0: { color: 'var(--dsw-alias-state-error-primary, #e5484d)' },
+      P1: { color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
+      P2: { color: 'var(--dsw-alias-state-business-primary, #4f8ef7)' },
+      P3: { color: 'var(--dsw-alias-label-tertiary, #b3bac4)' },
     }
 
     // ---- 工作流步骤条（前端静态定义，纯展示；后端不动） ----------------------
@@ -136,15 +155,51 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // 卡片/行 hover 质感（AgentTeams 团队面板风格）；主题令牌兜底，纯手写 h() 下
-    // 用静态 <style> 注入一次（inline style 无 :hover 能力）
+    // 卡片/行 hover 质感 + 交互反馈（DEV-024）：:focus-visible 键盘焦点、:active 按压回弹、
+    // 按钮统一过渡。纯手写 h() 下用静态 <style> 注入一次（inline style 无 :hover/:focus 能力）
     const AWF_HOVER_CSS =
       '.awf-card{transition:border-color .15s ease,box-shadow .15s ease,transform .12s ease}' +
       '.awf-card:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary,#5b8cff) 45%,transparent);' +
       'box-shadow:0 4px 14px color-mix(in srgb,rgba(8,12,22,.16) 60%,transparent);transform:translateY(-1px)}' +
       '.awf-row{transition:background .12s ease}' +
       '.awf-row:hover{background:color-mix(in srgb,var(--dsw-alias-interactive-bg-hover,rgba(120,126,140,.08)) 60%,transparent)}' +
-      '.awf-badge-row{transition:gap .12s ease}'
+      '.awf-badge-row{transition:gap .12s ease}' +
+      '.awf-card button,.awf-row button{transition:background .15s ease,border-color .15s ease,color .15s ease,transform .08s ease}' +
+      '.awf-card button:active:not(:disabled),.awf-row button:active:not(:disabled){transform:translateY(1px)}' +
+      '.awf-card :is(button,select,input):focus-visible,.awf-row :is(button,select,input):focus-visible,' +
+      '.awf-toggle-btn:focus-visible,.awf-toolbar :is(button,select):focus-visible,' +
+      '.awf-empty button:focus-visible{outline:2px solid var(--dsw-alias-interactive-bg-hover-accent,#5b8cff);outline-offset:1px}'
+
+    // 统一基础样式类（DEV-024 收敛零散 inline style 的根源）：
+    // 所有组件只挂类名 + 少量主题变量，尺寸/圆角/间距走同一体系，杜绝「裁切/大小不一致」。
+    const AWF_UI_CSS =
+      // 步骤条：节点 16px 圆（比 15px 更稳）、标签统一 11px、连线 2px 高
+      '.awf-step-node{width:16px;height:16px;border-radius:50%;flex-shrink:0;box-sizing:border-box;' +
+      'display:inline-flex;align-items:center;justify-content:center;position:relative;' +
+      'font-size:10px;font-weight:800;line-height:1;overflow:visible}' +
+      '.awf-step-node .awf-dot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);' +
+      'width:7px;height:7px;border-radius:50%;display:block}' +
+      '.awf-step-label{margin-top:5px;font-size:11px;white-space:nowrap;line-height:14px}' +
+      // 关键修复（用户反馈「进行中的状态被裁剪」）：overflowX:auto 会强制 overflowY 也 auto，
+      // 纵向溢出的节点/光圈就被父容器裁掉。改为 overflow:visible，节点永不裁剪；
+      // 横向由 flex-shrink + 最小宽度控制，超出时节点压缩而不是裁剪。
+      '.awf-track-body{display:flex;align-items:flex-start;overflow:visible;padding-bottom:4px;min-width:0}' +
+      '.awf-step{flex:0 1 auto;min-width:0}' +
+      '.awf-step-line{flex:1 1 10px;min-width:6px;height:2px;border-radius:99px;align-self:flex-start;margin-top:7px}' +
+      // 徽章统一尺寸：所有优先级/状态 Pill 同高同字号，仅用颜色/边框区分等级
+      '.awf-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;' +
+      'font-size:11px;font-weight:600;line-height:16px;padding:1px 8px;white-space:nowrap;box-sizing:border-box}' +
+      '.awf-pill .awf-dot{width:5px;height:5px;border-radius:50%;display:inline-block;flex-shrink:0}' +
+      // 优先级徽章用等宽数字：P0/P1/P2/P3 物理宽度完全一致（消除「0 比 1 大」的字体宽度差异）
+      '.awf-pill[data-prio]{font-variant-numeric:tabular-nums;font-family:var(--dsl-terminal-font,ui-monospace,SFMono-Regular,Menlo,monospace);min-width:26px;text-align:center;justify-content:center}' +
+      // 按钮统一 22px 档位
+      '.awf-btn{font-size:11px;line-height:16px;padding:3px 12px;border-radius:999px;cursor:pointer;' +
+      'font-weight:600;white-space:nowrap;box-sizing:border-box}' +
+      '.awf-btn-sm{font-size:11px;line-height:16px;padding:2px 10px;border-radius:999px;cursor:pointer;' +
+      'font-weight:600;white-space:nowrap;box-sizing:border-box}' +
+      // 进度条统一 4px 轨道
+      '.awf-progress{height:4px;border-radius:99px;overflow:hidden;margin-top:3px}' +
+      '.awf-progress-fill{height:100%;border-radius:99px;transition:width .3s ease}'
 
     // 回退文件改动状态徽标（dry-run 返回 {path, status}）
     const FILE_STATUS_STYLE = {
@@ -168,12 +223,12 @@ window.__ModuleLoader__.load({
     // ---- 工具 -------------------------------------------------------------
 
     const row = (extra) => Object.assign({ display: 'flex', alignItems: 'center', gap: 6 }, extra || {})
-    const muted = (extra) => Object.assign({ color: C.dim, fontSize: 11.5, lineHeight: 1.5 }, extra || {})
+    const muted = (extra) => Object.assign({ color: C.dim, fontSize: 12, lineHeight: 1.5 }, extra || {})
 
     const cardStyle = {
       border: '1px solid ' + C.border,
       borderRadius: C.radius,
-      padding: '10px 12px',
+      padding: '12px 14px 11px',
       background: C.surface,
       marginBottom: 8,
     }
@@ -189,7 +244,7 @@ window.__ModuleLoader__.load({
 
     /** 危险实心按钮：删除并回退修改（destroy 语义）。 */
     const dangerSolid = {
-      fontSize: 11.5, padding: '5px 14px', borderRadius: 8, cursor: 'pointer',
+      fontSize: 12, padding: '5px 14px', borderRadius: C.radiusSm, cursor: 'pointer',
       border: '1px solid ' + C.error, background: C.error, color: '#fff',
       fontWeight: 700, lineHeight: '18px', whiteSpace: 'nowrap',
       transition: 'opacity .15s ease',
@@ -197,66 +252,101 @@ window.__ModuleLoader__.load({
 
     /** 危险文字按钮：当前任务卡上的「删除」。 */
     const dangerTextStyle = {
-      fontSize: 10.5, padding: '1px 10px', borderRadius: 999, cursor: 'pointer',
+      fontSize: 11, padding: '2px 10px', borderRadius: 999, cursor: 'pointer',
       border: '1px solid color-mix(in srgb, ' + C.error + ' 45%, transparent)',
       background: 'color-mix(in srgb, ' + C.error + ' 8%, transparent)',
-      color: C.error, fontWeight: 600, lineHeight: '15px', whiteSpace: 'nowrap',
+      color: C.error, fontWeight: 600, lineHeight: '16px', whiteSpace: 'nowrap',
     }
 
     /** 表单输入（含 select）：主题令牌 + 紧凑尺寸。 */
     const inputStyle = {
-      fontSize: 11.5, padding: '3px 8px', borderRadius: 6,
+      fontSize: 12, padding: '3px 8px', borderRadius: C.radiusSm,
       background: C.surface, color: C.text,
       border: '1px solid ' + C.border, outline: 'none',
     }
 
-    /** 卡片内小型文字操作按钮（编辑 / 暂停 / 继续）。 */
+    /** 卡片内小型文字操作按钮（编辑 / 暂停 / 继续）。DEV-024：统一 11px/22px 档位。
+     * 暂停/开始按钮固定最小宽度 + busy 文字用同宽占位，避免「暂停」→「暂停中…」
+     * 文字变长导致按钮变宽、卡片底部行 layout 跳动（用户反馈「背景文字跳动」）。 */
     const tinyBtn = (busy) => Object.assign(buttonStyle(), {
-      fontSize: 10, padding: '1px 9px',
+      fontSize: 11, padding: '2px 10px', minWidth: 68,
       opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer',
     })
 
     const overlayStyle = {
       position: 'fixed', inset: 0, zIndex: 9999,
-      background: 'rgba(0,0,0,0.45)',
+      background: C.bgMask,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20, boxSizing: 'border-box',
     }
 
-    /** 语义色胶囊：彩色文字 + 同色系淡底 + 描边；可选前置圆点。 */
-    function Pill({ color, children, dot }) {
-      return h('span', {
-        style: {
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-          padding: '1px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600,
-          color, whiteSpace: 'nowrap', lineHeight: '16px',
-          background: 'color-mix(in srgb, ' + color + ' 13%, transparent)',
-          border: '1px solid color-mix(in srgb, ' + color + ' 34%, transparent)',
-        },
-      },
-        dot
-          ? h('span', { style: { width: 5, height: 5, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 } })
+    /** 语义色对应的主题淡底变体令牌（替代手调 color-mix 13% 配方；未知色回退 color-mix）。 */
+    function tintOf(color) {
+      const k = String(color || '')
+      const map = {
+        'var(--dsw-alias-state-error-primary': C.errorT,
+        'var(--dsw-alias-state-warn-primary': C.warnT,
+        'var(--dsw-alias-state-success-primary': C.successT,
+        'var(--dsw-alias-state-business-primary': C.businessT,
+      }
+      for (const prefix of Object.keys(map)) {
+        if (k.indexOf(prefix) === 0) return map[prefix]
+      }
+      return 'color-mix(in srgb, ' + color + ' 13%, transparent)'
+    }
+
+    /**
+     * 语义色胶囊（DEV-024）：variant 四态——
+     *   soft=浅底+描边+可选圆点（默认）；solid=实底白字（P0 优先级）；
+     *   ring=透明底+描边+圆点（handoff，与 review 区分）；chip=中性类型牌（无彩底）。
+     * 尺寸统一走集中类 .awf-pill（同高/同字号/同内边距），仅颜色与边框差异表达等级，
+     * 不再出现 P0 实底撑大的尺寸不一致（用户反馈）。
+     * 类名 awf-pill awf-pill-<variant> 供单测断言。
+     */
+    function Pill({ color, children, dot, variant, dataPrio }) {
+      const v = variant === 'solid' || variant === 'ring' || variant === 'chip' ? variant : 'soft'
+      const style = {}
+      if (v === 'chip') {
+        style.color = C.sub
+        style.background = 'transparent'
+        style.border = '1px solid ' + C.border
+      } else if (v === 'solid') {
+        style.color = '#fff'
+        style.background = color
+        style.border = '1px solid ' + color
+      } else {
+        style.color = color
+        style.background = v === 'ring' ? 'transparent' : tintOf(color)
+        style.border = v === 'ring'
+          ? '1px solid ' + color
+          : '1px solid color-mix(in srgb, ' + color + ' 34%, transparent)'
+      }
+      return h('span', Object.assign(
+        { className: 'awf-pill awf-pill-' + v, style },
+        dataPrio ? { 'data-prio': dataPrio } : {}),
+        dot && v !== 'chip'
+          ? h('span', { className: 'awf-dot', style: { background: color } })
           : null,
         children)
     }
 
     function StatusBadge({ status }) {
       const st = STATUS_STYLE[status] || { label: status || '未设', color: C.faint }
-      return h(Pill, { color: st.color, dot: true }, st.label)
+      return h(Pill, { color: st.color, variant: st.ring ? 'ring' : 'soft', dot: true }, st.label)
     }
 
-    /** 分区标题：渐变短竖条 + 标签 + 可选计数。 */
+    /** 分区标题：渐变短竖条 + 标签 + 可选计数（DEV-024：间距与字号统一 12px 档）。 */
     function SectionTitle({ label, count }) {
-      return h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 8px' } },
+      return h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0 10px' } },
         h('span', {
           style: {
             width: 3, height: 13, borderRadius: 2, flexShrink: 0,
             background: 'linear-gradient(180deg, ' + C.accent + ', ' + C.success + ')',
           },
         }),
-        h('span', { style: { fontSize: 12.5, fontWeight: 700, letterSpacing: '.02em', color: C.text } }, label),
+        h('span', { style: { fontSize: 12, fontWeight: 700, letterSpacing: '.02em', color: C.text } }, label),
         count != null
-          ? h('span', { style: { fontSize: 11, color: C.faint, background: C.hover, padding: '0 6px', borderRadius: 999, lineHeight: '15px' } }, String(count))
+          ? h('span', { style: { fontSize: 11, color: C.faint, background: C.hover, padding: '0 6px', borderRadius: 999, lineHeight: '16px' } }, String(count))
           : null)
     }
 
@@ -281,7 +371,7 @@ window.__ModuleLoader__.load({
               padding: '9px 14px', borderBottom: '1px solid ' + C.hairline, flexShrink: 0,
             },
           },
-            h('div', { style: { fontSize: 13.5, fontWeight: 800, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
+            h('div', { style: { fontSize: 13, fontWeight: 800, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
             h('button', {
               onClick: onClose,
               style: Object.assign(buttonStyle(), {
@@ -290,7 +380,7 @@ window.__ModuleLoader__.load({
               }),
             }, '✕')),
           h('div', {
-            style: { padding: '12px 14px', overflowY: 'auto', fontSize: 12.5, color: C.text },
+            style: { padding: '12px 14px', overflowY: 'auto', fontSize: 12, color: C.text },
           }, children)))
     }
 
@@ -604,52 +694,27 @@ window.__ModuleLoader__.load({
 
     // ---- 看板组件 ---------------------------------------------------------
 
-    /** todo 进度条：圆角轨道 + 渐变填充；100% 完成态换成功渐变并带 ✓。 */
-    function TodoBar({ label, done, total }) {
-      const pct = total > 0 ? Math.round((done / total) * 100) : 0
-      const complete = total > 0 && done >= total
-      const fill = complete
-        ? 'linear-gradient(90deg, ' + C.success + ', var(--dsw-alias-state-success-secondary, #5ee6a8))'
-        : 'linear-gradient(90deg, ' + C.accent + ', ' + C.success + ')'
-      return h('div', { style: { marginBottom: 10 } },
-        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 } },
-          h('span', { style: { fontSize: 12, fontWeight: 600, color: C.text, display: 'inline-flex', alignItems: 'center', gap: 5 } },
-            complete ? h('span', { style: { color: C.success, fontWeight: 800, fontSize: 11 } }, '✓') : null,
-            label),
-          h('span', { style: { fontSize: 11, color: complete ? C.success : C.dim, fontWeight: 600, fontFamily: C.mono } },
-            `${done}/${total} · ${pct}%`)),
-        h('div', {
-          style: {
-            height: 7, borderRadius: 999,
-            background: C.hover, border: '1px solid ' + C.hairline, overflow: 'hidden',
-          },
-        }, h('div', {
-          style: {
-            width: pct + '%', height: '100%', borderRadius: 999, background: fill,
-            transition: 'width .3s ease',
-            boxShadow: complete ? '0 0 8px color-mix(in srgb, ' + C.success + ' 55%, transparent)' : undefined,
-          },
-        })))
-    }
-
     /**
      * 当前任务卡：徽章行 / 标题 / Owner·更新 / 操作按钮（编辑 · 暂停/继续 · 删除）。
      * 编辑时原位展开表单改字段（优先级/状态/Owner/修改范围/描述）。
+     * DEV-024：flush=true 时去掉底部 margin（两列网格容器内用 gap 撑间距）。
      */
-    function TaskCard({ t, onDelete, deleting, onEdit, editing, editForm, onEditChange, onEditSave, onEditCancel, onPause, onResume, working, onOpenSource }) {
+    function TaskCard({ t, onDelete, deleting, onEdit, editing, editForm, onEditChange, onEditSave, onEditCancel, onPause, onResume, working, onOpenSource, flush }) {
       const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
-      const prioColor = PRIO_COLOR[t.prio] || C.faint
+      const pst = PRIO_STYLE[t.prio] || { color: C.faint }
       const delBusy = !!deleting
       const work = working || {}
       const busy = delBusy || (work.id === t.id)
       const blocked = t.status === 'blocked'
       const ef = editForm || {}
       const editBusy = !!ef.busy
+      const cardCls = Object.assign({}, cardStyle, flush ? { marginBottom: 0 } : {})
 
-      const badgeRow = h('div', { className: 'awf-badge-row', style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' } },
-        h(Pill, { color: type.color }, type.label),
+      // 徽章行：类型=中性 chip / 状态=语义 Pill / 优先级=实底或浅底 / Owner=accent 浅底
+      const badgeRow = h('div', { className: 'awf-badge-row', style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' } },
+        h(Pill, { color: type.color, variant: 'chip' }, type.label),
         StatusBadge({ status: t.status }),
-        t.prio ? h(Pill, { color: prioColor }, t.prio) : null,
+        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null,
         // Owner 也入徽章行：类型 × 状态 × 优先级 × Owner 多徽章布局（AgentTeams 风格）
         t.owner
           ? h(Pill, { color: C.accent, dot: true },
@@ -658,7 +723,7 @@ window.__ModuleLoader__.load({
 
       // ---- 编辑模式：原位表单（优先级 / 状态 / Owner / 描述 / 修改范围）
       if (editing) {
-        return h('div', { className: 'awf-card', style: Object.assign({}, cardStyle, { padding: '10px 12px 9px' }) },
+        return h('div', { className: 'awf-card', style: cardCls },
           h('div', {
             style: {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
@@ -705,12 +770,12 @@ window.__ModuleLoader__.load({
             h('button', {
               onClick: editBusy ? undefined : onEditSave, disabled: editBusy,
               style: Object.assign(buttonStyle(true), { opacity: editBusy ? 0.55 : 1, cursor: editBusy ? 'default' : 'pointer' }),
-            }, editBusy ? '保存中…' : '保存'),
+            }, '保存'),
             h('button', { onClick: onEditCancel, disabled: editBusy, style: buttonStyle() }, '取消')))
       }
 
       // ---- 正常模式
-      return h('div', { className: 'awf-card', style: Object.assign({}, cardStyle, { padding: '10px 12px 9px' }) },
+      return h('div', { className: 'awf-card', style: cardCls },
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
@@ -720,9 +785,9 @@ window.__ModuleLoader__.load({
         },
           h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 12, color: C.text } }, t.id || '?'),
           badgeRow),
-        h('div', { style: { fontSize: 12.5, fontWeight: 600, color: C.text, marginBottom: 5, lineHeight: 1.45 } },
+        h('div', { style: { fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6, lineHeight: 1.45 } },
           t.title || '（无标题）'),
-        h(TaskCheckProgress, { items: t.checkItems }),
+        h(TaskCheckProgress, { items: t.checkItems, status: t.status }),
         h(WorkflowSteps, { t }),
         h('div', {
           style: Object.assign(
@@ -731,7 +796,7 @@ window.__ModuleLoader__.load({
         },
           h('div', { style: row({ gap: 8, flexWrap: 'wrap', fontSize: 11, color: C.dim }) },
             t.owner
-              ? h('span', { style: row({ gap: 4 }) },
+              ? h('span', { title: 'Owner · ' + t.owner, style: row({ gap: 4 }) },
                   h('span', {
                     style: {
                       width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
@@ -739,8 +804,7 @@ window.__ModuleLoader__.load({
                       color: C.accent, fontSize: 9, fontWeight: 700, display: 'inline-flex',
                       alignItems: 'center', justifyContent: 'center',
                     },
-                  }, (t.owner[0] || '?').toUpperCase()),
-                  h('span', {}, 'Owner · ' + t.owner))
+                  }, (t.owner[0] || '?').toUpperCase()))
               : null,
             t.updated ? h('span', { style: row({ gap: 4 }) },
               h('span', { style: { color: C.faint } }, '↻'), h('span', {}, '更新 ' + t.updated)) : null,
@@ -760,20 +824,20 @@ window.__ModuleLoader__.load({
                   disabled: busy,
                   title: '开始（恢复进行中，状态 → active）',
                   style: tinyBtn(busy),
-                }, work.id === t.id ? '开始中…' : '开始') : null)
+                }, '开始') : null)
               : (typeof onPause === 'function' ? h('button', {
                   onClick: busy ? undefined : () => onPause(t),
                   disabled: busy,
                   title: '暂停（状态 → blocked）',
                   style: tinyBtn(busy),
-                }, work.id === t.id ? '暂停中…' : '暂停') : null),
+                }, '暂停') : null),
             typeof onDelete === 'function'
               ? h('button', {
                   onClick: busy ? undefined : () => onDelete(t),
                   disabled: busy,
                   title: '删除任务（回退修改需二次确认）',
                   style: Object.assign(dangerTextStyle, { opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }),
-                }, delBusy ? '删除中…' : '删除')
+                }, '删除')
               : null)))
     }
 
@@ -825,7 +889,7 @@ window.__ModuleLoader__.load({
             padding: '6px 0', borderBottom: '1px solid ' + C.hairline, fontSize: 12,
           },
         },
-          h(Pill, { color: typeStyle.color }, TYPE_LABEL(row.type)),
+          h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(row.type)),
           h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.faint, flexShrink: 0 } }, row.id),
           h('select', {
             value: f.prio || row.prio || 'P2', disabled: editBusy,
@@ -839,7 +903,7 @@ window.__ModuleLoader__.load({
           h('button', {
             onClick: editBusy ? undefined : onEditSave, disabled: editBusy,
             style: Object.assign(buttonStyle(true), { opacity: editBusy ? 0.55 : 1, cursor: editBusy ? 'default' : 'pointer' }),
-          }, editBusy ? '保存中…' : '保存'),
+          }, '保存'),
           h('button', { onClick: onEditCancel, disabled: editBusy, style: buttonStyle() }, '取消'),
           typeof onOpenSource === 'function'
             ? h('button', {
@@ -868,7 +932,7 @@ window.__ModuleLoader__.load({
           h('button', {
             onClick: rowBusy ? undefined : onDeleteConfirm, disabled: rowBusy,
             style: Object.assign(dangerTextStyle, { opacity: rowBusy ? 0.55 : 1, cursor: rowBusy ? 'default' : 'pointer' }),
-          }, rowBusy ? '删除中…' : '删除'),
+          }, '删除'),
           h('button', { onClick: onDeleteCancel, disabled: rowBusy, style: buttonStyle() }, '取消'))
       }
 
@@ -880,7 +944,7 @@ window.__ModuleLoader__.load({
           borderBottom: '1px solid ' + C.hairline, fontSize: 12,
         },
       },
-        h(Pill, { color: typeStyle.color }, TYPE_LABEL(row.type)),
+        h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(row.type)),
         h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text, flexShrink: 0 } }, row.id),
         h('span', {
           style: {
@@ -888,13 +952,13 @@ window.__ModuleLoader__.load({
             whiteSpace: 'nowrap', flex: 1, minWidth: 0,
           },
         }, row.desc || '—'),
-        row.prio ? h(Pill, { color: PRIO_COLOR[row.prio] || C.faint }, row.prio) : null,
+        row.prio ? h(Pill, { color: (PRIO_STYLE[row.prio] || { color: C.faint }).color, variant: 'soft', dataPrio: row.prio }, row.prio) : null,
         typeof onStart === 'function'
           ? h('button', {
               onClick: anyBusy ? undefined : () => onStart(row),
               disabled: anyBusy,
               style: Object.assign(buttonStyle(true), { opacity: anyBusy ? 0.55 : 1, cursor: anyBusy ? 'default' : 'pointer' }),
-            }, startBusy ? '开始中…' : '开始')
+            }, '开始')
           : null,
         typeof onEdit === 'function'
           ? h('button', {
@@ -915,10 +979,12 @@ window.__ModuleLoader__.load({
     /**
      * 待办类型三态切换器（dev/debug/docs）。todo.md 是表格行格式、无 checkbox，
      * 不再渲染进度条；各类型按 toggle 展示自己的未开始任务行。
+     * DEV-024：24px 控件高度，选中态用 hoverAccent 底 + accent 描边（对齐宿主 kit chipActive）。
      */
     function TypeToggle({ value, onChange }) {
       const items = [['dev', '开发'], ['debug', '调试'], ['docs', '文档']]
       return h('div', {
+        className: 'awf-toggle',
         style: {
           display: 'inline-flex', padding: 2, borderRadius: 8,
           background: 'color-mix(in srgb, ' + C.raised + ' 55%, transparent)',
@@ -927,37 +993,49 @@ window.__ModuleLoader__.load({
       },
         items.map(([v, label]) => h('button', {
           key: v,
+          className: 'awf-toggle-btn' + (value === v ? ' awf-toggle-btn-active' : ''),
           onClick: () => onChange(v),
           style: {
-            fontSize: 11, padding: '2px 12px', borderRadius: 6, cursor: 'pointer',
-            border: '1px solid ' + (value === v ? 'color-mix(in srgb, ' + C.accent + ' 40%, transparent)' : 'transparent'),
-            background: value === v ? 'color-mix(in srgb, ' + C.accent + ' 18%, transparent)' : 'transparent',
-            color: value === v ? C.accent : C.sub,
+            fontSize: 11, padding: '3px 14px', borderRadius: 6, cursor: 'pointer',
+            border: '1px solid ' + (value === v ? 'color-mix(in srgb, ' + C.accent + ' 45%, transparent)' : 'transparent'),
+            background: value === v ? C.hoverAccent : 'transparent',
+            color: value === v ? C.text : C.sub,
             fontWeight: value === v ? 700 : 500,
           },
         }, label)))
     }
 
-    /** 当前任务块内的验收勾选框进度（仅当后端/账本提供 checkItems 时渲染；无则纯徽章）。 */
-    function TaskCheckProgress({ items }) {
-      if (!items || !items.length) return null
-      const done = items.filter((i) => i && i.done).length
-      const pct = Math.round((done / items.length) * 100)
-      return h('div', { style: { marginBottom: 6 } },
+    /**
+     * 当前任务块内的验收勾选框进度（仅当后端/账本提供 checkItems 时渲染；无则纯徽章）。
+     * DEV-024 修复：服务端契约产出对象形态 {done,total,items:[…]}（src/ledger.js ledgerOf），
+     * 同时兼容单测注入的数组形态 —— 此前只按数组消费导致真实面板永不渲染。
+     * 容器带 awf-check 类供单测断言。
+     * 语义（用户反馈）：active/blocked=实现阶段 →「实现进度」；
+     * verify/review/handoff=验收与交接阶段 →「验收进度」。
+     */
+    function TaskCheckProgress({ items, status }) {
+      if (!items) return null
+      const list = Array.isArray(items) ? items : (items.items || [])
+      if (!list.length) return null
+      const done = Array.isArray(items) ? list.filter((i) => i && i.done).length : Math.max(0, Number(items.done) || 0)
+      const total = Array.isArray(items) ? list.length : (Number(items.total) > 0 ? Number(items.total) : list.length)
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0
+      const label = (status === 'verify' || status === 'review' || status === 'handoff') ? '验收进度' : '实现进度'
+      return h('div', { className: 'awf-check', style: { marginBottom: 6 } },
         h('div', { style: row({ gap: 6, fontSize: 11, color: C.sub }) },
-          h('span', { style: { fontWeight: 600, color: C.text } }, '验收进度'),
-          h('span', {}, String(done) + '/' + String(items.length) + ' · ' + String(pct) + '%')),
+          h('span', { style: { fontWeight: 600, color: C.text } }, label),
+          h('span', {}, String(done) + '/' + String(total) + ' · ' + String(pct) + '%')),
         h('div', {
+          className: 'awf-progress',
           style: {
-            marginTop: 3, height: 4, borderRadius: 99, overflow: 'hidden',
             background: 'color-mix(in srgb, ' + C.faint + ' 22%, transparent)',
           },
         },
           h('div', {
+            className: 'awf-progress-fill',
             style: {
-              height: '100%', width: pct + '%',
+              width: pct + '%',
               background: pct >= 100 ? C.success : C.accent,
-              transition: 'width 0.3s ease',
             },
           })))
     }
@@ -979,57 +1057,48 @@ window.__ModuleLoader__.load({
         const done = i < index
         const cur = i === index
         const base = {
-          width: 15, height: 15, borderRadius: '50%', flexShrink: 0, boxSizing: 'border-box',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 9, fontWeight: 800, lineHeight: 1,
-          // 不设 overflow:hidden——它会裁掉 boxShadow 光圈/字形上沿（用户反馈「最上面被裁剪」）
+          // 集中类 awf-step-node 提供 16px 圆 + 相对定位；这里只给状态色/边框
+          border: '1px solid ',
         }
         if (cur) {
           return Object.assign(base, {
-            background: C.accent, border: '1px solid ' + C.accent, color: '#fff',
-            boxShadow: '0 0 0 3px color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
+            background: C.accent, borderColor: C.accent, color: '#fff',
+            // DEV-024：光圈 2px，紧凑布局减小「被裁剪」观感
+            boxShadow: '0 0 0 2px color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
           })
         }
         if (done) {
           return Object.assign(base, {
             background: 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
-            border: '1px solid color-mix(in srgb, ' + C.accent + ' 55%, transparent)',
+            borderColor: 'color-mix(in srgb, ' + C.accent + ' 55%, transparent)',
             color: C.accent,
           })
         }
         return Object.assign(base, {
           background: 'transparent',
-          border: '1px solid color-mix(in srgb, ' + C.faint + ' 45%, transparent)',
+          borderColor: 'color-mix(in srgb, ' + C.faint + ' 45%, transparent)',
           color: C.faint,
         })
       }
-      // 节点内 icon：不用微型字形（7.5px ●/✓ 上沿易被裁、深色主题看不清），
-      // 改为 CSS 绘制——当前=白色实心圆点（居中，不裁剪），完成=✓，未到=空。
+      // 节点内 icon：CSS 绘制——当前=白色实心圆点（绝对定位居中，永不裁剪）、
+      // 完成=✓、暂停=⏸、未到=空。集中类 awf-step-node 保证容器不设 overflow 裁剪。
       const nodeIcon = (i) => {
         const done = i < index
         const cur = i === index
         if (cur && !paused) {
-          // 当前激活：内嵌白色实心圆点，margin auto 双居中保证不偏移、不被裁
-          return h('span', {
-            style: {
-              width: 6, height: 6, borderRadius: '50%',
-              background: '#fff', display: 'block', flexShrink: 0,
-              margin: 'auto',
-            },
-          })
+          // 当前激活：绝对定位白点，translate(-50%,-50%) 严格居中，不依赖行高
+          return h('span', { className: 'awf-dot', style: { background: '#fff' } })
         }
         if (cur && paused) {
-          return h('span', { style: { fontSize: 9, fontWeight: 800, lineHeight: 1, margin: 'auto' } }, '⏸')
+          return h('span', { style: { fontSize: 11, fontWeight: 900, lineHeight: 1 } }, '⏸')
         }
         if (done) {
-          return h('span', { style: { fontSize: 10, fontWeight: 900, lineHeight: 1 } }, '✓')
+          return h('span', { style: { fontSize: 11, fontWeight: 900, lineHeight: 1 } }, '✓')
         }
         // 未到：空心节点不放内容
         return null
       }
       const lineStyle = (i) => ({
-        flex: '1 1 10px', minWidth: 8, height: 2, borderRadius: 99,
-        alignSelf: 'flex-start', marginTop: 6,
         background: i < index
           ? 'color-mix(in srgb, ' + C.accent + ' 50%, transparent)'
           : 'color-mix(in srgb, ' + C.faint + ' 24%, transparent)',
@@ -1039,16 +1108,16 @@ window.__ModuleLoader__.load({
       steps.forEach((s, i) => {
         const done = i < index
         const cur = i === index
-        if (i > 0) trackChildren.push(h('span', { key: 'ln' + i, style: lineStyle(i - 1) }))
+        if (i > 0) trackChildren.push(h('span', { key: 'ln' + i, className: 'awf-step-line', style: lineStyle(i - 1) }))
         trackChildren.push(h('div', {
           key: s.key,
-          className: 'awf-step' + (cur ? ' awf-step-cur' : done ? ' awf-step-done' : ' awf-step-pend'),
-          style: { display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 },
+          className: 'awf-step' + (cur ? ' awf-step-cur' + (paused ? ' awf-step-paused' : '') : done ? ' awf-step-done' : ' awf-step-pend'),
+          style: { display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '0 1 auto', minWidth: 0 },
         },
-          h('span', { style: nodeStyle(i), title: s.label }, nodeIcon(i)),
+          h('span', { className: 'awf-step-node', style: nodeStyle(i), title: s.label }, nodeIcon(i)),
           h('span', {
+            className: 'awf-step-label',
             style: {
-              marginTop: 3, fontSize: 8.5, whiteSpace: 'nowrap',
               fontWeight: cur ? 700 : 600,
               color: cur ? C.accent : done ? C.sub : C.faint,
             },
@@ -1058,26 +1127,26 @@ window.__ModuleLoader__.load({
       return h('div', {
         className: 'awf-track',
         style: {
-          marginTop: 8, padding: '8px 10px', borderRadius: 8,
+          marginTop: 10, padding: '10px 12px', borderRadius: C.radius,
           background: 'color-mix(in srgb, ' + C.surface + ' 45%, transparent)',
           border: '1px solid ' + C.hairline,
         },
       },
-        h('div', { style: Object.assign({ justifyContent: 'space-between' }, row({ marginBottom: 6 })) },
-          h('span', { style: row({ gap: 6, fontSize: 10, fontWeight: 700, color: C.dim }) },
+        h('div', { style: Object.assign({ justifyContent: 'space-between' }, row({ marginBottom: 8 })) },
+          h('span', { style: row({ gap: 6, fontSize: 11, fontWeight: 700, color: C.dim }) },
             h('span', { style: { color: type.color } }, type.label),
             h('span', {}, '流程')),
-          h('span', { style: row({ gap: 8, fontSize: 10 }) },
+          h('span', { style: row({ gap: 8, fontSize: 11 }) },
             h('span', { style: { color: C.success, fontWeight: 600, whiteSpace: 'nowrap' } },
               '✓ 已完成 ' + index),
             paused
-              ? h('span', { style: { fontSize: 10, fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
+              ? h('span', { style: { fontSize: 11, fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
                   '已暂停 · ' + activeStep.label)
-              : h('span', { style: { fontSize: 10, color: C.accent, fontWeight: 600, whiteSpace: 'nowrap' } },
+              : h('span', { style: { fontSize: 11, color: C.accent, fontWeight: 600, whiteSpace: 'nowrap' } },
                   '当前 · ' + activeStep.label),
             h('span', { style: { color: C.faint, fontWeight: 600, whiteSpace: 'nowrap' } },
               '待办 ' + Math.max(0, steps.length - index - 1)))),
-        h('div', { style: { display: 'flex', alignItems: 'flex-start', overflowX: 'auto', paddingBottom: 2 } },
+        h('div', { className: 'awf-track-body', style: { display: 'flex', alignItems: 'flex-start', paddingBottom: 4, minWidth: 0 } },
           trackChildren))
     }
 
@@ -1094,7 +1163,7 @@ window.__ModuleLoader__.load({
           background: 'color-mix(in srgb, ' + C.accent + ' 6%, transparent)',
         },
       },
-        h('div', { style: { fontSize: 11.5, fontWeight: 700, color: C.text, marginBottom: 7 } }, '＋ 新增待办行'),
+        h('div', { style: { fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 7 } }, '＋ 新增待办行'),
         h('div', { style: row({ gap: 6, flexWrap: 'wrap' }) },
           h('select', {
             value: f.type || 'dev', disabled: busy,
@@ -1121,7 +1190,7 @@ window.__ModuleLoader__.load({
           h('button', {
             onClick: busy ? undefined : onSave, disabled: busy,
             style: Object.assign(buttonStyle(true), { opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }),
-          }, busy ? '保存中…' : '保存'),
+          }, '保存'),
           h('button', { onClick: onCancel, disabled: busy, style: buttonStyle() }, '取消')))
     }
 
@@ -1153,7 +1222,7 @@ window.__ModuleLoader__.load({
                   },
                     h('span', {
                       style: {
-                        fontFamily: C.mono, fontSize: 10.5, color: C.dim,
+                        fontFamily: C.mono, fontSize: 11, color: C.dim,
                         wordBreak: 'break-all', minWidth: 0, flex: 1,
                       },
                     }, data.absPath || ''),
@@ -1164,7 +1233,7 @@ window.__ModuleLoader__.load({
                     }, s.copied ? '已复制 ✓' : '复制路径')),
                   h('div', {
                     style: {
-                      fontSize: 10.5, color: C.faint, lineHeight: 1.5,
+                      fontSize: 11, color: C.faint, lineHeight: 1.5,
                       padding: '0 2px',
                     },
                   }, '提示：复制路径后在访达（Finder）按 ⌘⇧G 粘贴直达，或粘贴到任意编辑器打开查看。'),
@@ -1190,7 +1259,7 @@ window.__ModuleLoader__.load({
       const busy = !!s.busy
 
       const errorLine = s.error
-        ? h('div', { key: 'err', style: { fontSize: 11.5, color: C.error, marginTop: 10, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
+        ? h('div', { key: 'err', style: { fontSize: 12, color: C.error, marginTop: 10, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
         : null
 
       const actionButtons = (withRollback) => h('div', {
@@ -1202,7 +1271,7 @@ window.__ModuleLoader__.load({
               disabled: busy,
               autoFocus: false,
               style: Object.assign(dangerSolid, { opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer' }),
-            }, busy ? '处理中…' : '删除并回退修改')
+            }, '删除并回退修改')
           : null,
         h('button', {
           onClick: busy ? undefined : H.onLedgerOnly,
@@ -1245,7 +1314,7 @@ window.__ModuleLoader__.load({
             h('span', {
               style: { fontSize: 12.5, color: C.error, fontWeight: 700, lineHeight: 1.5 },
             }, '删除后将回退这些文件的未提交修改，不可恢复')),
-          h('div', { style: { fontSize: 11.5, color: C.sub, margin: '10px 0 6px' } },
+          h('div', { style: { fontSize: 12, color: C.sub, margin: '10px 0 6px' } },
             '将回退以下 ' + view.files.length + ' 个文件：'),
           h('div', { style: { border: '1px solid ' + C.border, borderRadius: 8, overflow: 'hidden' } },
             view.files.map((f, i) => {
@@ -1261,7 +1330,7 @@ window.__ModuleLoader__.load({
                 h(Pill, { color: st.color }, fileStatusLabel(f.status)),
                 h('span', {
                   style: {
-                    fontFamily: C.mono, fontSize: 10.5, color: C.text,
+                    fontFamily: C.mono, fontSize: 11, color: C.text,
                     wordBreak: 'break-all', flex: 1, minWidth: 0,
                   },
                 }, f.path))
@@ -1280,9 +1349,9 @@ window.__ModuleLoader__.load({
             h('span', { style: { fontSize: 15 } }, '⚠️'),
             h('div', {},
               h('div', { style: { fontSize: 12.5, color: C.warn, fontWeight: 700 } }, '无法回退未提交修改'),
-              h('div', { style: { fontSize: 11.5, color: C.sub, marginTop: 3, lineHeight: 1.5 } },
+              h('div', { style: { fontSize: 12, color: C.sub, marginTop: 3, lineHeight: 1.5 } },
                 deleteReasonText(view.reason)))),
-          h('div', { style: { fontSize: 11.5, color: C.sub, marginTop: 10, lineHeight: 1.5 } },
+          h('div', { style: { fontSize: 12, color: C.sub, marginTop: 10, lineHeight: 1.5 } },
             '仍可「仅删除账本」：跳过回退，只从账本中移除该任务块（done.md 记「已撤销」）。'),
           errorLine,
           actionButtons(false))
@@ -1306,18 +1375,18 @@ window.__ModuleLoader__.load({
         const typeStyle = TYPE_STYLE[s.data.type] || { color: C.faint }
         body = h('div', {},
           h('div', { style: row({ gap: 8, flexWrap: 'wrap' }) },
-            h(Pill, { color: typeStyle.color }, TYPE_LABEL(s.data.type)),
-            doneRow.prio ? h(Pill, { color: PRIO_COLOR[doneRow.prio] || C.faint }, doneRow.prio) : null,
+            h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(s.data.type)),
+            doneRow.prio ? h(Pill, { color: (PRIO_STYLE[doneRow.prio] || { color: C.faint }).color, variant: 'soft', dataPrio: doneRow.prio }, doneRow.prio) : null,
             doneRow.date ? h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, '完成于 ' + doneRow.date) : null),
           h('div', { style: { fontSize: 13, fontWeight: 700, color: C.text, marginTop: 8, lineHeight: 1.5 } },
             doneRow.desc || '（无描述）'),
-          h('div', { style: { fontSize: 11.5, fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
+          h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
             '任务块原文（markdown）'),
           h('pre', {
             style: {
               margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 320,
               background: C.raised, border: '1px solid ' + C.hairline,
-              fontFamily: C.mono, fontSize: 11.5, lineHeight: 1.55,
+              fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
               color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
             },
           }, s.data.block || '（该任务归档时未保留详细任务块，仅摘要）'),
@@ -1329,21 +1398,40 @@ window.__ModuleLoader__.load({
       return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 520 }, body)
     }
 
-    /** 未初始化引导卡：图标 + 文案 + 「初始化工作流」按钮。 */
-    function renderInitCard({ busy, error, onInit }) {
+    /**
+     * 统一空态/错误/引导卡（DEV-024）：dashed 边框 + 语义底色 + 图标 + 主/副文案 + 可选动作。
+     * tone: 'error'（红）| 'accent'（引导）| 其他（中性）；容器带 awf-empty 类供单测断言。
+     */
+    function EmptyState({ icon, title, desc, tone, action, extra }) {
+      const err = tone === 'error'
+      const accentTone = tone === 'accent'
       return h('div', {
+        className: 'awf-empty',
         style: {
           display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
-          padding: '20px 16px', borderRadius: C.radius,
-          border: '1px dashed ' + C.accent,
-          background: 'color-mix(in srgb, ' + C.accent + ' 5%, transparent)',
+          padding: '18px 16px', borderRadius: C.radius,
+          border: '1px dashed ' + (err
+            ? 'color-mix(in srgb, ' + C.error + ' 40%, transparent)'
+            : accentTone ? 'color-mix(in srgb, ' + C.accent + ' 45%, transparent)' : C.border),
+          background: err
+            ? 'color-mix(in srgb, ' + C.error + ' 7%, transparent)'
+            : accentTone ? 'color-mix(in srgb, ' + C.accent + ' 5%, transparent)' : C.surface,
         },
       },
-        h('span', { style: { fontSize: 26, lineHeight: 1 } }, '🚀'),
-        h('div', { style: { fontWeight: 800, fontSize: 13.5, color: C.text, marginTop: 10 } }, '工作流未初始化'),
-        h('div', { style: muted({ marginTop: 6, maxWidth: 260 }) },
-          '该项目尚未初始化 agent-workflow。点击下方按钮生成骨架：project.yaml + tasks/{dev,debug,docs}/{todo,current,done}.md + status.md。'),
-        typeof onInit === 'function'
+        h('span', { style: { fontSize: 24, lineHeight: 1 } }, icon),
+        h('div', { style: { fontWeight: 800, fontSize: 13, color: C.text, marginTop: 10 } }, title),
+        desc ? h('div', { style: muted({ marginTop: 6, maxWidth: 260 }) }, desc) : null,
+        extra || null,
+        action || null)
+    }
+
+    /** 未初始化引导卡：图标 + 文案 + 「初始化工作流」按钮（EmptyState accent 形态）。 */
+    function renderInitCard({ busy, error, onInit }) {
+      return h(EmptyState, {
+        icon: '🚀', tone: 'accent',
+        title: '工作流未初始化',
+        desc: '该项目尚未初始化 agent-workflow。点击下方按钮生成骨架：project.yaml + tasks/{dev,debug,docs}/{todo,current,done}.md + status.md。',
+        action: typeof onInit === 'function'
           ? h('button', {
               onClick: busy ? undefined : onInit,
               disabled: busy,
@@ -1351,12 +1439,13 @@ window.__ModuleLoader__.load({
                 marginTop: 12, padding: '5px 16px', fontSize: 12,
                 opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
               }),
-            }, busy ? '初始化中…' : '初始化工作流')
+            }, '初始化工作流')
           : null,
-        error
-          ? h('div', { style: { marginTop: 10, fontSize: 11.5, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
+        extra: error
+          ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
               '⚠️ ' + error)
-          : null)
+          : null,
+      })
     }
 
     // ---- 看板主体 ---------------------------------------------------------
@@ -1804,34 +1893,35 @@ window.__ModuleLoader__.load({
         })
       }, [])
 
-      const header = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 } },
-        h('div', { style: { minWidth: 0 } },
-          h('div', { style: { fontWeight: 800, fontSize: 14, color: C.text } }, 'Agent Workflow'),
-          h('div', { style: { fontSize: 10.5, color: C.faint, marginTop: 1, letterSpacing: '.02em' } }, 'agent-workflow 账本看板')),
+      // DEV-024 头部工具条：撤销冗余大标题（页签即标题），一行容纳
+      // 项目下拉（主控件）+ 锚定徽章 + 刷新；刷新按钮文案恒定（不再随轮询闪
+      // 「刷新中」，busy 只做 disabled+降透明）。
+      const header = h('div', {
+        className: 'awf-toolbar',
+        style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 },
+      },
+        h('div', { style: { minWidth: 0, flex: '1 1 180px', maxWidth: 320 } },
+          h('select', {
+            value: selected,
+            onChange: onSelect,
+            title: '账本看板 · 选择项目',
+            style: {
+              width: '100%', padding: '4px 8px', fontSize: 12,
+              background: C.surface, color: C.text,
+              border: '1px solid ' + C.border, borderRadius: C.radiusSm, outline: 'none',
+              textOverflow: 'ellipsis',
+            },
+          },
+            h('option', { value: '', disabled: true }, projects ? '选择项目…' : '加载索引…'),
+            (projects || []).map((pr) => h('option', { key: pr.path, value: pr.path },
+              `${pr.id}（${pr.path}）`)))),
+        auto && selected ? h(Pill, { color: C.success, dot: true }, '已锚定当前会话') : null,
         h('button', {
           onClick: loadLedger,
           disabled: loading,
+          title: '刷新账本（每 15s 自动刷新）',
           style: Object.assign(buttonStyle(), { opacity: loading ? 0.6 : 1, cursor: loading ? 'default' : 'pointer' }),
-        }, loading ? '刷新中' : '刷新'))
-
-      const selector = h('div', { style: { marginBottom: 8 } },
-        h('div', { style: row({ gap: 8, marginBottom: 4 }) },
-          h('span', { style: { fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: '.05em' } }, '项目'),
-          auto && selected
-            ? h(Pill, { color: C.success }, '已锚定当前会话')
-            : null),
-        h('select', {
-          value: selected,
-          onChange: onSelect,
-          style: {
-            width: '100%', padding: '5px 8px', fontSize: 12,
-            background: C.surface, color: C.text,
-            border: '1px solid ' + C.border, borderRadius: 8, outline: 'none',
-          },
-        },
-          h('option', { value: '', disabled: true }, projects ? '选择项目…' : '加载索引…'),
-          (projects || []).map((pr) => h('option', { key: pr.path, value: pr.path },
-            `${pr.id}（${pr.path}）`))))
+        }, '刷新'))
 
       const body = notInit
         ? renderInitCard({ busy: initBusy, error: initError, onInit: handleInit })
@@ -1889,9 +1979,9 @@ window.__ModuleLoader__.load({
           padding: '12px 12px 20px', boxSizing: 'border-box',
         },
       },
-        // 卡片/行 hover 质感：一次性注入静态样式（纯手写 h() 无构建）
-        h('style', { key: 'awf-hover-css' }, AWF_HOVER_CSS),
-        header, selector, body,
+        // 卡片/行 hover 质感 + 焦点/按压反馈 + 统一基础样式：一次性注入静态样式（纯手写 h() 无构建）
+        h('style', { key: 'awf-hover-css' }, AWF_HOVER_CSS + AWF_UI_CSS),
+        header, body,
         archive ? renderArchiveModal(archive, () => setArchive(null)) : null,
         delModal ? renderDeleteModal(delModal, {
           onRollback: () => handleDeleteConfirm('rollback'),
@@ -1904,49 +1994,26 @@ window.__ModuleLoader__.load({
 
     function renderErrorBody(error, onRetry) {
       const msg = String(error || '')
-      return h('div', {
-        style: {
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '16px 14px', borderRadius: C.radius, textAlign: 'center',
-          border: '1px solid color-mix(in srgb, ' + C.error + ' 40%, transparent)',
-          background: 'color-mix(in srgb, ' + C.error + ' 7%, transparent)',
-        },
-      },
-        h('span', { style: { fontSize: 22, lineHeight: 1 } }, '⚠️'),
-        h('div', { style: { fontWeight: 700, fontSize: 13, color: C.error, marginTop: 8 } }, '账本读取失败'),
-        msg
-          ? h('div', { style: muted({ marginTop: 6, wordBreak: 'break-all' }) }, msg)
-          : null,
-        typeof onRetry === 'function'
+      return h(EmptyState, {
+        icon: '⚠️', tone: 'error', title: '账本读取失败',
+        desc: msg || null,
+        action: typeof onRetry === 'function'
           ? h('button', { onClick: onRetry, style: Object.assign(buttonStyle(true), { marginTop: 10 }) }, '重试')
-          : null)
+          : null,
+      })
     }
 
     function renderEmptyBody(projects) {
       if (Array.isArray(projects) && projects.length === 0) {
-        return h('div', {
-          style: {
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            padding: '18px 14px', borderRadius: C.radius, textAlign: 'center',
-            border: '1px dashed ' + C.border, background: C.surface,
-          },
-        },
-          h('span', { style: { fontSize: 24, lineHeight: 1 } }, '🗂️'),
-          h('div', { style: { fontWeight: 700, fontSize: 13, color: C.text, marginTop: 10 } }, '未选择项目'),
-          h('div', { style: muted({ marginTop: 6, maxWidth: 240 }), color: C.sub },
-            '当前会话未命中任何已登记项目。请从上方下拉选择一个项目查看账本。'))
+        return h(EmptyState, {
+          icon: '🗂️', title: '未选择项目',
+          desc: '当前会话未命中任何已登记项目。请从上方下拉选择一个项目查看账本。',
+        })
       }
-      return h('div', {
-        style: {
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '18px 14px', borderRadius: C.radius, textAlign: 'center',
-          border: '1px dashed ' + C.border, background: C.surface,
-        },
-      },
-        h('span', { style: { fontSize: 24, lineHeight: 1 } }, '📭'),
-        h('div', { style: { fontWeight: 700, fontSize: 13, color: C.text, marginTop: 10 } }, '项目索引为空'),
-        h('div', { style: muted({ marginTop: 6, maxWidth: 240 }) },
-          '先运行 `awf register` 登记项目，再回来查看 Agent Workflow 账本。'))
+      return h(EmptyState, {
+        icon: '📭', title: '项目索引为空',
+        desc: '先运行 `awf register` 登记项目，再回来查看 Agent Workflow 账本。',
+      })
     }
 
     /**
@@ -1973,7 +2040,7 @@ window.__ModuleLoader__.load({
           key: 'action-error',
           style: {
             display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, padding: '7px 10px',
-            borderRadius: 8, fontSize: 11.5, color: C.error, wordBreak: 'break-all',
+            borderRadius: 8, fontSize: 12, color: C.error, wordBreak: 'break-all',
             border: '1px solid color-mix(in srgb, ' + C.error + ' 40%, transparent)',
             background: 'color-mix(in srgb, ' + C.error + ' 7%, transparent)',
           },
@@ -1994,7 +2061,7 @@ window.__ModuleLoader__.load({
       },
         h('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 } },
           h('div', { style: { minWidth: 0 } },
-            h('div', { style: { fontSize: 15, fontWeight: 800, color: C.text, lineHeight: 1.3 } },
+            h('div', { style: { fontSize: 14, fontWeight: 800, color: C.text, lineHeight: 1.3 } },
               proj.name || '未命名项目'),
             h('div', { style: { fontFamily: C.mono, fontSize: 11, color: C.faint, marginTop: 3, wordBreak: 'break-all' } },
               proj.path || '')),
@@ -2002,7 +2069,7 @@ window.__ModuleLoader__.load({
         proj.purpose
           ? h('div', {
               style: {
-                marginTop: 9, fontSize: 11.5, color: C.sub, lineHeight: 1.5,
+                marginTop: 9, fontSize: 12, color: C.sub, lineHeight: 1.5,
                 background: 'color-mix(in srgb, ' + C.accent + ' 7%, transparent)',
                 border: '1px solid ' + C.hairline, borderRadius: 8,
                 padding: '6px 9px', wordBreak: 'break-word',
@@ -2018,13 +2085,14 @@ window.__ModuleLoader__.load({
             `status.md 更新于 ${fmtTime(ledger.status && ledger.status.updated)}` +
             (fresh ? '' : ' → 请运行 awf status')))))
 
-      // ---- 当前任务
+      // ---- 当前任务（DEV-024：宽面板两列网格，窄面板 auto-fit 自动回退单列）
       items.push(h(SectionTitle, { key: 'cur-h', label: '当前任务', count: ledger.current.length }))
       if (ledger.current.length > 0) {
+        const taskCards = []
         ledger.current.forEach((t, i) => {
           const editingThis = !!(U.taskEdit && U.taskEdit.id === t.id)
-          items.push(h(TaskCard, {
-            key: 'cur-' + i, t,
+          taskCards.push(h(TaskCard, {
+            key: 'cur-' + i, t, flush: true,
             onDelete: U.onDelete,
             deleting: U.onDelete && U.deleting === t.id,
             onEdit: U.onTaskEdit,
@@ -2039,6 +2107,15 @@ window.__ModuleLoader__.load({
             onOpenSource: typeof U.onOpenSource === 'function' ? (() => U.onOpenSource(t.type, 'current')) : undefined,
           }))
         })
+        items.push(h('div', {
+          key: 'cur-grid',
+          className: 'awf-tasks',
+          style: {
+            // 任务卡恢复单列：步骤条、验收进度和操作区内容高度不同，双列会造成行内卡片错位。
+            display: 'flex', flexDirection: 'column',
+            gap: 10, width: '100%',
+          },
+        }, taskCards))
       } else {
         items.push(h('div', {
           key: 'cur-none',
@@ -2067,8 +2144,8 @@ window.__ModuleLoader__.load({
             borderTop: '1px dashed ' + C.hairline,
           },
         },
-          h('span', { style: { fontSize: 11.5, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType)),
-          h('span', { style: { fontSize: 10.5, color: C.faint } }, String(typeRows.length))))
+          h('span', { style: { fontSize: 12, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType)),
+          h('span', { style: { fontSize: 11, color: C.faint } }, String(typeRows.length))))
         if (U.todoAddForm) {
           cardChildren.push(h(TodoAddForm, {
             key: 'todo-add-form',
@@ -2107,7 +2184,7 @@ window.__ModuleLoader__.load({
             key: 'rows-empty',
             style: {
               marginTop: 8, padding: '14px 0', textAlign: 'center',
-              color: C.faint, fontSize: 11.5,
+              color: C.faint, fontSize: 12,
               border: '1px dashed ' + C.hairline, borderRadius: 8,
             },
           }, '该类型暂无未开始任务' + (typeof U.onTodoAdd === 'function' ? '（可点「＋ 新增」登记）' : '')))
