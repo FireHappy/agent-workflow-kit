@@ -147,7 +147,7 @@
 3. 目标没有未提交改动 / 其他 active 任务
 4. 目标工作区可创建会话
 
-全过时优先在**目标工作区的会话**中执行，不要默认 headless；详细流程见 `workflows/cross-project.md`。若当前 harness 提供派发工具，可用 `./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话；否则按 `workflows/cross-project.md` 手动派发。
+全过时优先在**目标工作区的会话**中执行，不要默认无人值守（后台）执行；详细流程见 `workflows/cross-project.md`。若当前 harness 提供派发工具，可用 `./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话；否则按 `workflows/cross-project.md` 手动派发。
 
 ---
 

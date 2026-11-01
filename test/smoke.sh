@@ -1155,6 +1155,7 @@ cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
 ### 下一步
 继续。
 EOF
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "补齐后 check 通过" || bad "补齐后 check 未通过"
 
 # 6. 事实文件变更 → 入口过期 → bootstrap 修复
@@ -1248,6 +1249,160 @@ set +e
 dispatch_code=$?
 set -e
 [ "$dispatch_code" = "2" ] && ok "awf-dispatch 门失败退出码为 2" || bad "awf-dispatch 退出码为 $dispatch_code（期望 2）"
+
+# 13. F1：check 校验状态枚举（非法值失败）
+cat > "$PROJ/agent-workflow/tasks/docs/current.md" <<'F1B'
+# 正在撰写
+
+## [DOCS-100] 非法状态
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | dream |
+| Owner | t3 |
+
+### 下一步
+改正。
+F1B
+if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  bad "F1 非法状态值未被 check 发现"
+else
+  printf '%s\n' "$out" | grep -q '状态非法' && ok "F1 非法状态值被 check 拒绝" || bad "F1 非法状态值未被点名：$out"
+fi
+cat > "$PROJ/agent-workflow/tasks/docs/current.md" <<'F1G'
+# 正在撰写
+
+（暂无进行中任务）
+F1G
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F1 恢复合法状态后 check 通过" || bad "F1 恢复后 check 未通过"
+
+# 14. F2：status.md 新鲜度（账本改动后未刷新 → 过期失败）
+cat > "$PROJ/agent-workflow/tasks/debug/current.md" <<'F2B'
+# 正在调试
+
+## [DEBUG-101] 新鲜度
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | t3 |
+| 现象 | x |
+| 假设 | y |
+| 证伪方法 | z |
+
+### 下一步
+跑 status 后复检。
+F2B
+if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  bad "F2 账本改动后未刷新 status.md，check 应失败"
+else
+  printf '%s\n' "$out" | grep -q 'status.md 已过期' && ok "F2 status 过期被 check 发现" || bad "F2 过期信息缺失：$out"
+fi
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F2 刷新 status 后 check 通过" || bad "F2 刷新后 check 未通过"
+
+# 15. F3：done.md 归档块校验（缺文件 / 非法归档行）
+printf '| BAD-ID | P1 | 少日期行 |\n' >> "$PROJ/agent-workflow/tasks/dev/done.md"
+if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  bad "F3 done.md 非法归档行未被 check 发现"
+else
+  printf '%s\n' "$out" | grep -q 'BAD-ID' && ok "F3 done.md 非法归档行被 check 拒绝" || bad "F3 未点名非法归档行：$out"
+fi
+grep -v 'BAD-ID' "$PROJ/agent-workflow/tasks/dev/done.md" > "$PROJ/agent-workflow/tasks/dev/done.md.tmp" \
+  && mv "$PROJ/agent-workflow/tasks/dev/done.md.tmp" "$PROJ/agent-workflow/tasks/dev/done.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3 修复归档行后 check 通过" || bad "F3 修复后 check 未通过"
+mv "$PROJ/agent-workflow/tasks/debug/done.md" "$PROJ/agent-workflow/tasks/debug/done.md.hid"
+if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
+  bad "F3 缺 done.md（无归档块）未被 check 发现"
+else
+  ok "F3 缺 done.md（无归档块）check 失败"
+fi
+mv "$PROJ/agent-workflow/tasks/debug/done.md.hid" "$PROJ/agent-workflow/tasks/debug/done.md"
+
+# 16. F4：team-flow 文档 approval 语义统一为 automatic（无 staged 审批残留）
+if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' docs/team-flow.md >/dev/null; then
+  bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' docs/team-flow.md | tr '\n' ';')"
+else
+  ok "F4 team-flow 无 staged 审批残留"
+fi
+grep -q 'approval=automatic' docs/team-flow.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
+
+# 17. F5：cross-project 模板 harness 中立（无 DSH 专有词，细节下沉文档/技能层）
+for f in "$KIT_DIR/templates/workflows/cross-project.md" "$KIT_DIR/agent-workflow/workflows/cross-project.md"; do
+  if grep -qiE 'dsh|headless|workspace\.json|session 错误码|Ungrouped|DEFAULT_WEB_URL' "$f"; then
+    bad "F5 $f 仍含 DSH 专有词：$(grep -inE 'dsh|headless|workspace\.json|session 错误码|Ungrouped|DEFAULT_WEB_URL' "$f" | tr '\n' ';')"
+  else
+    ok "F5 $f 无 DSH 专有词"
+  fi
+done
+if grep -q '派发技能' "$KIT_DIR/templates/workflows/cross-project.md" \
+  && grep -q 'docs/dispatch.md' "$KIT_DIR/templates/workflows/cross-project.md"; then
+  ok "F5 模板把细节下沉指向文档与技能层"
+else
+  bad "F5 模板缺少文档/技能层指引"
+fi
+
+# 18. F6：kit 形态副本漂移被 check 拒绝（根 → agent-workflow/ 双向）
+F6R="$TMP/f6kit"
+"$KIT_DIR/bin/awf" init "$F6R" --name f6 --no-register >/dev/null
+mkdir -p "$F6R/bin"
+cp "$KIT_DIR/bin/awf" "$F6R/bin/awf"
+cp -R "$KIT_DIR/templates/." "$F6R/templates/"
+chmod +x "$F6R/bin/awf"
+if ( cd "$F6R" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
+  ok "F6 副本一致时 check 通过"
+else
+  bad "F6 副本一致时 check 未通过"
+fi
+printf '\n> 本地补充内容\n' >> "$F6R/agent-workflow/workflows/dev.md"
+if out="$(cd "$F6R" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  bad "F6 agent 侧工作流漂移未被发现"
+else
+  printf '%s\n' "$out" | grep -q '副本漂移' && ok "F6 agent 侧副本漂移被 check 拒绝" || bad "F6 漂移信息缺失：$out"
+fi
+cp "$F6R/templates/workflows/dev.md" "$F6R/agent-workflow/workflows/dev.md"
+printf '\n> 模板新内容\n' >> "$F6R/templates/AGENTS.md.tmpl"
+if out="$(cd "$F6R" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  bad "F6 根侧模板漂移未被发现"
+else
+  printf '%s\n' "$out" | grep -q '副本漂移' && ok "F6 根侧模板漂移被 check 拒绝" || bad "F6 根侧漂移信息缺失"
+fi
+cp "$KIT_DIR/templates/AGENTS.md.tmpl" "$F6R/templates/AGENTS.md.tmpl"
+( cd "$F6R" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F6 恢复同步后 check 通过" || bad "F6 恢复同步后 check 未通过"
+
+# 19. F6：release-prep 先检测漂移再覆盖（有漂移拒绝，禁止静默回滚）
+RPD="$TMP/rpdrift"
+"$KIT_DIR/bin/awf" init "$RPD" --name rpdrift --no-register >/dev/null
+mkdir -p "$RPD/bin" "$RPD/test"
+cp "$KIT_DIR/bin/awf" "$RPD/bin/awf"
+cp -R "$KIT_DIR/templates/." "$RPD/templates/"
+chmod +x "$RPD/bin/awf"
+printf '0.0.1\n' > "$RPD/VERSION"
+printf '# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n' > "$RPD/CHANGELOG.md"
+printf '#!/bin/sh\nexit 0\n' > "$RPD/agent-workflow/check_workflow.sh"
+printf '#!/bin/sh\nexit 0\n' > "$RPD/test/smoke.sh"
+chmod +x "$RPD/agent-workflow/check_workflow.sh" "$RPD/test/smoke.sh"
+printf '\n> 本地发版工作流改动\n' >> "$RPD/agent-workflow/workflows/release.md"
+set +e
+rp_out="$("$RPD/agent-workflow/bin/awf" release-prep --root "$RPD" 0.5.0 2>&1)"
+rp_code=$?
+set -e
+if [ "$rp_code" != "0" ] && printf '%s\n' "$rp_out" | grep -q '漂移'; then
+  ok "F6 release-prep 检测漂移并拒绝覆盖"
+else
+  bad "F6 release-prep 未拒绝漂移（rc=$rp_code）：$rp_out"
+fi
+[ "$(cat "$RPD/VERSION")" = "0.0.1" ] && ok "F6 拒绝后 VERSION 未被改写" || bad "F6 拒绝后 VERSION 被改写"
+cp "$RPD/templates/workflows/release.md" "$RPD/agent-workflow/workflows/release.md"
+if ( cd "$RPD" && ./agent-workflow/bin/awf release-prep --root "$RPD" 0.5.0 >/dev/null 2>&1 ); then
+  ok "F6 消除漂移后 release-prep 成功"
+else
+  bad "F6 消除漂移后 release-prep 失败"
+fi
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

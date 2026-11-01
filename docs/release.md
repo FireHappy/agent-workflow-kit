@@ -51,6 +51,7 @@ git tag --list 'v*' --sort=-v:refname | head # 上一个版本
 - [ ] `CHANGELOG.md` 已写本次版本条目（`[Unreleased]` 移到 `[X.Y.Z] - YYYY-MM-DD`）
 - [ ] `VERSION` 与 CHANGELOG 标题版本一致
 - [ ] 入口 `AGENTS.md` digest 与 `project.yaml` 一致
+- [ ] 生成副本无漂移（`bin/awf`、`bin/awf-dispatch`、`templates/` ↔ `agent-workflow/`；`check` 兜底，有漂移先同步或 `init . --force` 有意刷新）
 - [ ] demo01 / demo02 等下游项目是否需要同步升级（见 §5）
 
 ## 3. 改版本号与 CHANGELOG
@@ -93,7 +94,8 @@ printf '0.2.2\n' > VERSION
 
 它**会做**：
 
-1. `./bin/awf init . --force --no-register` 刷新生成副本，再 `bootstrap` 刷新 `AGENTS.md` digest；
+0. **先检测生成副本漂移**（`bin/awf`、`bin/awf-dispatch`、`templates/` ↔ `agent-workflow/`）：有漂移立即拒绝，不做任何覆盖——防止 `init . --force` 静默回滚 agent-workflow 侧的工作流改动（本地对 agent-workflow 侧改过内容时，先手工决定同步或有意刷新）；
+1. `./bin/awf init . --force --no-register` 刷新生成副本（无漂移时才执行），再 `bootstrap` 刷新 `AGENTS.md` digest；
 2. 在 `agent-workflow/tasks/dev/current.md` 写入 `[DEV-XXX] release-prep <版本>` 块（自动取下一个可用 ID），校验通过后归档到 `done.md`；
 3. 把 `VERSION` 改为 `<X.Y.Z>`；把 `CHANGELOG.md` 顶部的 `## [Unreleased]` 改为 `## [<X.Y.Z>] - 今天`（没有 Unreleased 时提示手动处理）；
 4. 跑 `./agent-workflow/check_workflow.sh` 与 `bash test/smoke.sh`，任一失败即停（账本留在 `current.md`）；

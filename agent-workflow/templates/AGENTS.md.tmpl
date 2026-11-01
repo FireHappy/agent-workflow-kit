@@ -50,7 +50,7 @@
 - 全局索引：`~/.agents/AGENTS.md`（别名 → 路径）；也可运行 `./agent-workflow/bin/awf projects`
 - 按名字定位：`./agent-workflow/bin/awf find <别名|ID>`
 - 若索引里还没有本仓库（clone/移动后），运行 `./agent-workflow/bin/awf register`；`bootstrap` 会自动刷新已登记项目的路径
-- 派发前先确认目标项目有工作流且已登记为当前 harness 的工作区；满足后优先在目标工作区的会话中执行，不要默认 headless
+- 派发前先确认目标项目有工作流且已登记为当前 harness 的工作区；满足后优先在目标工作区的会话中执行，不要默认无人值守（后台）执行
 - 派发工具（若 harness 提供）：`./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
 - 不要在调度方会话里直接改目标仓库；写入由目标 agent 在目标工作区完成
 

@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Added
+- `check` 机械兜底（F1-F3）：状态字段枚举校验（`active/blocked/review/verify/handoff`，非法值即失败）；`status.md` 新鲜度校验（账本改动后未跑 `awf status` 即失败）；`done.md` 归档块/归档行校验（缺文件、非法 ID、缺优先级或完成日期即失败）
+- `check` 生成副本漂移检测（F6）：`bin/awf`、`bin/awf-dispatch`、`templates/` 与 `agent-workflow/` 对应副本不一致即失败
+- `release-prep` 生成副本漂移保护（F6）：先检测漂移再覆盖，有漂移拒绝执行，不再静默回滚 agent-workflow 侧改动
+
+### Changed
+- 模板 harness 中立化落地（F5）：`templates/workflows/cross-project.md` 移除全部 DSH 专有词（workspace.json / headless / Ungrouped / 会话错误码），收敛为抽象步骤，细节下沉 `docs/dispatch.md` 与派发技能层；`templates/README.md`、`templates/AGENTS.md.tmpl` 同步收敛
+- `docs/team-flow.md` §4.2 / §5 / §6 / §7 的 approval 语义统一为 `automatic`（F4）：不再 staged 审批，建队前贴 3 行计划摘要、可立即叫停
+
+### Fixed
+- 更正 0.4.0「模板中立化」名不副实：cross-project 模板当时仍含 DSH 专有词，本次全部移除并下沉文档与技能层
+
 ## [0.4.2] - 2026-10-31
 
 ### Added

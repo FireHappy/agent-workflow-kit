@@ -55,7 +55,9 @@ awf — agent workflow framework
       若项目已在全局索引中，会顺带刷新其路径与别名。
 
   awf check
-      校验框架完整性、AGENTS.md 入口新鲜度、进行中任务的必填字段。
+      校验框架完整性、AGENTS.md 入口新鲜度、进行中任务的必填字段、
+      status.md 新鲜度、done.md 归档块与生成副本漂移（kit 仓库）。
+      状态枚举只允许 active/blocked/review/verify/handoff。
 
   awf status
       从 tasks/*/current.md、todo.md、done.md 生成 tasks/status.md。
@@ -70,8 +72,10 @@ awf — agent workflow framework
       按别名或 ID 查找项目路径。
 
   awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
-      一键发版装配：刷新生成副本与 AGENTS 入口、写账本、改 VERSION/CHANGELOG、
-      跑校验并归档；只打印下一步 git 命令，不自动 commit/tag/push。
+      一键发版装配：先检测生成副本漂移（bin/awf / bin/awf-dispatch /
+      templates/ ↔ agent-workflow/），有漂移即拒绝覆盖；无漂移才刷新生成副本
+      与 AGENTS 入口、写账本、改 VERSION/CHANGELOG、跑校验并归档；
+      只打印下一步 git 命令，不自动 commit/tag/push。
 
   awf-dispatch <别名|目录> <任务文件>
       跨项目派发（DSH 会话适配）：检查目标工作流/工作区后，在目标工作区创建会话执行。
@@ -576,17 +580,24 @@ cmd_bootstrap() {
 
 # ---------------------------------------------------------------- check
 
+# 校验任务块（mode=current 时状态值必须 ∈ 工作态枚举，下一步必填；
+# mode=done 时归档块同解析，状态保留归档时原值不强制枚举，下一步不强制，
+# 并额外校验归档表行：ID 格式 + 优先级 P0-P3 + YYYY-MM-DD 完成日期）。
 check_current_file() {
-  local f="$1" type="$2"
-  awk -v wf="$type" '
+  local f="$1" type="$2" mode="${3:-current}"
+  awk -v wf="$type" -v m="$mode" '
     function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
     function flush(   miss) {
       if (id == "") return
       miss = ""
       if (!st) miss = miss " 状态"
       if (!ow) miss = miss " Owner"
-      if (!nx) miss = miss " 下一步"
+      if (m == "current" && !nx) miss = miss " 下一步"
       if (miss != "") { printf "FAIL  %s [%s] 缺少字段:%s\n", wf, id, miss; bad++ }
+      else if (m == "current" && st_v !~ /^(active|blocked|review|verify|handoff)$/) {
+        printf "FAIL  %s [%s] 状态非法：%s（应为 active/blocked/review/verify/handoff）\n", wf, id, st_v
+        bad++
+      }
       else printf "ok    %s [%s] 字段完整\n", wf, id
       id = ""
     }
@@ -603,100 +614,39 @@ check_current_file() {
         id = ""
         next
       }
-      st = 0; ow = 0; nx = 0
+      st = 0; ow = 0; nx = 0; st_v = ""
       next
     }
     /^### *下一步/ { if (id != "") nx = 1 }
+    m == "done" && id == "" && $0 ~ /^\|/ {
+      if ($0 ~ /^\|[ \t]*-/ || $0 ~ /^\| *任务ID/) next
+      rid = trim($2)
+      if (rid == "") next
+      if (rid !~ /^[A-Z]+-[0-9]+$/) {
+        printf "FAIL  %s 归档行 ID 非法：%s（应为 类型-数字，如 DEV-001）\n", wf, rid
+        bad++
+        next
+      }
+      okpri = (trim($3) ~ /^P[0-3]$/)
+      hasdate = 0
+      for (i = 4; i <= NF; i++) if ($i ~ /^ *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *$/) hasdate = 1
+      if (!okpri || !hasdate) {
+        printf "FAIL  %s 归档行格式错：%s（需 优先级 P0-P3 与 YYYY-MM-DD 完成日期）\n", wf, rid
+        bad++
+      }
+    }
     {
       if (id == "") next
-      if (trim($2) == "状态") st = 1
+      if (trim($2) == "状态") { st = 1; st_v = trim($3) }
       else if (trim($2) == "Owner") ow = 1
     }
     END { flush(); exit (bad > 0 ? 1 : 0) }
   ' FS='|' "$f"
 }
 
-cmd_check() {
-  local root fails=0 out f
-  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
-  cd "$root"
-
-  local required="
-AGENTS.md
-agent-workflow/project.yaml
-agent-workflow/README.md
-agent-workflow/workflows/dev.md
-agent-workflow/workflows/debug.md
-agent-workflow/workflows/docs.md
-agent-workflow/workflows/review.md
-agent-workflow/workflows/cross-project.md
-agent-workflow/workflows/release.md
-agent-workflow/tasks/status.md
-agent-workflow/templates/AGENTS.md.tmpl
-"
-  for f in $required; do
-    if [ -f "$f" ]; then
-      say "ok    $f"
-    else
-      say "FAIL  缺少 $f"
-      fails=$((fails + 1))
-    fi
-  done
-
-  local nb ne
-  nb="$(grep -c '<!-- awf:begin' AGENTS.md || true)"
-  ne="$(grep -c '<!-- awf:end' AGENTS.md || true)"
-  if [ "$nb" = "1" ] && [ "$ne" = "1" ]; then
-    say "ok    AGENTS.md 受控区块标记成对"
-  else
-    say "FAIL  AGENTS.md 受控区块标记不成对（begin $nb / end $ne）"
-    fails=$((fails + 1))
-  fi
-
-  local actual recorded
-  actual="$(hash_files agent-workflow/project.yaml agent-workflow/templates/AGENTS.md.tmpl)"
-  recorded="$(sed -n 's/.*<!-- awf:begin v[0-9][0-9]* digest:\([0-9a-f]\{8\}\).*/\1/p' AGENTS.md | head -n 1)"
-  if [ "$actual" = "$recorded" ]; then
-    say "ok    AGENTS.md 入口与 project.yaml 同步（digest: ${actual}）"
-  else
-    say "FAIL  AGENTS.md 入口已过期（记录: ${recorded:-无} / 实际: ${actual}）"
-    say "      → 运行 ./agent-workflow/bin/awf bootstrap"
-    fails=$((fails + 1))
-  fi
-
-  for f in agent-workflow/tasks/dev/current.md agent-workflow/tasks/debug/current.md agent-workflow/tasks/docs/current.md; do
-    [ -f "$f" ] || continue
-    case "$f" in
-      */dev/*)   out="$(check_current_file "$f" dev)" || true ;;
-      */debug/*) out="$(check_current_file "$f" debug)" || true ;;
-      */docs/*)  out="$(check_current_file "$f" docs)" || true ;;
-    esac
-    if printf '%s' "$out" | grep -q 'FAIL'; then
-      fails=$((fails + 1))
-    fi
-    printf '%s\n' "$out" | grep -v '^$' || true
-  done
-
-  if [ "$fails" -eq 0 ]; then
-    say ""
-    say "全部检查通过"
-  else
-    say ""
-    say "发现 $fails 处问题"
-  fi
-  return "$fails"
-}
-
-# ---------------------------------------------------------------- status
-
-cmd_status() {
-  local root block target f r
-  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
-  cd "$root"
-
-  block="agent-workflow/tasks/status.md.block.tmp"
-  target="agent-workflow/tasks/status.md"
-
+# 生成 status 区块内容（含 当前进行中 / 待处理 / 最近完成）到 $1
+status_build_block() {
+  local block="$1" type f r todo_rows="" r3 done_rows="" r2
   {
     printf '> 本区块由 `agent-workflow/bin/awf status` 生成，请勿手改。\n'
     printf '> 数据来源：`tasks/*/current.md`、`tasks/*/todo.md`、`tasks/*/done.md`。\n\n'
@@ -743,7 +693,6 @@ cmd_status() {
     printf '\n' >> "$block"
 
     printf '## 待处理\n\n' >> "$block"
-    local todo_rows="" r3
     for type in dev debug docs; do
       f="agent-workflow/tasks/$type/todo.md"
       [ -f "$f" ] || continue
@@ -773,7 +722,6 @@ cmd_status() {
     printf '\n' >> "$block"
 
     printf '## 最近完成\n\n' >> "$block"
-    local done_rows="" r2
     for type in dev debug docs; do
       f="agent-workflow/tasks/$type/done.md"
       [ -f "$f" ] || continue
@@ -799,6 +747,176 @@ cmd_status() {
 
     printf '\n*最后更新：%s*\n' "$(now)" >> "$block"
   } > "$block"
+}
+
+# 校验 status.md 新鲜度：临时重渲染状态摘要并与现有文件 diff（忽略 最后更新 行）
+check_status_fresh() {
+  local block
+  block=".awf-status-fresh.tmp"
+  [ -f "agent-workflow/tasks/status.md" ] || return 0   # 缺失已由 required 计失败
+  status_build_block "$block"
+  local gen act
+  gen="$(grep -v '最后更新' "$block" || true)"
+  act="$(sed -n '/<!-- awf:status:begin -->/,/<!-- awf:status:end -->/p' agent-workflow/tasks/status.md \
+    | sed '1d;$d' | grep -v '最后更新' || true)"
+  rm -f "$block"
+  if [ "$gen" = "$act" ]; then
+    say "ok    tasks/status.md 与账本一致（新鲜）"
+    return 0
+  fi
+  say "FAIL  tasks/status.md 已过期（账本改动后未刷新）"
+  say "      → 运行 ./agent-workflow/bin/awf status"
+  return 1
+}
+
+# 生成副本漂移报告（kit 形态：根目录同时有 bin/awf 与 templates/ 时生效）。
+# 返回 0=无漂移；非 0=存在漂移；stdout 逐对打印 ok / FAIL 明细。
+copy_drift_report() {
+  local root="$1" rc=0 pair src dst wf b
+  if [ ! -f "$root/bin/awf" ] || [ ! -f "$root/templates/README.md" ] || [ ! -d "$root/templates/workflows" ]; then
+    return 0
+  fi
+  for pair in "bin/awf:agent-workflow/bin/awf" \
+              "bin/awf-dispatch:agent-workflow/bin/awf-dispatch" \
+              "templates/README.md:agent-workflow/README.md" \
+              "templates/AGENTS.md.tmpl:agent-workflow/templates/AGENTS.md.tmpl"; do
+    src="${pair%%:*}"; dst="${pair#*:}"
+    [ -f "$root/$src" ] || continue
+    if [ ! -f "$root/$dst" ]; then
+      say "FAIL  生成副本缺失：$root/$dst（源 $root/$src）"
+      rc=1
+    elif ! cmp -s "$root/$src" "$root/$dst"; then
+      say "FAIL  生成副本漂移：$src ≠ $dst"
+      say "      → 同步 agent-workflow/ 对应文件，或运行 ./bin/awf init . --force --no-register 有意刷新（会覆盖 agent-workflow 侧改动）"
+      rc=1
+    else
+      say "ok    $src 与 $dst 副本一致"
+    fi
+  done
+  for wf in "$root"/templates/workflows/*.md; do
+    [ -f "$wf" ] || continue
+    b="$(basename "$wf")"
+    if [ ! -f "$root/agent-workflow/workflows/$b" ]; then
+      say "FAIL  生成副本缺失：$root/agent-workflow/workflows/$b（源 $wf）"
+      rc=1
+    elif ! cmp -s "$wf" "$root/agent-workflow/workflows/$b"; then
+      say "FAIL  生成副本漂移：templates/workflows/$b ≠ agent-workflow/workflows/$b"
+      say "      → 同步 agent-workflow/ 对应文件，或运行 ./bin/awf init . --force --no-register 有意刷新（会覆盖 agent-workflow 侧改动）"
+      rc=1
+    else
+      say "ok    templates/workflows/$b 与 agent-workflow/workflows/$b 副本一致"
+    fi
+  done
+  return "$rc"
+}
+
+cmd_check() {
+  local root fails=0 out f
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
+  cd "$root"
+
+  local required="
+AGENTS.md
+agent-workflow/project.yaml
+agent-workflow/README.md
+agent-workflow/workflows/dev.md
+agent-workflow/workflows/debug.md
+agent-workflow/workflows/docs.md
+agent-workflow/workflows/review.md
+agent-workflow/workflows/cross-project.md
+agent-workflow/workflows/release.md
+agent-workflow/tasks/status.md
+agent-workflow/templates/AGENTS.md.tmpl
+agent-workflow/tasks/dev/done.md
+agent-workflow/tasks/debug/done.md
+agent-workflow/tasks/docs/done.md
+"
+  for f in $required; do
+    if [ -f "$f" ]; then
+      say "ok    $f"
+    else
+      say "FAIL  缺少 $f"
+      fails=$((fails + 1))
+    fi
+  done
+
+  local nb ne
+  nb="$(grep -c '<!-- awf:begin' AGENTS.md || true)"
+  ne="$(grep -c '<!-- awf:end' AGENTS.md || true)"
+  if [ "$nb" = "1" ] && [ "$ne" = "1" ]; then
+    say "ok    AGENTS.md 受控区块标记成对"
+  else
+    say "FAIL  AGENTS.md 受控区块标记不成对（begin $nb / end $ne）"
+    fails=$((fails + 1))
+  fi
+
+  local actual recorded
+  actual="$(hash_files agent-workflow/project.yaml agent-workflow/templates/AGENTS.md.tmpl)"
+  recorded="$(sed -n 's/.*<!-- awf:begin v[0-9][0-9]* digest:\([0-9a-f]\{8\}\).*/\1/p' AGENTS.md | head -n 1)"
+  if [ "$actual" = "$recorded" ]; then
+    say "ok    AGENTS.md 入口与 project.yaml 同步（digest: ${actual}）"
+  else
+    say "FAIL  AGENTS.md 入口已过期（记录: ${recorded:-无} / 实际: ${actual}）"
+    say "      → 运行 ./agent-workflow/bin/awf bootstrap"
+    fails=$((fails + 1))
+  fi
+
+  # F6：生成副本漂移（kit 形态：项目根同时有 bin/awf 与 templates/）
+  local drift_out drift_n
+  drift_out="$(copy_drift_report "$root" || true)"
+  drift_n="$(printf '%s\n' "$drift_out" | grep -c '^FAIL' || true)"
+  [ "$drift_n" -gt 0 ] && fails=$((fails + drift_n))
+  printf '%s\n' "$drift_out" | grep -v '^$' || true
+
+  # F3：current.md 与 done.md 归档块/归档行同解析
+  for f in agent-workflow/tasks/dev/current.md agent-workflow/tasks/debug/current.md agent-workflow/tasks/docs/current.md \
+           agent-workflow/tasks/dev/done.md agent-workflow/tasks/debug/done.md agent-workflow/tasks/docs/done.md; do
+    [ -f "$f" ] || continue
+    case "$f" in
+      */dev/*)   t="dev" ;;
+      */debug/*) t="debug" ;;
+      */docs/*)  t="docs" ;;
+    esac
+    case "$f" in
+      */done.md) m="done" ;;
+      *)         m="current" ;;
+    esac
+    out="$(check_current_file "$f" "$t" "$m")" || true
+    if printf '%s' "$out" | grep -q 'FAIL'; then
+      fails=$((fails + 1))
+    fi
+    printf '%s\n' "$out" | grep -v '^$' || true
+  done
+
+  # F2：status.md 新鲜度（账本改动后必须 awf status 刷新）
+  if out="$(check_status_fresh)"; then
+    printf '%s\n' "$out" | grep -v '^$' || true
+  else
+    fails=$((fails + 1))
+    printf '%s\n' "$out" | grep -v '^$' || true
+  fi
+
+  if [ "$fails" -eq 0 ]; then
+    say ""
+    say "全部检查通过"
+  else
+    say ""
+    say "发现 $fails 处问题"
+  fi
+  return "$fails"
+}
+
+# ---------------------------------------------------------------- status
+
+cmd_status() {
+  local root block target f r
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+
+  block="agent-workflow/tasks/status.md.block.tmp"
+  target="agent-workflow/tasks/status.md"
+
+  status_build_block "$block"
 
   if [ ! -f "$target" ]; then
     {
@@ -833,6 +951,7 @@ release_usage() {
 用法：awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
 
 一键发版装配（在 kit 仓库根运行）：
+  0. 检查生成副本漂移（bin/awf / bin/awf-dispatch / templates/ ↔ agent-workflow/），有漂移即拒绝
   1. ./bin/awf init . --force --no-register + bootstrap 刷新生成副本与 AGENTS 入口
   2. 在 agent-workflow/tasks/dev/current.md 写入 release-prep 任务块
   3. 改 VERSION；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
@@ -982,6 +1101,7 @@ cmd_release_prep() {
 
   if [ "$dry_run" -eq 1 ]; then
     say "[dry-run] cd $ROOT"
+    say "[dry-run] 检查生成副本漂移（bin/awf / bin/awf-dispatch / templates/ ↔ agent-workflow/，有漂移即拒绝）"
     say "[dry-run] ./bin/awf init . --force --no-register"
     say "[dry-run] ./bin/awf bootstrap"
     if [ -n "$(release_done_id)" ]; then
@@ -1004,6 +1124,16 @@ cmd_release_prep() {
   fi
 
   say "== release-prep $version（$TASK_ID）=="
+
+  # a0. 生成副本漂移保护（F6）：先检测再覆盖，禁止静默回滚 agent-workflow 侧改动
+  local drift_out
+  drift_out="$(copy_drift_report "$ROOT" || true)"
+  if printf '%s\n' "$drift_out" | grep -q '^FAIL'; then
+    say ""
+    say "== 检测到生成副本漂移，拒绝覆盖 agent-workflow 侧改动 =="
+    printf '%s\n' "$drift_out" | grep '^FAIL'
+    die "请先同步（或运行 ./bin/awf init . --force --no-register 有意刷新，会覆盖 agent-workflow 侧改动）后再执行 release-prep"
+  fi
 
   # a. 刷新生成副本与 AGENTS 入口
   release_run "$ROOT/bin/awf" init . --force --no-register
