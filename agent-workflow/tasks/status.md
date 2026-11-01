@@ -34,5 +34,5 @@
 | dev | DEV-015 | P1 | awf 全局索引写入并发安全：$AGENTS_HOME 互斥锁（flock / mkdir 自旋 + 陈旧回收）串行化读改写、按 P_ID 合并、test/registry-concurrency.sh 并发回归 | 2026-11-01 |
 | docs | DOCS-007 | P1 | agent-workflow-kit 整体框架审查 v2：插件职责收敛与当前 blocker | 2026-11-01 |
 
-*最后更新：2026-11-02 00:23*
+*最后更新：2026-11-02 00:28*
 <!-- awf:status:end -->

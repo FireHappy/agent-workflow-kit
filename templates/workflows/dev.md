@@ -107,13 +107,22 @@
 
 **前置 gate：review 必须已返回 `pass`（见 Step 5）。review 未通过或未执行，不得归档。**
 
-1. 确认 review 结论为 `pass`（复核子 agent 已返回成功）
-2. **任务状态修改为「归档」**：任务从 `current.md` 移到 `done.md`（状态摘要中不再列为进行中，归入「最近完成」）；归档不是删除，任务是已完成状态
-3. 有长期价值的过程写入 `../memory/history/`
-4. 清理对应 `../memory/cache/`
-5. 运行 `./agent-workflow/check_workflow.sh` 通过
-6. 运行 `./agent-workflow/bin/awf status` 刷新摘要
-7. 提交一次本地 git commit（**禁止 push**）
+**归档时序（关键）：review 返回 `pass`（验证完成）的当场，就先把任务状态修改为「归档」，不能等 done.md / status / commit 等文档记录完成后再改状态。** 状态是流程完成的即时指示器——验证通过那一刻该任务已经不是「进行中」，文档记录只是把这一事实落纸。
+
+**第 1 步（当场，验证完成即执行）：状态修改为「归档」**
+
+确认 review 结论为 `pass` 后，立即：
+
+- 将任务状态标记为「归档」：任务从 `current.md` 移到 `done.md`
+- 状态摘要中不再列为进行中，归入「最近完成」；归档不是删除，任务是已完成状态
+
+**第 2 步（状态已改归档后，依次执行文档记录）：**
+
+1. 有长期价值的过程写入 `../memory/history/`
+2. 清理对应 `../memory/cache/`
+3. 运行 `./agent-workflow/check_workflow.sh` 通过
+4. 运行 `./agent-workflow/bin/awf status` 刷新摘要
+5. 提交一次本地 git commit（**禁止 push**）
 
 ---
 
