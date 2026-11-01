@@ -116,9 +116,22 @@ for i in $(seq 1 "$N"); do
 done
 ok "bootstrap 后：projects.tsv=$tsv_n2 行 / AGENTS.md 表格=$md_n2 行 / 行内容正确"
 
-# 5. 锁残留检查：所有写进程退出后锁应已释放
-[ ! -e "$DSH_AGENTS_HOME/.awf-registry.lock" ] \
-  || fail "锁残留：$DSH_AGENTS_HOME/.awf-registry.lock 未被释放"
+# 5. 锁残留检查：按实际锁模式断言（flock 平台锁文件常驻不删除，不能断言不存在）
+if command -v flock >/dev/null 2>&1; then
+  # flock 模式：锁文件预期常驻；断言其存在且可正常获取/释放（无残留占用）
+  LOCKF="$DSH_AGENTS_HOME/.awf-registry.lock"
+  [ -f "$LOCKF" ] || fail "flock 模式：锁文件 $LOCKF 不存在（预期常驻）"
+  if ( exec 9>"$LOCKF" && flock -n 9 ); then
+    ok "flock 模式：锁文件存在且可正常获取/释放"
+  else
+    fail "flock 模式：锁文件 $LOCKF 无法获取（疑似残留占用）"
+  fi
+else
+  # mkdir 模式：释放时 rmdir 删除锁目录，断言无残留
+  [ ! -e "$DSH_AGENTS_HOME/.awf-registry.lock" ] \
+    || fail "锁残留：$DSH_AGENTS_HOME/.awf-registry.lock 未被释放"
+  ok "mkdir 模式：锁已释放无残留"
+fi
 
 echo ""
 echo "全部通过：并发 register/bootstrap 无丢失更新（N=$N，$LOCK_PATH）"
