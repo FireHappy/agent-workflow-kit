@@ -326,3 +326,4 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 - [x] 验证 3：归档并提交（本地 commit，禁 push）
 
 | DEV-023 | P1 | 步骤条 icon 裁剪修复（当前节点 CSS 白点 + 去 overflow 裁剪、✓/⏸/空心三态清晰）+ 顶部 已完成/当前/待办 计数 + 三态激活语义（active→实现/verify→验证/review→Review） | 2026-11-01 |
+| DEV-034 | P1 | 发版 v0.6.0：VERSION/CHANGELOG 更新 + 注释 tag v0.6.0（插件 Agent Workflow 面板 + 徽章/status 修复 + review 规范） | 2026-11-02 |
