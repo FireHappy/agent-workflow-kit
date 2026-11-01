@@ -14,3 +14,18 @@
 | DEV-002 | P1 | 跨项目派发流程：cross-project 工作流 + awf-dispatch 会话派发器 + 派发技能，并同步 demo01/demo02 | 2026-10-31 |
 | DEV-012 | P1 | release-prep 0.4.2：一键发版装配 | 2026-10-31 |
 | DEV-001 | P2 | 自举副本漂移检测（F6）：check 对 bin/awf、bin/awf-dispatch、templates 三对副本漂移即 FAIL，release-prep 先检测再覆盖不静默回滚 | 2026-11-01 |
+
+## [DEV-013] 架构审查 P1 修复批次（F1-F6 + RT-1/2/3）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | lead |
+| 修改范围 | bin/awf、bin/awf-dispatch、templates/、docs/team-flow.md、docs/dispatch.md、test/smoke.sh、CHANGELOG.md、agent-workflow/ 双副本 |
+| 验收标准 | 9×P1 全部修复；smoke 113/113；check 全绿；t5/t6/t7 复核 pass |
+
+### 下一步
+P2 后续批次：RT-3 区间归因（medium）、SKILL.md 同步（medium）、_legacy_candidates 死代码、headless 正文回退、模板 GUI/sessionId 措辞 + F5 正则。
+
+| DEV-013 | P1 | 架构审查 P1 修复批次：check 兜底×3 / approval 统一 / 模板中立 / 副本漂移 + 误吞会话 / headless 退出码 5 / 落地误判 | 2026-11-01 |

@@ -84,3 +84,23 @@
 1. **P1-立即**：RT-1（误吞用户会话）、RT-2（headless 退出码）、RT-3（落地误判）——三类真实误判路径
 2. **P1-近期**：F4（文档矛盾）、F5（模板中立）、F1/F2/F3（check 机械兜底）、F6（副本漂移 + release-prep 回滚保护）
 3. **P2 + smoke 缺口**：随常规开发批次消化（含 DEV-001 升级）
+---
+
+## 六、P1 修复状态（2026-11-01 已闭环）
+
+| 批次 | commit | 复核 | 证据 |
+|---|---|---|---|
+| F1-F6（check 兜底×3 / approval 统一 / 模板中立 / 副本漂移+release-prep 保护） | `fb0e45f` | t5 r1 pass + t7 r2 终审 pass | 对抗实测（故意坏账本三连拦截、漂移注入 FAIL、release-prep 拒绝覆盖零写入）；F5 DSH 词 0 命中 |
+| RT-1/2/3（误吞会话 / headless 退出码 5 / 落地误判窗口） | `9eb3296` | t6 r1 pass | 12 项定向 probe（mock API + 真实 git 仓库），RT-1 三态 / RT-2 四态 / RT-3 ID 边界 DEV-007≠DEV-0071 |
+| 账本收尾（DEV-001 归档、status 刷新） | `0666aa7` | check 全绿 | F2 新鲜度拦截曾真实触发（归档后未刷新即 FAIL） |
+
+**升级量**：smoke 89 → **113**（+24 项）；check 27 → 28 项；退出码新增 **5**（headless 执行失败）；awf-dispatch 新增 `--allow-legacy-reuse`。
+
+## 七、后续清单（P2 批次，未修，按优先级）
+
+1. **RT-3 残余漏判（medium）**：任务 commit 落地后 10s 内被无关 commit 压顶 → wait_for_landing 误判 not landed；改 `git log initial..HEAD` 区间归因（任一含任务 ID 即落地）
+2. **SKILL.md:68 未同步（medium）**：仍写旧语义「唯一旧格式空闲会话自动迁移」，参数表缺 `--allow-legacy-reuse`、无退出码 5；技能是分发产物，需与 docs/dispatch.md 同步
+3. **_legacy_candidates 死代码（low）**：`bin/awf-dispatch:535-560` 无调用点，且 blank 过滤与 docstring 相反——删除或接线修正
+4. **headless task_id 回退（low）**：`:1693` 仅取文件名，会话模式有 text 回退——对齐
+5. **模板措辞统一（low）**：`templates/workflows/cross-project.md` GUI×2（:92,:146）+ sessionId×1（:158）→「图形界面/会话 ID」；smoke F5 门禁正则补 gui/sessionId
+6. **下游存量项目旧格式 done.md** 跑新 check 会报格式错（无 P0-P3/日期列）——预期强制收严，CHANGELOG 已注明；升级存量项目时注意
