@@ -532,34 +532,6 @@ def _reuse_rank(row: dict):
     return (0 if idle else 1, -updated)
 
 
-def _legacy_candidates(rows, target: Path):
-    """项目里可迁移的旧格式会话：同 cwd、非空、空闲、标题形如 `<项目> · <任务>`。
-
-    项目里已存在任何 `[awf]` 规范会话时返回空列表（旧格式不迁移，避免串模块）。
-    """
-    project = Path(target).name
-    real = os.path.realpath(str(target))
-    canonical_exists = any(
-        isinstance(row, dict)
-        and (row.get("cwd") or "")
-        and os.path.realpath(row["cwd"]) == real
-        and session_title(row).startswith(AWF_TITLE_PREFIX)
-        for row in rows or []
-    )
-    if canonical_exists:
-        return []
-    return [
-        row
-        for row in rows or []
-        if isinstance(row, dict)
-        and (row.get("cwd") or "")
-        and os.path.realpath(row["cwd"]) == real
-        and row.get("blank") is not False
-        and row.get("running") is False
-        and is_legacy_session_title(session_title(row), project)
-    ]
-
-
 def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
                          legacy_probe=None):
     """按「同 cwd + 标题等于 `[awf] <项目> · <模块>`」复用；没有候选返回 None。
@@ -834,7 +806,11 @@ def wait_for_landing(target: Path, task_id: str, initial_head, timeout: float,
             and current_head is not None
             and current_head != initial_head
         ):
-            if not task_id or commit_message_has_id(target, task_id):
+            # RT-3 区间归因：HEAD 变了还要确认区间里有「本任务」的 commit——
+            # initial..HEAD 任一 commit 含任务 ID 即落地（被无关 commit 压顶仍算）；
+            # 区间里只有无关 commit 不判落地，继续等 done.md 或超时。
+            # 没有任务 ID 时退回仅按 HEAD 变化判定（保持 ID 缺失票据兼容）。
+            if not task_id or commit_range_has_id(target, task_id, initial_head):
                 return "commit"
         if task_id and ledger_has_id(target, task_id):
             return "done"
@@ -889,19 +865,24 @@ def git_head_sha(target: Path):
         return None
 
 
-def commit_message_has_id(target: Path, task_id: str) -> bool:
-    """最新 HEAD commit 的提交消息是否含本任务 ID（HEAD 变化时的落地归因）。
+def commit_range_has_id(target: Path, task_id: str, since_sha) -> bool:
+    """`since_sha..HEAD` 区间内是否有 commit 消息含本任务 ID（RT-3 区间归因）。
 
-    RT-3：落地等待期间其它会话或用户的无关 commit 不含本任务 ID，不得判成本任务
-    落地。没有任务 ID（task_id 为空）返回 False，调用方据此退回「仅 HEAD 变化」语义；
-    读不到消息（非 git 仓库、HEAD 为空等）也返回 False——不据不可靠信息判落地。
+    任务 commit 落地后 10s 内被无关 commit 压顶（HEAD 已不是任务 commit）仍算落地；
+    since_sha 为空（如空仓库基线 ""）时把全部 commit 都视为区间内。
+    没有任务 ID 或读不到日志（非 git 仓库、HEAD 为空等）返回 False——
+    不据不可靠信息判落地。
     """
     if not task_id:
         return False
-    proc = run_git(["git", "-C", str(target), "log", "-1", "--format=%s%n%b", "HEAD"])
+    scope = f"{since_sha}..HEAD" if since_sha else "HEAD"
+    proc = run_git(
+        ["git", "-C", str(target), "log", "-E", f"--grep={id_ere(task_id)}",
+         "--format=%H", scope]
+    )
     if proc.returncode != 0:
         return False
-    return id_regex(task_id).search(proc.stdout) is not None
+    return bool(proc.stdout.strip())
 
 
 def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
@@ -1690,7 +1671,11 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
         return 0
 
     # --wait：同步等待 + 落地校验（RT-2：与 --wait 会话模式契约一致）。
-    task_id = ticket_task_id(task.name) or ""
+    # 任务 ID 与会话模式对齐：文件名优先，正文回退（票据正文里的任务 ID 也能归因落地）。
+    task_id = ticket_task_id(task.name)
+    if not task_id:
+        match = TICKET_ID_RE.search(text or "")
+        task_id = match.group(0) if match else ""
     # 初始 HEAD 在进程启动前读取（RT-3 同契约）：等待期间无关 commit 不算落地。
     initial_head = git_head_sha(target)
     if initial_head is None:

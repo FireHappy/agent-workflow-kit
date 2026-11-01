@@ -10,7 +10,9 @@
 
 ## 待处理
 
-（无）
+| 工作流 | 任务ID | 优先级 | 描述 | 登记日期 |
+|--------|--------|--------|------|----------|
+| dev | DEV-014 | P2 | P2 后续批次：RT-3 区间归因（git log initial..HEAD 任一含 ID 即落地）、SKILL.md 同步（--allow-legacy-reuse/退出码 5/迁移语义）、_legacy_candidates 死代码、headless task_id 正文回退、模板 GUI/sessionId 措辞 + F5 正则 | 2026-11-01 |
 
 ## 最近完成
 
@@ -30,5 +32,5 @@
 | dev | DEV-012 | P1 | release-prep 0.4.2：一键发版装配 | 2026-10-31 |
 | dev | DEV-004 | P1 | `awf-dispatch --team`：任务包追加团队执行建议（缺省不变、可降级），smoke 覆盖注入与参数传递 | 2026-10-31 |
 
-*最后更新：2026-11-01 15:30*
+*最后更新：2026-11-01 16:13*
 <!-- awf:status:end -->

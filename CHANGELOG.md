@@ -11,11 +11,16 @@
 - `docs/team-flow.md` §4.2 / §5 / §6 / §7 的 approval 语义统一为 `automatic`（F4）：不再 staged 审批，建队前贴 3 行计划摘要、可立即叫停
 - 会话复用不再自动迁移旧格式会话（RT-1）：用户自建的 `<项目> · xxx` 普通会话不会被复用/改名/注入任务；只有会话消息含派发任务包标记、或显式 `--allow-legacy-reuse` 才迁移
 - `--wait` 落地判定增加 commit 归因（RT-3）：初始 HEAD 改为任务发送前一刻采集；HEAD 变化后还需最新 commit 含任务 ID（或账本 done.md 归档）才算落地，无关 commit 不再误判
+- `--wait` 落地归因改区间判定（RT-3 区间归因）：`initial..HEAD` 区间内任一 commit 含任务 ID 即判落地，任务 commit 落地后 10s 内被无关 commit 压顶不再误判 not landed
+- headless 任务 ID 与会话模式对齐：文件名优先、票据正文回退（正文里的任务 ID 也能归因落地）
 - headless `--wait` 与会话模式契约对齐（RT-2）：进程退出 0 后仍校验落地（初始 HEAD 在启动前采集）；进程超时未结束仍为退出码 3
+- cross-project 模板措辞统一（F5 补全）：GUI×2 / sessionId×1 改为「图形界面 / 会话 ID」，smoke F5 门禁正则补 gui/sessionId
 
 ### Fixed
 - 更正 0.4.0「模板中立化」名不副实：cross-project 模板当时仍含 DSH 专有词，本次全部移除并下沉文档与技能层
 - `awf-dispatch` headless 非零退出不再伪装成超时（RT-2）：新增独立退出码 5（执行失败），`docs/dispatch.md` 退出码表同步更新
+- 删除无调用点的 `_legacy_candidates`（旧格式迁移逻辑已内联在 `select_reuse_session` 的 probe 分支，死代码移除避免语义漂移）
+- `skills/cross-project-dispatch/SKILL.md` 同步新语义：--allow-legacy-reuse 参数、退出码 5、旧格式迁移需派发标记且默认关闭
 
 ## [0.4.2] - 2026-10-31
 

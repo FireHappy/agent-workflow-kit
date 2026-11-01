@@ -625,22 +625,26 @@ assert not history_activity["has_output"] and not history_activity["has_tool"], 
 unreadable = module.turn_activity(BrokenPageApi(), activity_row())
 assert unreadable["available"] is False, "读不到记录时不能判僵尸"
 
-orig_sha, orig_ledger, orig_cmid = module.git_head_sha, module.ledger_has_id, module.commit_message_has_id
+orig_sha, orig_ledger, orig_cmrange = module.git_head_sha, module.ledger_has_id, module.commit_range_has_id
 try:
-    module.commit_message_has_id = lambda target, task_id: task_id == "TEST-001"
+    module.commit_range_has_id = lambda target, task_id, since_sha: task_id == "TEST-001"
     heads = iter(["aaa", "aaa", "bbb"])
     module.git_head_sha = lambda target: next(heads)
     module.ledger_has_id = lambda target, task_id: False
     assert module.wait_for_landing(
         target, "TEST-001", "aaa", timeout=0.5, interval=0.01) == "commit"
 
-    # RT-3：HEAD 变化但最新 commit 不含任务 ID（无关 commit）→ 不判落地
+    # RT-3：区间内无本任务 commit（全部无关 commit）→ 不判落地
     module.git_head_sha = lambda target: "bbb"
-    module.commit_message_has_id = lambda target, task_id: False
+    module.commit_range_has_id = lambda target, task_id, since_sha: False
     assert module.wait_for_landing(
         target, "TEST-001", "aaa", timeout=0.05, interval=0.01) is None, \
         "无关 commit 不得判落地（RT-3）"
-    module.commit_message_has_id = lambda target, task_id: task_id == "TEST-001"
+    # RT-3 区间归因：任务 commit 落地后被无关 commit 压顶，区间内仍含任务 ID → 判落地
+    module.commit_range_has_id = lambda target, task_id, since_sha: task_id == "TEST-001"
+    assert module.wait_for_landing(
+        target, "TEST-001", "aaa", timeout=0.5, interval=0.01) == "commit", \
+        "任务 commit 被压顶仍应判落地（RT-3 区间归因）"
 
     module.git_head_sha = lambda target: "aaa"
     module.ledger_has_id = lambda target, task_id: task_id == "TEST-001"
@@ -671,8 +675,8 @@ try:
     assert module.wait_for_landing(
         target, "TEST-001", None, timeout=0.05, interval=0.01) is None
 finally:
-    module.git_head_sha, module.ledger_has_id, module.commit_message_has_id = (
-        orig_sha, orig_ledger, orig_cmid)
+    module.git_head_sha, module.ledger_has_id, module.commit_range_has_id = (
+        orig_sha, orig_ledger, orig_cmrange)
 
 
 TEXT_PAGE = {"records": [
@@ -698,8 +702,8 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     sha = module.git_head_sha(repo)
     assert isinstance(sha, str) and len(sha) == 40, sha
-    assert module.commit_message_has_id(repo, "TEST-001") is True, "提交消息含任务 ID"
-    assert module.commit_message_has_id(repo, "TEST-999") is False, "无关 ID 不得命中"
+    assert module.commit_range_has_id(repo, "TEST-001", "") is True, "提交消息含任务 ID"
+    assert module.commit_range_has_id(repo, "TEST-999", "") is False, "无关 ID 不得命中"
     assert module.wait_for_landing(
         repo, "TEST-001", "", timeout=0.1, interval=0.01) == "commit"
     assert module.git_head_sha(repo / "missing") is None
@@ -715,7 +719,7 @@ with tempfile.TemporaryDirectory() as tmp:
          "-c", "user.name=smoke", "commit", "-qm", "chore: 用户无关提交"],
         check=True,
     )
-    assert module.commit_message_has_id(unrelated, "TEST-001") is False
+    assert module.commit_range_has_id(unrelated, "TEST-001", "") is False
     assert module.wait_for_landing(
         unrelated, "TEST-001", "", timeout=0.1, interval=0.01) is None, \
         "无关 commit 不得判落地（RT-3）"
@@ -1394,9 +1398,10 @@ fi
 grep -q 'approval=automatic' docs/team-flow.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
 
 # 17. F5：cross-project 模板 harness 中立（无 DSH 专有词，细节下沉文档/技能层）
+F5_PAT='dsh|headless|workspace\.json|session 错误码|Ungrouped|DEFAULT_WEB_URL|gui|sessionId'
 for f in "$KIT_DIR/templates/workflows/cross-project.md" "$KIT_DIR/agent-workflow/workflows/cross-project.md"; do
-  if grep -qiE 'dsh|headless|workspace\.json|session 错误码|Ungrouped|DEFAULT_WEB_URL' "$f"; then
-    bad "F5 $f 仍含 DSH 专有词：$(grep -inE 'dsh|headless|workspace\.json|session 错误码|Ungrouped|DEFAULT_WEB_URL' "$f" | tr '\n' ';')"
+  if grep -qiE "$F5_PAT" "$f"; then
+    bad "F5 $f 仍含 DSH 专有词：$(grep -inE "$F5_PAT" "$f" | tr '\n' ';')"
   else
     ok "F5 $f 无 DSH 专有词"
   fi
@@ -1631,7 +1636,8 @@ with tempfile.TemporaryDirectory() as tmp:
     module.wait_for_landing = lambda target, task_id, initial_head, remaining: (
         landing_calls.append({"task_id": task_id, "initial_head": initial_head}) or "commit")
 
-    def dispatch_headless_case(task_name, proc_outcome, wait_landing, timeout=5):
+    def dispatch_headless_case(task_name, proc_outcome, wait_landing, timeout=5,
+                               body="任务：任务\n"):
         landing_calls.clear()
         module.subprocess.Popen = lambda *a, **k: FakeProc(proc_outcome)
         module.wait_for_landing = wait_landing
@@ -1647,9 +1653,9 @@ with tempfile.TemporaryDirectory() as tmp:
             os.chdir(work)
             try:
                 task = pathlib.Path(work) / task_name
-                task.write_text("任务：任务\n", encoding="utf-8")
+                task.write_text(body, encoding="utf-8")
                 code = module.dispatch_headless(
-                    pathlib.Path(work) / "tgt", task, "任务：任务",
+                    pathlib.Path(work) / "tgt", task, body,
                     "headless 任务", args)
             finally:
                 os.chdir(old_cwd)
@@ -1685,6 +1691,16 @@ with tempfile.TemporaryDirectory() as tmp:
         lambda *a, **k: "commit")
     assert code == module.EXIT_TIMEOUT == 3, "headless 进程超时仍为 3"
 
+    # task_id 正文回退：文件名无 ID 时取票据正文（与会话模式对齐）
+    body_calls = []
+    code = dispatch_headless_case(
+        "plain-task.md", 0,
+        lambda target, task_id, initial_head, remaining: (
+            body_calls.append(task_id) or "commit"),
+        body="任务：TEST-305 冒烟\n\n- 目标项目：demo（/tmp/demo）\n- 模块：工作流\n")
+    assert code == module.EXIT_OK == 0, code
+    assert body_calls == ["TEST-305"], f"文件名无 ID 应回退正文取 ID，实际 {body_calls}"
+
     (module.preflight, module.append_log, module.emit,
      module.git_head_sha, module.git_head, module.wait_for_landing,
      module.subprocess.Popen) = head_orig[:7]
@@ -1710,8 +1726,8 @@ with tempfile.TemporaryDirectory() as tmp:
         (repo / "b.txt").write_text("b", encoding="utf-8")
         subprocess.run(["git", "-C", str(repo), "add", "b.txt"], check=True)
         subprocess.run(["git", "-C", str(repo), "commit", "-qm", "chore: 用户无关提交"], check=True)
-        assert module.commit_message_has_id(repo, "TEST-201") is False
-        assert module.commit_message_has_id(repo, "TEST-999") is False
+        assert module.commit_range_has_id(repo, "TEST-201", base) is False
+        assert module.commit_range_has_id(repo, "TEST-999", base) is False
         assert module.wait_for_landing(repo, "TEST-201", base, timeout=0.1, interval=0.01) is None, \
             "无关 commit 不得判落地（RT-3）"
 
@@ -1720,6 +1736,47 @@ with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fix: TEST-202 完成"], check=True)
         assert module.wait_for_landing(repo, "TEST-202", base, timeout=0.1, interval=0.01) == "commit", \
             "含任务 ID 的 commit 才判落地（RT-3）"
+
+        # RT-3 区间归因（P2）：任务 commit 落地后被无关 commit 压顶（<10s 轮询窗口）
+        # → initial..HEAD 区间归因仍判落地，不误判 not landed
+        buried = pathlib.Path(repo_tmp) / "buried"
+        buried.mkdir()
+        subprocess.run(["git", "init", "-q", str(buried)], check=True)
+        subprocess.run(["git", "-C", str(buried), "config", "user.email", "smoke@test"], check=True)
+        subprocess.run(["git", "-C", str(buried), "config", "user.name", "smoke"], check=True)
+        (buried / "seed.txt").write_text("s", encoding="utf-8")
+        subprocess.run(["git", "-C", str(buried), "add", "seed.txt"], check=True)
+        subprocess.run(["git", "-C", str(buried), "commit", "-qm", "chore: 基线"], check=True)
+        base_buried = module.git_head_sha(buried)
+        (buried / "t.txt").write_text("t", encoding="utf-8")
+        subprocess.run(["git", "-C", str(buried), "add", "t.txt"], check=True)
+        subprocess.run(["git", "-C", str(buried), "commit", "-qm", "fix: TEST-301 落地"], check=True)
+        for i in (1, 2):  # 任务 commit 落地后 10s 内被两个无关 commit 压顶
+            (buried / f"n{i}.txt").write_text(f"n{i}", encoding="utf-8")
+            subprocess.run(["git", "-C", str(buried), "add", f"n{i}.txt"], check=True)
+            subprocess.run(["git", "-C", str(buried), "commit", "-qm", "chore: 无关压顶"], check=True)
+        assert module.commit_range_has_id(buried, "TEST-301", base_buried) is True, \
+            "区间内含任务 commit 即命中（区间归因）"
+        assert module.wait_for_landing(buried, "TEST-301", base_buried, timeout=0.1, interval=0.01) == "commit", \
+            "任务 commit 被压顶仍判落地（RT-3 区间归因）"
+
+        # 对照：区间内只有无关 commit 仍不判落地
+        buried2 = pathlib.Path(repo_tmp) / "buried2"
+        buried2.mkdir()
+        subprocess.run(["git", "init", "-q", str(buried2)], check=True)
+        subprocess.run(["git", "-C", str(buried2), "config", "user.email", "smoke@test"], check=True)
+        subprocess.run(["git", "-C", str(buried2), "config", "user.name", "smoke"], check=True)
+        (buried2 / "seed.txt").write_text("s", encoding="utf-8")
+        subprocess.run(["git", "-C", str(buried2), "add", "seed.txt"], check=True)
+        subprocess.run(["git", "-C", str(buried2), "commit", "-qm", "chore: 基线"], check=True)
+        base_b2 = module.git_head_sha(buried2)
+        for i in (1, 2):
+            (buried2 / f"n{i}.txt").write_text(f"n{i}", encoding="utf-8")
+            subprocess.run(["git", "-C", str(buried2), "add", f"n{i}.txt"], check=True)
+            subprocess.run(["git", "-C", str(buried2), "commit", "-qm", "chore: 纯无关"], check=True)
+        assert module.commit_range_has_id(buried2, "TEST-301", base_b2) is False
+        assert module.wait_for_landing(buried2, "TEST-301", base_b2, timeout=0.1, interval=0.01) is None, \
+            "区间内无任务 commit 不得判落地"
 PY
 then
   ok "RT-1/2/3 单元回归全绿（用户会话不迁移 / headless 独立退出码 / 无关 commit 不落地）"
