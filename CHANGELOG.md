@@ -1,3 +1,22 @@
+## [0.6.0] - 2026-11-02
+
+### Added
+- Agent Workflow 工作流进度 DSH 插件（DEV-019~022）：右侧边栏「Agent Workflow」页签，项目选择/任务卡/状态徽章/待办进度/最近完成/账本新鲜度/自动刷新；初始化/开始任务/归档查看 + 任务 CRUD/暂停继续/删除回退（弹框确认）
+- 建队账本门禁（DEV-021）：`awf team-audit` + `check` F7——扫描 `.agent-teams/` 引用 ID 校验账本登记，未登记 FAIL
+- 步骤条三态激活语义（DEV-023）：active→实现 / verify→验证 / review→Review，顶部 已完成/当前/待办 计数，icon 裁剪修复（当前节点白点 + 去 overflow）
+- `dev-reload.sh`（DEV-024）：自动检测前端（刷新即生效）/ 服务端（需重启）改动类型，给出最小生效路径
+
+### Changed
+- 面板整体 UI 设计优化（DEV-024）：单列任务卡 / 实现 vs 验收进度双语义 / 步骤条无裁剪 / 优先级徽章统一等宽 / 按钮无中间状态文案；checkItems 只统计「验收标准」段（14/14 而非 14/17），HTML 注释模板块不再被解析为任务
+- review 状态徽章文案「待复核」→「复核中」（DEV-030，与进行中/验证中持续动作语义一致）
+- review 流程规范补齐（DEV-028）：review 必须由独立子 agent 执行并等待返回 pass 才能归档；结论三态 pass / needs_revision / reject；进入 review 前验收标准须 100% 勾选；状态流转纪律（active→verify→review→归档）强制 + 双重检查（自查 + 独立复查）
+- 归档时序规范（DEV-029）：review 返回 pass（验证完成）当场先改任务状态为「归档」，done.md 移入 / status 刷新 / commit 是状态改归档之后的落纸动作；状态字段变更后必须立即 `awf status` 刷新摘要
+
+### Fixed
+- `awf status` 最近完成不显示最新归档任务（DEV-031）：done.md 新条目在顶部，`tail -n 8` 误取旧行，改 `head -n 8` + bootstrap 同步副本
+
+---
+
 ## [0.5.0] - 2026-11-01
 
 ### Added
