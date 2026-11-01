@@ -2,6 +2,8 @@
 
 | 任务ID | 优先级 | 描述 | 完成日期 |
 |--------|--------|------|----------|
+| DEV-024 | P1 | Agent Workflow 面板整体 UI 设计优化：单列任务卡/实现vs验收进度语义/步骤条无裁剪/优先级徽章统一等宽/按钮无中间状态文案/checkItems 只统计验收标准段（14/14 而非 14/17）/模板注释块不再被解析 | 2026-11-01 |
+| DEV-028 | P1 | 工作流 review 规范补齐：review 必须由独立子 agent 执行并等待返回 pass 才能归档；结论三态 pass/needs_revision/reject；进入 review 前验收标准须 100% 勾选；状态流转纪律（active→verify→review→归档）强制 + 双重检查；归档状态修改明确语义 | 2026-11-02 |
 | DEV-022 | P1 | 页签改名 Agent Workflow + 交互增强（初始化/开始任务/归档查看/CRUD/暂停继续/删除回退/UI 重构） | 2026-11-01 |
 | DEV-011 | P1 | awf-dispatch 会话复用（项目 × 模块）：默认复用同模块空闲会话保留上下文，会话命名 `[awf] <项目> · <模块>`，新增 --new/--session/--module/--idle-wait；发版 0.4.1 | 2026-10-31 |
 | DEV-010 | P2 | 派发票据生命周期：`--prune` 默认 dry-run，按 commit/`done.md` 判定归档；7 张已完成票据入 archive | 2026-10-31 |
