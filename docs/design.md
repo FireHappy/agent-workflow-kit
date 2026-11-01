@@ -43,7 +43,8 @@
 1. 框架文件齐全（入口、事实、五份流程、模板、状态）。
 2. `AGENTS.md` 的 digest 与 `project.yaml` + 模板一致。
 3. 每个进行中任务块包含 `状态` / `Owner` / `下一步`。
-4. 退出码 = 失败项数量，可直接给 pre-commit / CI 用。
+4. 迁移类 FAIL（归档块缺「状态」、旧英文表头 `| Status |`）输出**可直接执行的修复指引**，agent 无需推断。
+5. 退出码 = 失败项数量，可直接给 pre-commit / CI 用。
 
 确定性检查优先于“请记得更新”这类文字约束。
 
@@ -69,4 +70,4 @@
 
 ## 版本
 
-`VERSION` 是技能版本；入口区块记录 `v<version>`。升级项目是显式动作：替换 `bin/awf`、`bin/awf-dispatch`、`cross-project.md` 与入口模板，再 `bootstrap` + `check`。
+`VERSION` 是技能版本；入口区块记录 `v<version>`。升级项目是一等操作：`awf upgrade <目录>` 复制框架文件 → `bootstrap` 刷新入口 → `check` 校验，保留 `project.yaml` / `tasks/**` / `memory/**` / `tools/**`；步骤与验收见 `docs/upgrade.md`。

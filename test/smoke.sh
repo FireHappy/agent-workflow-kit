@@ -1389,6 +1389,58 @@ else
 fi
 mv "$PROJ/agent-workflow/tasks/debug/done.md.hid" "$PROJ/agent-workflow/tasks/debug/done.md"
 
+# 15.1 F3+：归档块旧英文表头（| Status |）→ check FAIL 且输出可直接执行的修复指引
+cat >> "$PROJ/agent-workflow/tasks/dev/done.md" <<'EOF'
+
+## [DEV-102] 旧英文表头归档
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| Status | 完成 |
+| Owner | t3 |
+EOF
+if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  bad "F3+ 旧英文表头未被 check 发现"
+else
+  printf '%s\n' "$out" | grep -q 'DEV-102' && ok "F3+ 点名旧归档块" || bad "F3+ 未点名旧归档块：$out"
+  printf '%s\n' "$out" | grep -q 'Status' && ok "F3+ 指明旧表头 Status" || bad "F3+ 未指明 Status：$out"
+  printf '%s\n' "$out" | grep -q '| 状态 |' && ok "F3+ 给出 | Status | → | 状态 | 指引" || bad "F3+ 缺修复指引：$out"
+fi
+sed -i '' 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/done.md" 2>/dev/null \
+  || sed -i 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/done.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 按指引修复后 check 通过" || bad "F3+ 修复后 check 未通过"
+
+# 15.2 F3+：任务块正文引用迁移字样（`| Status |` / `| 状态 |`）不污染状态列与字段检测
+cat >> "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
+
+## [DEV-103] 正文含迁移字样
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | review |
+| Owner | t3 |
+
+### 目标
+迁移指引正文：把 `| Status |` 改为 `| 状态 |`；归档块缺「状态」字段时补一行 `| 状态 | 完成 |`。
+
+### 下一步
+x
+EOF
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+grep -q '| dev | DEV-103 | P1 | review | t3 | 正文含迁移字样 |' "$PROJ/agent-workflow/tasks/status.md" \
+  && ok "F3+ 正文引用迁移字样不污染状态列" \
+  || bad "F3+ 状态列被正文污染：$(grep 'DEV-103' "$PROJ/agent-workflow/tasks/status.md")"
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 正文引用迁移字样时 check 通过" || bad "F3+ 正文引用迁移字样时 check 失败"
+cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
+# 正在开发
+
+（暂无进行中任务）
+EOF
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+
 # 16. F4：team-flow 文档 approval 语义统一为 automatic（无 staged 审批残留）
 if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' docs/team-flow.md >/dev/null; then
   bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' docs/team-flow.md | tr '\n' ';')"

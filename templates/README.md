@@ -134,7 +134,7 @@
 5. 子任务先 `verify/review`，再由主任务 Owner 合流归档
 6. 实现与复核尽量由不同会话/角色承担；复核必须独立重跑验证命令，不接受只读自述
 
-> 当前 harness 提供多会话/多角色协作能力时，任务**默认优先派发给团队**，三轨流程见 kit 的 `docs/team-flow.md`；不支持时退回单会话，本模板不绑定具体 harness。
+> 任务路由先判目标仓库：目标仓库 == 当前工作区时，小任务单会话、**可并行拆分才用团队**（三轨流程见 kit 的 `docs/team-flow.md`）；目标仓库 ≠ 当前工作区时默认 `awf-dispatch` 派到目标项目自己的工作区会话，**团队不承载跨仓库任务**。本模板不绑定具体 harness。
 
 ---
 
@@ -148,6 +148,8 @@
 4. 目标工作区可创建会话
 
 全过时优先在**目标工作区的会话**中执行，不要默认无人值守（后台）执行；详细流程见 `workflows/cross-project.md`。若当前 harness 提供派发工具，可用 `./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话；否则按 `workflows/cross-project.md` 手动派发。
+
+跨仓库写入一律经派发完成：**团队不承载跨仓库任务**——成员会话工作区 = 建队方工作区，直接改目标仓库会越权或撞目标门禁；需要团队时只用于「拆票据 + 每目标一个成员派发等待 + 汇总回报」。
 
 ---
 
@@ -194,3 +196,12 @@
 ```
 
 然后编辑 `agent-workflow/project.yaml`（校验命令、并行切分、共享写点），再运行 `awf bootstrap`。
+
+已有旧版框架（生成物过期 / 规则变化）请升级而非重装：
+
+```sh
+/path/to/awf-kit/bin/awf upgrade <项目目录>       # 复制新框架 → bootstrap → check
+/path/to/awf-kit/bin/awf upgrade <项目目录> --dry-run   # 只预览变更/保留
+```
+
+`awf upgrade` 覆盖框架文件（bin/awf、bin/awf-dispatch、templates/AGENTS.md.tmpl、README.md、workflows/*.md、check_workflow.sh 入口），**保留** `project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 AGENTS.md 区块外内容；旧账本格式问题（归档块缺「状态」、旧英文表头 `| Status |`）由 `check` 输出修复指引。步骤与验收见 kit 的 `docs/upgrade.md`。

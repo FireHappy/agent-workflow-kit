@@ -13,13 +13,17 @@
 agent-workflow-kit/
 ├── SKILL.md                 # 技能入口（脚手架）
 ├── prompt.md                # 无 shell 环境的提示词版
-├── bin/awf                  # init / bootstrap / check / status / register / projects / find
+├── bin/awf                  # init / bootstrap / check / status / register / projects / find / release-prep / upgrade
 ├── bin/awf-dispatch         # 跨项目派发（DSH 工作区会话适配）
 ├── skills/cross-project-dispatch/SKILL.md  # 配套技能：跨项目派发
 ├── templates/               # 生成用的规范与入口模板
 ├── test/smoke.sh            # 冒烟测试
+├── test/upgrade.sh          # 升级回归测试（awf upgrade 全流程）
+├── test/registry-concurrency.sh  # 全局索引并发回归测试
 ├── docs/design.md           # 设计取舍
-├── docs/dispatch.md         # 跨项目派发（会话优先 / headless / handoff）
+├── docs/dispatch.md         # 跨项目派发（会话优先 / 无人值守 / handoff）
+├── docs/team-flow.md        # 团队执行流程（三轨 + 派发模式）
+├── docs/upgrade.md          # 升级已有项目的工作流（awf upgrade 规范）
 ├── install.sh               # 安装两个技能到 ~/.dsh/skills（link 或 copy）
 └── VERSION                  # 版本号
 ```
@@ -102,20 +106,28 @@ awf find 系统组件          # 别名 → 路径
 ## 测试
 
 ```bash
-bash test/smoke.sh        # init / check / status / bootstrap / --force / 全局索引 / 派发 CLI
+bash test/smoke.sh        # init / check / status / bootstrap / --force / 全局索引 / 派发 CLI / 迁移修复指引
+bash test/upgrade.sh      # awf upgrade：干净升级 / 旧账本迁移 / 自定义门禁保留 / 边界拒绝
+bash test/registry-concurrency.sh  # 全局索引并发写入无丢失更新
 ```
 
 CI（GitHub Actions）在每次 push 时运行同一套测试。
 
-## 升级
+## 升级已有项目
+
+新版本发布后，已有项目的工作流不会自动更新；升级是**显式操作**（一等命令，取代「自行推断拷贝哪些文件」的隐式流程）：
 
 ```bash
-cd ~/Documents/GitHub/agent-workflow-kit
-git pull
-bash test/smoke.sh
+/path/to/agent-workflow-kit/bin/awf upgrade <项目目录>    # 复制新框架 → bootstrap 刷新入口 → check 校验
+/path/to/agent-workflow-kit/bin/awf upgrade <项目目录> --dry-run   # 只预览变更/保留清单
 ```
 
-已生成的项目各自保留 `agent-workflow/bin/awf` 与模板副本，不会被自动改写；需要升级某个项目时，把新的 `bin/awf`、`bin/awf-dispatch`、`agent-workflow/workflows/cross-project.md` 与 `templates/AGENTS.md.tmpl` 拷过去，再跑一次 `bootstrap` + `check`。
+- **变更清单**：`agent-workflow/` 下的 `bin/awf`、`bin/awf-dispatch`、`templates/AGENTS.md.tmpl`、`README.md`、`workflows/*.md`、`check_workflow.sh`（项目自定义门禁默认保留，`--force` 才覆盖）；
+- **保留清单**：`agent-workflow/project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 `AGENTS.md` 区块外内容；
+- 升级后跑 `./agent-workflow/check_workflow.sh`；旧账本格式问题（归档块缺「状态」字段、旧英文表头 `| Status |`）会得到**可直接执行的修复指引**，无需推断；
+- 步骤、验收标准与批量升级注意点见 [docs/upgrade.md](docs/upgrade.md)。
+
+批量升级多个项目时，每个目标在**自己的工作区会话**里执行升级；团队不承载跨仓库任务（任务路由见模板「任务路由」与 [docs/team-flow.md](docs/team-flow.md)）。
 
 ## 版本
 
