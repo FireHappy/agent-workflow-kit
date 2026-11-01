@@ -247,7 +247,7 @@ test('renderLedgerBody：完整渲染账本数据（不抛错、关键字段齐�
   assert.ok(joined.includes('请运行 awf status'), '过期时应给出提示')
   assert.ok(joined.includes('DEV-019'), '应含当前任务 ID')
   assert.ok(joined.includes('进行中'), 'active 状态徽章文案')
-  assert.ok(joined.includes('待复核'), 'review 状态徽章文案')
+  assert.ok(joined.includes('复核中'), 'review 状态徽章文案')
   // todo.md 是表格行格式、无 checkbox：不渲染进度条（countTodo 恒 0/0 无意义）
   assert.ok(!joined.includes('待办进度'), '不再渲染「待办进度」区')
   assert.ok(!joined.includes('2/5'), 'todo 进度条已移除（2/5 不应出现）')

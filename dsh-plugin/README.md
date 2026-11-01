@@ -36,7 +36,7 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 打开页签后默认自动加载**当前会话项目**的账本（也仍可在下拉中切换）：
 
 - 项目卡：名称 / 路径 / purpose 与账本新鲜度徽章——`status.md` 比账本文件旧时显示「账本过期 → 请运行 awf status」
-- 当前任务：任务标题 + ID + 类型徽章（开发/调试/文档）+ 状态徽章（进行中/待复核/验证/阻塞/交接）+ 优先级 + Owner + 更新时间；每卡带「编辑」「暂停/继续」「删除」入口（详见下）
+- 当前任务：任务标题 + ID + 类型徽章（开发/调试/文档）+ 状态徽章（进行中/复核中/验证/阻塞/交接）+ 优先级 + Owner + 更新时间；每卡带「编辑」「暂停/继续」「删除」入口（详见下）
 - **未初始化引导**：所选项目尚未初始化 agent-workflow 时，页签显示引导卡（图标 + 文案 + 「初始化工作流」按钮）。点击调用 `/awf/init` 生成骨架（project.yaml + tasks/*/{todo,current,done}.md + status.md），成功后自动重新加载账本显示正常看板；`already-initialized` 等错误有友好提示
 - **开始任务**：待办进度区除各类型进度条外，列出未开始任务表格行（类型 / ID / 描述 / 优先级），每行带「开始」按钮。点击调用 `/awf/task/start` 把该行移入 `current.md` 生成 active 任务块（todo 删行），成功后刷新账本；加载中按钮禁用，`not-found` 友好提示
 - **todo CRUD**（`POST /awf/todo`，action add/update/delete）：

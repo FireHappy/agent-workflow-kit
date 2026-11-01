@@ -82,7 +82,7 @@ window.__ModuleLoader__.load({
     // handoff=中性流转（idle + ring 环形样式，与 review 彻底区分，不再同色）。
     const STATUS_STYLE = {
       active: { label: '进行中', color: 'var(--dsw-alias-state-business-primary, #4f8ef7)' },
-      review: { label: '待复核', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
+      review: { label: '复核中', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
       verify: { label: '验证', color: 'var(--dsw-alias-state-success-primary, #3ecf8e)' },
       blocked: { label: '已暂停', color: 'var(--dsw-alias-state-error-primary, #e5484d)' },
       handoff: { label: '交接', color: C.idle, ring: true },
