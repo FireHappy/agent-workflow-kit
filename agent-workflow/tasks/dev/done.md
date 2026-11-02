@@ -130,3 +130,18 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 | DEV-017 | P1 | 工作流路由与「项目升级」语义改进（KIT-DEV-017）：路由按目标仓库逐条决策（小任务单会话/可并行才团队/跨仓库默认 awf-dispatch、团队不承载跨仓库任务）；新增 awf upgrade + docs/upgrade.md；check 迁移 FAIL 输出修复指引（| Status | → | 状态 |） | 2026-11-01 |
 
 | DEV-018 | P1 | release-prep 0.5.0：一键发版装配 | 2026-11-01 |
+
+## [DEV-019] 批量升级/安装 11 个项目 agent-workflow 框架至 kit v0.5.0
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | captain（用户直接触发） |
+| 修改范围 | 各目标仓库 agent-workflow/ 框架 + AGENTS.md 受控区块 + 全局索引 ~/.agents/AGENTS.md |
+| 验收标准 | 11 项目 upgrade/init 全部完成且 check rc=0；各一个本地 commit 含任务 ID；全部登记全局索引；调度方未直接改目标仓库 |
+
+### 下一步
+无（闭环）。跨仓库升级/安装全部由目标自己的工作区会话执行；agent-demo01 与 rokid_system_components 回合超时后由 finalize 票据补 commit。
+
+| DEV-019 | P1 | 批量升级/安装 11 个项目 agent-workflow 框架至 kit v0.5.0（6 upgrade + 5 init）；团队 awf-upgrade-all × 5 dispatcher；G1 status.md 梗阻由 captain 刷新破除；2 个超时回合 finalize 补 commit | 2026-11-02 |

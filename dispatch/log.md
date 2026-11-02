@@ -192,3 +192,85 @@
 - 目标 HEAD：aca0622 chore: 升级工作流框架到 0.4.2
 - 回报节选：任务完成。按任务文件要求的回报格式汇报： --- ## 任务回报：finderpathbar-DEV-001 升级工作流框架到 0.4.2 **状态**：✅ 已完成（框架升级至 0.4.2，已本地提交，未 push，工作树干净） **变更文件**（12 个，commit `aca0622`）： - 修改（9）：[AGENTS.md](AGENTS.md)（受控区块重渲染，digest `840b8be7`）、[agent-workflow/README.md](agent-workflow/README.md)、[agent-workflow/bin/awf](agent-workflow/b…（已截断，完整回报见会话）
 
+## 2026-11-02 22:18 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · 升级 agent-workflow 框架到 kit 最新（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/dshsettings-awf-upgrade-20261102-upgrade.md）
+- 模块：通用
+- 工作区：dsh-settings（b9ddb884-47fd-43ee-ad73-7fa9a8f78213）
+- 会话：session-b42aa821-3526-4199-9b03-e39f7e85b7c7（[awf] dsh-settings · 通用）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：7b95881 chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）
+- 回报节选：# 任务回报：awf-upgrade-20261102 ```dsh-ui {"title":"awf-upgrade-20261102 · agent-workflow 升级到 kit v0.5.0","gap":14,"items":[{"type":"keyvalue","pairs":[{"key":"状态","value":"✅ 成功"},{"key":"任务账本","value":"DEV-011（current.md 认领 → done.md 归档）"},{"key":"commit","value":"7b95881（8 文件，+308/−18），含任务 ID"},{"key"…（已截断，完整回报见会话）
+
+## 2026-11-02 22:19 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · 升级 agent-workflow 框架到 kit 最新（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/agentdemo02-awf-upgrade-20261102-upgrade.md）
+- 模块：通用
+- 工作区：agent-demo02（2954372d-7230-4a5f-ad49-993ecd25ff02）
+- 会话：session-dcbeb9b4-6711-4a10-836e-1ead10168484（[awf] agent-demo02 · 通用）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：1a8bfa3 chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）
+- 回报节选：```dsh-ui {"title":"awf-upgrade-20261102 升级回报","gap":12,"items":[{"type":"stat","label":"状态","value":"成功"},{"type":"stat","label":"check 退出码","value":"0"},{"type":"table","columns":["类别","文件","说明"],"rows":[["覆盖","AGENTS.md","受控区块由 bootstrap 刷新（digest 24f689ab，区块外零改动）"],["覆盖","agent-workflow/bin/awf"…（已截断，完整回报见会话）
+
+## 2026-11-02 22:19 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · 升级 agent-workflow 框架到 kit 最新（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/FinderPathBar-awf-upgrade-20261102-upgrade.md）
+- 模块：通用
+- 工作区：findpathbar（20ebba16-29e9-4082-a6cc-7309a5d1f44e）
+- 会话：session-37bcc0d5-7fff-4884-9dc4-59cd74ec0a00（[awf] FinderPathBar · 通用）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：e733541 chore: 升级 agent-workflow 框架至 kit 0.5.0（awf-upgrade-20261102）
+- 回报节选：升级任务已完成。以下是任务包五项回报： ## 任务回报：awf-upgrade-20261102 ```dsh-ui {"title":"awf-upgrade-20261102 升级报告","gap":14,"items":[{"type":"callout","tone":"success","content":"状态：成功 — agent-workflow 框架已升级到 kit v0.5.0，账本归档完成，本地 commit 已生成（未 push）。"},{"type":"table","columns":["回报项","内容"],"rows":[["状态","成功 / 无阻塞"],["…（已截断，完整回报见会话）
+
+## 2026-11-02 22:24 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · 升级 agent-workflow 框架到 kit 最新（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/agentdemo01-awf-upgrade-20261102-upgrade.md）
+- 模块：通用
+- 工作区：agent-demo01（181aff53-4218-4074-a910-5d9025047c2f）
+- 会话：session-4b39f463-81e9-4b37-9c74-73ed1526386a（[awf] agent-demo01 · 通用）
+- 会话来源：新建
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：b631125 chore: 升级 agent-workflow 框架至 kit 0.4.2
+
+## 2026-11-02 22:30 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · 升级 agent-workflow 框架到 kit 最新（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/rokidsystemcomponents-awf-upgrade-20261102-upgrade.md）
+- 模块：通用
+- 工作区：rokid_system_components（b49610a8-d5ac-4575-9e29-221b141b1fce）
+- 会话：session-757f6754-7b11-4400-b662-718d0aadcc3a（[awf] rokid_system_components · 通用）
+- 会话来源：新建
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：e3aae2cd chore: 升级 agent-workflow 框架至 kit 0.4.2
+
+## 2026-11-02 22:33 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · agent-demo01 升级收尾：本地 commit（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/agentdemo01-awf-upgrade-20261102-finalize.md）
+- 模块：通用
+- 工作区：agent-demo01（181aff53-4218-4074-a910-5d9025047c2f）
+- 会话：session-40948e80-14bf-4293-a021-71d804ecbcc3（[awf] agent-demo01 · 通用）
+- 会话来源：新建
+- 状态：完成（已落地：归档）
+- 目标 HEAD：2a0d98a chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）
+- 回报节选：任务完成。回报如下： ## 回报：awf-upgrade-20261102 - **状态**：成功 ✅ - **commit**：`2a0d98ac8b7820bf9d150f9e7283d174d2c83ff4`（短 `2a0d98a`）— `chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）` - **验证结果**：`./agent-workflow/check_workflow.sh` 复跑 rc=0（全部检查通过，status.md 与账本一致） - **阻塞**：无 **执行明细**：目标仓库 == 当前工作区，…（已截断，完整回报见会话）
+
+## 2026-11-02 22:35 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · rokidsystemcomponents 升级收尾：本地 commit（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/rokidsystemcomponents-awf-upgrade-20261102-finalize.md）
+- 模块：通用
+- 工作区：rokid_system_components（b49610a8-d5ac-4575-9e29-221b141b1fce）
+- 会话：session-692b0dd6-c64a-4a05-93d1-c5d5d3dfc2e9（[awf] rokid_system_components · 通用）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：dd35d38a chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）
+- 回报节选：任务已完成。以下是回报： ```dsh-ui {"title":"awf-upgrade-20261102 收尾回报","gap":12,"items":[{"type":"keyvalue","pairs":[{"key":"状态","value":"成功"},{"key":"commit","value":"dd35d38a — chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）"},{"key":"check 复跑","value":"rc=0，全部检查通过（16 项 ok）"},{"key":"push","val…（已截断，完整回报见会话）
+
