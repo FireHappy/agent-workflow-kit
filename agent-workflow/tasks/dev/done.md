@@ -21,6 +21,70 @@
 | DEV-012 | P1 | release-prep 0.4.2：一键发版装配 | 2026-10-31 |
 | DEV-001 | P2 | 自举副本漂移检测（F6）：check 对 bin/awf、bin/awf-dispatch、templates 三对副本漂移即 FAIL，release-prep 先检测再覆盖不静默回滚 | 2026-11-01 |
 
+
+
+## [DEV-033] 写操作 agent 化 + 数据驱动 UI：面板按钮只注入意图给 agent，agent 执行并改账本，程序以数据状态驱动页面
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | 归档 |
+| Owner | agent |
+| 协作模式 | single |
+| 来源任务 | todo 登记（DEV-026 路径 A 延伸） |
+| 修改范围 | dsh-plugin/lib/（index.js + client.js）、dsh-plugin/src/ledger.js、dsh-plugin/test/ |
+| 分支/工作区 | 待补充 |
+| 依赖 | DEV-026 |
+| 最近更新 | 2026-11-02 |
+
+### 目标
+把「程序直接改账本」改为「agent 执行写操作、程序以数据状态驱动页面」：
+1. 判断型操作（返回待办/删除/回退）→ 面板按钮只注入指令给主对话 agent（sessionController.prompt），agent 分析后执行并更新账本，程序不再直接改 todo/current/done.md；
+2. 账本文件是唯一事实源：程序只读账本渲染 UI；账本变化（任何写者）经 SSE 事件推送 UI 立即刷新（替代 15s 轮询，轮询保留兜底）；
+3. 回退/删除判断从程序移到 agent（程序不内置 git 回退语义）。
+
+### 验收标准
+- [x] 通用动作指令构建器 buildActPrompt（start/return-todo/delete 动作枚举 + 任务引用 + 约束，agent 读工作流展开；收敛 DEV-026 的 buildTeamPrompt）
+- [x] 通用注入端点 POST /awf/agent/act（认证+白名单；仅注入不改账本；team/start 复用 promptSession）
+- [x] 前端「返回待办」「删除」改调 /awf/agent/act（删除链路删 dry-run/弹框/程序写；文案「注入中…」+ 双态提示）
+- [x] 步骤条语义修正：active=认领（开始仅登记，未认领/方案/实现）；进度标签「实现进度」→「进度」
+- [x] 事件推送：GET /awf/events（SSE）+ fs.watch tasks 目录（跨写者广播）+ EventSource 订阅；15s 轮询兜底降级
+- [x] 重启宿主后 GUI 实测：返回待办/删除走 agent 注入链路（已注入到主对话）、账本变化 UI 立即刷新（SSE <1.2s 实测）
+
+### 下一步
+- [x] 盘点写账本点：判断型（返回待办/删除/回退）agent 化；纯字段（待办 CRUD/暂停/归档）保留程序
+- [x] 实现 buildActPrompt + /awf/agent/act + promptSession 复用
+- [x] 前端删除/返回待办接线 agent 注入（删除程序链路清理）
+- [x] 步骤条/进度标签修正
+- [x] 块 B：SSE /awf/events + fs.watch 广播 + EventSource 订阅（轮询兜底）
+- [ ] 重启 DSH 宿主（服务端新路由 /awf/agent/act、/awf/events 需重启加载）
+- [ ] GUI 实测后勾选验收 → review → 独立复核 → 归档 → 本地 commit（禁 push）
+## [DEV-026] 「开始任务」接 AgentTeams 真执行（方案 B）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | 归档 |
+| Owner | agent |
+| 协作模式 | single |
+| 来源任务 | todo.md 登记（P1）：开始=建队 DAG 执行 |
+| 修改范围 | dsh-plugin/lib/（index.js 服务端 + client.js 前端） |
+
+### 目标
+
+「开始任务」按钮从当前「移到 current.md 生成 active 块」升级为：真实创建 AgentTeams 团队并执行 DAG（开始=建队执行、暂停=暂停团队、恢复=继续、完成=回填账本点亮步骤条）。
+
+### 验收标准
+
+- [x] 服务端「开始」登记账本 + 向主对话注入建队指令（sessionController.prompt，mode=queue，失败降级普通开始）
+- [x] 「开始并建队」按钮：调 /awf/team/start 带 sessionId，🤝/ℹ️ 双态提示
+- [x] 无 sessionId / prompt 失败/宿主缺 sessionController 时降级为普通开始（登记成功、prompted:false 不报错）
+- [x] 建队指令携带任务 ID/类型/路径/approval=automatic，指向 tasks/<type>/current.md（主对话 agent 据 AGENTS.md 路由决策）
+- [x] 68/68 测试 + smoke 119 + check_workflow 通过
+
+### 下一步
+- [x] 可行性分析完成：宿主有官方通道 sessionController.@Remote(prompt) —— 插件服务端 ctx.remote.session.prompt 注入 user/message 事件触发 agent 处理（含建队），无需等宿主扩展
+- [ ] 分析 AgentTeams 可用接口（本仓库 AGENTS.md 团队模式）
 ## [DEV-001] 自举副本漂移检测（F6）
 
 | 字段 | 值 |

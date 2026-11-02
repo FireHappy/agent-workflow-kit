@@ -864,14 +864,14 @@ test('t5 Dashboard 接线：暂停/开始/任务编辑回调必须传入 renderL
 test('t5 当前任务验收进度：任务块含 checkItems 时显示完成度，无子项不渲染进度条', () => {
   const { mod } = loadChunk()
   const ledger = crudLedger()
-  // active（实现阶段）→「实现进度」
+  // active（认领/执行阶段）→「进度」
   ledger.current[0].checkItems = [
     { done: true, text: '实现 A' },
     { done: false, text: '实现 B' },
     { done: false, text: '测试 C' },
   ]
   const tree = collectTexts(mod.renderLedgerBody(ledger), []).join('|')
-  assert.ok(tree.includes('实现进度'), 'active 实现阶段显示「实现进度」标题')
+  assert.ok(tree.includes('进度'), 'active 阶段显示「进度」标题')
   assert.ok(tree.includes('1/3'), '进度计数 done/total')
   assert.ok(tree.includes('33'), '进度百分比')
   // verify（验证阶段）→「验收进度」
@@ -880,7 +880,7 @@ test('t5 当前任务验收进度：任务块含 checkItems 时显示完成度�
   assert.ok(vTree.includes('验收进度'), 'verify 验证阶段显示「验收进度」标题')
   // 无 checkItems 的任务：不渲染进度（仅徽章）
   const plain = collectTexts(mod.renderLedgerBody(crudLedger()), []).join('|')
-  assert.ok(!plain.includes('实现进度') && !plain.includes('验收进度'), '无子项任务不渲染进度')
+  assert.ok(!plain.includes('进度'), '无子项任务不渲染进度')
   delete global.window
 })
 
@@ -987,21 +987,21 @@ test('t7 工作流步骤：三类型完整流程定义（dev/debug/docs）', () 
 
 test('t7 阶段推断 inferWorkflowStage：状态→阶段下标（纯函数）', () => {
   const { mod } = loadChunk()
-  // dev：active=实现(2)、verify=验证(3)、review=Review(4)
-  assert.equal(mod.inferWorkflowStage({ type: 'dev', status: 'active' }).index, 2)
+  // DEV-033：active=认领(0)——开始任务只登记，未认领/方案/实现
+  assert.equal(mod.inferWorkflowStage({ type: 'dev', status: 'active' }).index, 0)
   assert.equal(mod.inferWorkflowStage({ type: 'dev', status: 'verify' }).index, 3)
   assert.equal(mod.inferWorkflowStage({ type: 'dev', status: 'review' }).index, 4)
-  // debug：active=收集证据(2)、verify=验证假设(3)、review=修复与回归(4)
-  assert.equal(mod.inferWorkflowStage({ type: 'debug', status: 'active' }).index, 2)
+  // debug：active=认领(0)、verify=验证假设(3)、review=修复与回归(4)
+  assert.equal(mod.inferWorkflowStage({ type: 'debug', status: 'active' }).index, 0)
   assert.equal(mod.inferWorkflowStage({ type: 'debug', status: 'verify' }).index, 3)
   assert.equal(mod.inferWorkflowStage({ type: 'debug', status: 'review' }).index, 4)
-  // docs：active=撰写(2)、review=审阅(3)
-  assert.equal(mod.inferWorkflowStage({ type: 'docs', status: 'active' }).index, 2)
+  // docs：active=认领(0)、review=审阅(3)
+  assert.equal(mod.inferWorkflowStage({ type: 'docs', status: 'active' }).index, 0)
   assert.equal(mod.inferWorkflowStage({ type: 'docs', status: 'review' }).index, 3)
   // blocked：停在 active 对应阶段，paused=true
   const b = mod.inferWorkflowStage({ type: 'dev', status: 'blocked' })
   assert.equal(b.paused, true, 'blocked → paused 标注')
-  assert.equal(b.index, 2, 'blocked 停在实现阶段')
+  assert.equal(b.index, 0, 'blocked 停在认领阶段')
   // 未知类型 → null（不渲染步骤条）
   assert.equal(mod.inferWorkflowStage({ type: 'xxx', status: 'active' }), null)
   assert.equal(mod.inferWorkflowStage(null), null)
@@ -1013,11 +1013,11 @@ test('t7 步骤条渲染：进行中任务显示流程步骤与当前阶段；bl
   const tree = collectTexts(mod.renderLedgerBody(crudLedger()), []).join('|')
   // dev active 任务（DEV-100）：流程标题 + dev 六步 + 当前阶段
   assert.ok(tree.includes('开发') && tree.includes('流程'), '步骤条带类型徽章与流程标题')
-  assert.ok(tree.includes('当前 · 实现'), 'active → 标注当前阶段 实现')
-  assert.ok(tree.includes('已完成 2') && tree.includes('待办 3'), '步骤计数：已完成/待办明确表达')
+  assert.ok(tree.includes('当前 · 认领'), 'active → 标注当前阶段 认领（DEV-033：开始仅登记，未认领/方案/实现）')
+  assert.ok(tree.includes('已完成 0') && tree.includes('待办 5'), '步骤计数：已完成/待办明确表达（active=认领未推进）')
   assert.ok(tree.includes('认领') && tree.includes('方案') && tree.includes('验证') && tree.includes('Review') && tree.includes('归档'), 'dev 六步渲染')
   // dev blocked 任务（DEV-101）：暂停位置标注
-  assert.ok(tree.includes('已暂停 · 实现'), 'blocked → 暂停位置标注')
+  assert.ok(tree.includes('已暂停 · 认领'), 'blocked → 暂停位置标注')
   assert.ok(tree.includes('待办 '), 'blocked 也带待办计数')
   // 轨道节点符号：当前=内嵌 CSS 白点（不再用 7.5px ● 字形，防深色主题裁剪/看不清）、
   // 已完成=✓、暂停=⏸（节点内符号 + 标签分离）
@@ -1029,7 +1029,7 @@ test('t7 步骤条渲染：进行中任务显示流程步骤与当前阶段；bl
   dbg.current = [{ type: 'debug', id: 'DBG-1', title: '调试任务', prio: 'P1', status: 'active', owner: '', mode: '', updated: '' }]
   const dbgTree = collectTexts(mod.renderLedgerBody(dbg), []).join('|')
   assert.ok(dbgTree.includes('选择诊断方式') && dbgTree.includes('收集证据') && dbgTree.includes('验证假设') && dbgTree.includes('修复与回归'), 'debug 流程步骤')
-  assert.ok(dbgTree.includes('当前 · 收集证据'), 'debug active 阶段')
+  assert.ok(dbgTree.includes('当前 · 认领'), 'debug active 阶段=认领')
 
   // docs 类型任务展示 docs 流程
   const dc = crudLedger()
@@ -1047,7 +1047,8 @@ test('t8 步骤条布局：横向阶段轨道（awf-track + 步骤节点 + 连�
   assert.ok(classes.includes('awf-track'), '步骤条容器为 awf-track（横向轨道）')
   assert.ok(classes.some((c) => c.startsWith('awf-step')), '步骤为 awf-step 节点')
   assert.ok(classes.includes('awf-step-cur'), '当前步骤带 awf-step-cur 强调态')
-  assert.ok(classes.includes('awf-step-done'), '已完成步骤带 awf-step-done 态')
+  // DEV-033：active=认领(0)，无已完成步骤——认领是当前、后续全待办
+  assert.ok(!classes.includes('awf-step-done'), 'active 认领阶段无已完成步骤（开始仅登记）')
   assert.ok(classes.includes('awf-step-pend'), '未到步骤带 awf-step-pend 置灰态')
   // 轨道含连接线 span：步骤节点之间的连线元素通过 h('span') 渲染（带线样式），
   // 校验 track 容器内 span 结构存在（步骤=div.awf-step、连接线=span、标签=span）
@@ -1116,7 +1117,7 @@ test('t9 验收进度：服务端对象形态 checkItems={done,total,items} 渲�
   ]
   const arrTexts = collectTexts(mod.renderLedgerBody(ledger), []).join('|')
   assert.ok(arrTexts.includes('1/2'), '数组形态仍兼容渲染')
-  assert.ok(arrTexts.includes('实现进度'), 'active 阶段数组形态显示实现进度')
+  assert.ok(arrTexts.includes('进度'), 'active 阶段数组形态显示进度标题')
   delete global.window
 })
 

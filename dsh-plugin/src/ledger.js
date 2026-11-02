@@ -1052,6 +1052,9 @@ export async function taskEdit(o) {
   if (action === 'delete') {
     return deleteTask({ projectPath, type, id, revert, dryRun, date, runGit })
   }
+  if (action === 'return-todo') {
+    return returnTaskToTodo({ projectPath, type, id, date })
+  }
   if (!['update', 'pause', 'resume'].includes(action)) return { ok: false, code: 'bad-action' }
   const currentFile = join(projectPath, 'agent-workflow', 'tasks', type, 'current.md')
   let currentMd
@@ -1073,6 +1076,74 @@ export async function taskEdit(o) {
   if (!res.ok) return res
   await writeFile(currentFile, res.md, 'utf8')
   return { ok: true, task: { id, type, fields: res.fields } }
+}
+
+// ---------------------------------------------------------------------------
+// 源文件只读查看（前端「编辑任务 → 打开 .md 源文件」用）
+// ---------------------------------------------------------------------------
+
+/**
+ * 把 current.md 中的任务块放回 todo.md（撤销「开始任务」登记，保留任务本身）。
+ * 行为与 startTask 相反：
+ *   a) 从 current.md 移除任务块（保留 HTML 注释模板区；标题/优先级/描述取自块）；
+ *   b) 向 todo.md 追加一行 `| ID | 优先级 | 描述 | 日期 |`（表分隔行之后）。
+ * 状态不再回显（todo 行无状态列），描述取块标题（缺省回退为 ID），
+ * 优先级取块的「优先级」字段（缺省 P2），日期取块的「最近更新」或新登记日期。
+ * @param {object} o {projectPath, type, id, date?}
+ * @returns {Promise<{ok: true, task: {id, type, prio, desc, date}}|{ok: false, code}>}
+ *   code: bad-type / bad-id / not-found（current.md 无此任务块）
+ */
+export async function returnTaskToTodo(o) {
+  const { projectPath, type, id, date } = o
+  if (!TASK_TYPES.includes(type)) return { ok: false, code: 'bad-type' }
+  if (!ID_RE.test(String(id))) return { ok: false, code: 'bad-id' }
+  const dir = join(projectPath, 'agent-workflow', 'tasks', type)
+  const todoFile = join(dir, 'todo.md')
+  const currentFile = join(dir, 'current.md')
+
+  // a) 从 current.md 移除任务块并解析字段
+  let currentMd
+  try {
+    currentMd = await readFile(currentFile, 'utf8')
+  } catch {
+    return { ok: false, code: 'not-found' }
+  }
+  const lines = String(currentMd).split('\n')
+  const [start, end] = blockRange(lines, id)
+  if (start === -1) return { ok: false, code: 'not-found' }
+  const blockLines = lines.slice(start, end)
+  const blockMap = parseBlockFieldMap(blockLines.join('\n'))
+  const title = blockTitle(blockLines.join('\n')) || id
+  const prio = blockMap['优先级'] || 'P2'
+  const dateUsed = date || blockMap['最近更新'] || todayLocal()
+  const kept = lines.slice(0, start).concat(lines.slice(end))
+  const currentNext = kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n'
+  await writeFile(currentFile, currentNext, 'utf8')
+
+  // b) 向 todo.md 追加任务行（表分隔行 `|---|` 之后追加；无表头时直接追加）
+  let todoMd
+  try {
+    todoMd = await readFile(todoFile, 'utf8')
+  } catch {
+    todoMd = ''
+  }
+  const rowLine = `| ${id} | ${prio} | ${safeCell(title)} | ${dateUsed} |`
+  const todoLines = String(todoMd).split('\n')
+  let insertAt = -1
+  for (let i = 0; i < todoLines.length; i++) {
+    if (/^\s*\|[\s:|-]+\|/.test(todoLines[i]) && /-+/.test(todoLines[i])) { insertAt = i + 1; break }
+  }
+  if (insertAt === -1) {
+    // 无表头：拼接完整表格（含表头/分隔）
+    const header = '| 任务ID | 优先级 | 描述 | 登记日期 |\n|--------|--------|------|----------|'
+    todoLines.push('', header)
+    insertAt = todoLines.length
+  }
+  todoLines.splice(insertAt, 0, rowLine)
+  const todoNext = todoLines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n'
+  await writeFile(todoFile, todoNext, 'utf8')
+
+  return { ok: true, task: { id, type, prio, desc: title, date: dateUsed } }
 }
 
 // ---------------------------------------------------------------------------

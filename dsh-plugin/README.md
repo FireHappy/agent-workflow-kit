@@ -2,6 +2,13 @@
 
 agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，在 DSH 右侧边栏的 **Agent Workflow** 页签可视化查看项目账本——当前任务状态、todo 进度、最近完成、status.md 新鲜度；并提供未初始化引导、开始任务与归档查看等交互。
 
+## 定位（为什么做这个插件）
+
+1. **让 agent 的开发更规范**：账本（todo → active → verify → review → 归档）是开发流程的唯一事实源，agent 的一切开发动作都遵循工作流纪律；插件把流程可视化、可强制，**判断型写操作（返回待办/删除/回退）由 agent 执行**，程序不绕过 agent 直接改账本。
+2. **让用户更方便地使用 agent**：面板按钮是意图入口，用户点一下即把操作指令注入主对话 agent（sessionController.prompt），agent 干剩下的事——减少重复输入长指令；程序以账本数据状态驱动页面刷新，agent 写账本后 UI 自动反映。
+
+架构原则：账本文件是唯一事实源，程序只做「读账本渲染 + 注入意图」，写操作收敛到 agent。
+
 - 数据源：各项目的 `agent-workflow/tasks/{dev,debug,docs}/{todo,current,done}.md` 与 `status.md`（账本读取只读；交互写操作走下方安全路由）
 - 服务端路由（全部走宿主连接认证围栏，错误统一 `{ok:false, error:{code,message}}`）：
   - `GET  /awf/projects`（全局索引）

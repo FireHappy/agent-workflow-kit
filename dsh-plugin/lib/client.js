@@ -125,9 +125,11 @@ window.__ModuleLoader__.load({
       ],
     }
 
-    // 状态 → 阶段 key（按类型；active=主工作阶段、review=Review/审阅、verify=验证等）
+    // 状态 → 阶段 key（按类型；active=认领/主工作阶段、review=Review/审阅、verify=验证等）
+    // DEV-033 修正：active 映射到「认领」而非「实现」——开始任务只登记账本，还没认领/
+    // 方案/实现；具体执行进度由 agent 在任务块「下一步」推进，阶段条只反映账本状态语义。
     const STATUS_STAGE = {
-      active: { dev: 'impl', debug: 'collect', docs: 'write' },
+      active: { dev: 'claimed', debug: 'claimed', docs: 'claimed' },
       verify: { dev: 'verify', debug: 'hypothesis', docs: 'review' },
       review: { dev: 'review', debug: 'fix', docs: 'review' },
       handoff: { dev: 'review', debug: 'fix', docs: 'review' },
@@ -155,15 +157,12 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // 卡片/行 hover 质感 + 交互反馈（DEV-024）：:focus-visible 键盘焦点、:active 按压回弹、
-    // 按钮统一过渡。纯手写 h() 下用静态 <style> 注入一次（inline style 无 :hover/:focus 能力）
+    // 交互反馈（DEV-024）：:focus-visible 键盘焦点、:active 按压回弹。
+    // 2026-11-02（DEV-026 观察项）：去掉全部 hover 位移/阴影/背景效果——
+    // 鼠标移上去卡片上浮/行高亮会让列表布局跳动。保留焦点环（无障碍必需）
+    // 与按压反馈（不移动布局）。
     const AWF_HOVER_CSS =
-      '.awf-card{transition:border-color .15s ease,box-shadow .15s ease,transform .12s ease}' +
-      '.awf-card:hover{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary,#5b8cff) 45%,transparent);' +
-      'box-shadow:0 4px 14px color-mix(in srgb,rgba(8,12,22,.16) 60%,transparent);transform:translateY(-1px)}' +
-      '.awf-row{transition:background .12s ease}' +
-      '.awf-row:hover{background:color-mix(in srgb,var(--dsw-alias-interactive-bg-hover,rgba(120,126,140,.08)) 60%,transparent)}' +
-      '.awf-badge-row{transition:gap .12s ease}' +
+      '.awf-card{transition:border-color .15s ease}' +
       '.awf-card button,.awf-row button{transition:background .15s ease,border-color .15s ease,color .15s ease,transform .08s ease}' +
       '.awf-card button:active:not(:disabled),.awf-row button:active:not(:disabled){transform:translateY(1px)}' +
       '.awf-card :is(button,select,input):focus-visible,.awf-row :is(button,select,input):focus-visible,' +
@@ -699,7 +698,7 @@ window.__ModuleLoader__.load({
      * 编辑时原位展开表单改字段（优先级/状态/Owner/修改范围/描述）。
      * DEV-024：flush=true 时去掉底部 margin（两列网格容器内用 gap 撑间距）。
      */
-    function TaskCard({ t, onDelete, deleting, onEdit, editing, editForm, onEditChange, onEditSave, onEditCancel, onPause, onResume, working, onOpenSource, flush }) {
+    function TaskCard({ t, onDelete, deleting, onEdit, editing, editForm, onEditChange, onEditSave, onEditCancel, onPause, onResume, working, onOpenSource, flush, onReturnTodo, returning }) {
       const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
       const pst = PRIO_STYLE[t.prio] || { color: C.faint }
       const delBusy = !!deleting
@@ -831,13 +830,21 @@ window.__ModuleLoader__.load({
                   title: '暂停（状态 → blocked）',
                   style: tinyBtn(busy),
                 }, '暂停') : null),
+            typeof onReturnTodo === 'function'
+              ? h('button', {
+                  onClick: busy ? undefined : () => onReturnTodo(t),
+                  disabled: busy || !!returning,
+                  title: '放回待办（注入指令给 agent 判断后执行）',
+                  style: Object.assign(tinyBtn(busy || !!returning), { opacity: busy || returning ? 0.55 : 1 }),
+                }, returning ? '注入中…' : '放回待办')
+              : null,
             typeof onDelete === 'function'
               ? h('button', {
                   onClick: busy ? undefined : () => onDelete(t),
-                  disabled: busy,
-                  title: '删除任务（回退修改需二次确认）',
-                  style: Object.assign(dangerTextStyle, { opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }),
-                }, '删除')
+                  disabled: busy || !!deleting,
+                  title: '删除任务（注入指令给 agent 分析能否删除后执行）',
+                  style: Object.assign(dangerTextStyle, { opacity: busy || deleting ? 0.55 : 1, cursor: busy || deleting ? 'default' : 'pointer' }),
+                }, deleting ? '注入中…' : '删除')
               : null)))
     }
 
@@ -958,7 +965,7 @@ window.__ModuleLoader__.load({
               onClick: anyBusy ? undefined : () => onStart(row),
               disabled: anyBusy,
               style: Object.assign(buttonStyle(true), { opacity: anyBusy ? 0.55 : 1, cursor: anyBusy ? 'default' : 'pointer' }),
-            }, '开始')
+            }, '开始并建队')
           : null,
         typeof onEdit === 'function'
           ? h('button', {
@@ -1020,7 +1027,7 @@ window.__ModuleLoader__.load({
       const done = Array.isArray(items) ? list.filter((i) => i && i.done).length : Math.max(0, Number(items.done) || 0)
       const total = Array.isArray(items) ? list.length : (Number(items.total) > 0 ? Number(items.total) : list.length)
       const pct = total > 0 ? Math.round((done / total) * 100) : 0
-      const label = (status === 'verify' || status === 'review' || status === 'handoff') ? '验收进度' : '实现进度'
+      const label = (status === 'verify' || status === 'review' || status === 'handoff') ? '验收进度' : '进度'
       return h('div', { className: 'awf-check', style: { marginBottom: 6 } },
         h('div', { style: row({ gap: 6, fontSize: 11, color: C.sub }) },
           h('span', { style: { fontWeight: 600, color: C.text } }, label),
@@ -1465,9 +1472,10 @@ window.__ModuleLoader__.load({
       const [initBusy, setInitBusy] = useState(false)
       const [initError, setInitError] = useState(null)
       const [starting, setStarting] = useState(null) // {type,id,key} 开始任务中
+      const [teamNotice, setTeamNotice] = useState(null) // {id,prompted} 建队指令注入提示（DEV-026）
       const [actionError, setActionError] = useState(null) // 开始/操作失败提示
       const [archive, setArchive] = useState(null) // {id,busy,data,error}
-      const [delModal, setDelModal] = useState(null) // 删除二次确认 {task,busy,view,error}
+      const [delAct, setDelAct] = useState(null) // 删除指令注入中 {id,type}（DEV-033：删除由 agent 执行）
 
       // t5：todo / 当前任务 CRUD 交互状态
       const [addForm, setAddForm] = useState(null) // 新增待办表单 {type,id,prio,desc,busy,error} | null
@@ -1477,6 +1485,8 @@ window.__ModuleLoader__.load({
       const [todoType, setTodoType] = useState('dev') // 待办区类型切换（默认 dev）
       const [taskEdit, setTaskEdit] = useState(null) // 当前任务编辑表单 {id,type,prio,status,owner,scope,desc,busy,error} | null
       const [taskWorking, setTaskWorking] = useState(null) // 暂停/继续中 {id, action} | null
+      const [returningId, setReturningId] = useState(null) // 放回待办中的任务 id（DEV-026 扩展）
+      const [actionNotice, setActionNotice] = useState(null) // 成功提示（如放回待办）
       const [source, setSource] = useState(null) // 源文件面板 {type,file,busy,data,copied,error} | null
 
       // 1) 项目索引（只读）
@@ -1549,9 +1559,27 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         loadLedger()
+        // DEV-033 块 B：SSE 事件驱动刷新（数据状态驱动页面）——
+        // 账本文件变化（agent/程序/手动写者）→ 服务端广播 → 匹配项目立即刷新；
+        // 15s 轮询保留为兜底降级（SSE 断线/不支持时自动退回轮询）。
         const t = setInterval(loadLedger, POLL_MS)
-        return () => { clearInterval(t) }
-      }, [loadLedger])
+        let es = null
+        try {
+          es = new EventSource('/awf/events')
+          es.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(ev.data || '{}')
+              if (msg && msg.type === 'ledger-changed' && msg.projectPath === selected) {
+                loadLedger()
+              }
+            } catch (e) { /* 忽略畸形事件 */ }
+          }
+        } catch (e) { /* EventSource 不可用时纯轮询兜底 */ }
+        return () => {
+          clearInterval(t)
+          if (es) es.close()
+        }
+      }, [loadLedger, selected])
 
       // 4) 用户手动切换项目：写入 localStorage（优先于自动检测）
       const onSelect = (e) => {
@@ -1606,7 +1634,9 @@ window.__ModuleLoader__.load({
         }
       }, [selected, initBusy, anchorRoot, projects, loadLedger])
 
-      // 6) 开始任务（todo 行 → current.md）
+      // 6) 开始任务（todo 行 → current.md + DEV-026 建队执行）
+      //    调 /awf/team/start：服务端先登记 current.md，再向主对话 session 注入建队
+      //    指令（sessionController.prompt）。无 sessionId 时降级为普通开始（登记成功）。
       const handleStart = useCallback(async (row) => {
         if (!selected || !row || !row.id || !row.type) return
         const key = row.type + ':' + row.id
@@ -1614,11 +1644,18 @@ window.__ModuleLoader__.load({
         setStarting({ type: row.type, id: row.id, key })
         setActionError(null)
         try {
-          await postJson('/awf/task/start', {
+          const resp = await postJson('/awf/team/start', {
             path: selected, type: row.type, id: row.id,
+            sessionId: props.sessionId || (props.scope && props.scope.sessionId) || undefined,
             workspaceRoot: anchorRoot || undefined,
           })
           loadLedger()
+          if (resp && resp.team && resp.team.prompted) {
+            setActionError(null)
+            setTeamNotice({ id: row.id, prompted: true })
+          } else {
+            setTeamNotice({ id: row.id, prompted: false })
+          }
         } catch (e) {
           if (e.code === 'not-found') {
             setActionError('未在 todo.md 中找到该任务：' + row.id + '（可能已被移除，请刷新）')
@@ -1630,7 +1667,7 @@ window.__ModuleLoader__.load({
         } finally {
           setStarting(null)
         }
-      }, [selected, starting, anchorRoot, loadLedger])
+      }, [selected, starting, anchorRoot, loadLedger, props.sessionId, props.scope])
 
       // 7) 归档查看
       const handleOpenArchive = useCallback(async (r) => {
@@ -1650,42 +1687,29 @@ window.__ModuleLoader__.load({
         }
       }, [selected, archive])
 
-      // 8) 删除任务：先 dry-run 拿回退清单，弹框二次确认后才 execute
+      // 8) 删除任务（DEV-033）：注入删除指令给主对话 agent 分析执行。
+      //    程序不再 dry-run/回退——agent 判断能否删除（未提交改动/修改范围/依赖）后
+      //    执行并更新账本，插件靠账本数据变化刷新。
       const handleDeleteClick = useCallback(async (t) => {
-        if (!selected || !t || !t.id || delModal) return
-        setDelModal({ task: t, busy: true, view: null, error: null })
+        if (!selected || !t || !t.id || delAct) return
+        setDelAct({ id: t.id, type: t.type })
+        setActionError(null)
         try {
-          const data = await postJson('/awf/task/delete/dry-run', {
-            path: selected, type: t.type, id: t.id,
+          const resp = await postJson('/awf/agent/act', {
+            path: selected, type: t.type, id: t.id, action: 'delete',
+            sessionId: props.sessionId || (props.scope && props.scope.sessionId) || undefined,
             workspaceRoot: anchorRoot || undefined,
           })
-          setDelModal((cur) => (cur ? Object.assign({}, cur, { busy: false, view: buildDeleteView(data && data.dryRun) }) : cur))
-        } catch (e) {
-          setDelModal((cur) => (cur ? Object.assign({}, cur, {
-            busy: false,
-            error: '无法获取回退清单：' + String((e && e.message) || e),
-          }) : cur))
-        }
-      }, [selected, anchorRoot, delModal])
-
-      const handleDeleteConfirm = useCallback(async (mode) => {
-        const cur = delModal
-        if (!cur || !cur.task || cur.busy) return
-        setDelModal(Object.assign({}, cur, { busy: true, error: null }))
-        try {
-          await postJson('/awf/task/delete/execute', {
-            path: selected, type: cur.task.type, id: cur.task.id, mode,
-            workspaceRoot: anchorRoot || undefined,
-          })
-          setDelModal(null)
           loadLedger()
+          setTeamNotice(resp && resp.team && resp.team.prompted
+            ? { id: t.id, prompted: true }
+            : { id: t.id, prompted: false })
         } catch (e) {
-          setDelModal((prev) => (prev ? Object.assign({}, prev, {
-            busy: false,
-            error: '删除失败：' + String((e && e.message) || e),
-          }) : prev))
+          setActionError('删除指令注入失败：' + String((e && e.message) || e))
+        } finally {
+          setDelAct(null)
         }
-      }, [selected, anchorRoot, delModal, loadLedger])
+      }, [selected, anchorRoot, delAct, loadLedger, props.sessionId, props.scope])
 
       // ---- t5：todo CRUD ---------------------------------------------------
 
@@ -1848,6 +1872,29 @@ window.__ModuleLoader__.load({
       const handleTaskPause = useCallback((t) => handleTaskToggle(t, 'pause'), [handleTaskToggle])
       const handleTaskResume = useCallback((t) => handleTaskToggle(t, 'resume'), [handleTaskToggle])
 
+      // 放回待办（撤销开始登记 → 恢复 todo.md 行）
+      const handleReturnTodo = useCallback(async (t) => {
+        if (!selected || !t || !t.id || (returningId && returningId === t.id)) return
+        setReturningId(t.id)
+        setActionError(null)
+        try {
+          // DEV-033：注入「返回待办」指令给主对话 agent（程序不再直接改账本）
+          const resp = await postJson('/awf/agent/act', {
+            path: selected, type: t.type, id: t.id, action: 'return-todo',
+            sessionId: props.sessionId || (props.scope && props.scope.sessionId) || undefined,
+            workspaceRoot: anchorRoot || undefined,
+          })
+          loadLedger()
+          setTeamNotice(resp && resp.team && resp.team.prompted
+            ? { id: t.id, prompted: true }
+            : { id: t.id, prompted: false })
+        } catch (e) {
+          setActionError('返回待办指令注入失败：' + apiErrorText(e, '操作失败'))
+        } finally {
+          setReturningId(null)
+        }
+      }, [selected, returningId, anchorRoot, loadLedger, props.sessionId, props.scope])
+
       // ---- t5：待办类型切换 / 源文件查看 ------------------------------------
 
       const handleTodoTypeChange = useCallback((v) => {
@@ -1931,9 +1978,10 @@ window.__ModuleLoader__.load({
             ? renderLedgerBody(ledger, {
                 onStart: handleStart,
                 starting,
+                teamNotice,
                 onOpenArchive: handleOpenArchive,
                 onDelete: handleDeleteClick,
-                deleting: delModal && delModal.task ? delModal.task.id : null,
+                deleting: delAct ? delAct.id : null,
                 actionError,
 
                 // t5：todo CRUD
@@ -1962,6 +2010,9 @@ window.__ModuleLoader__.load({
                 onTaskEditCancel: closeTaskEdit,
                 onTaskPause: handleTaskPause,
                 onTaskResume: handleTaskResume,
+                onReturnTodo: handleReturnTodo,
+                returningId,
+                actionNotice,
                 taskEdit,
                 taskWorking,
 
@@ -1982,12 +2033,7 @@ window.__ModuleLoader__.load({
         // 卡片/行 hover 质感 + 焦点/按压反馈 + 统一基础样式：一次性注入静态样式（纯手写 h() 无构建）
         h('style', { key: 'awf-hover-css' }, AWF_HOVER_CSS + AWF_UI_CSS),
         header, body,
-        archive ? renderArchiveModal(archive, () => setArchive(null)) : null,
-        delModal ? renderDeleteModal(delModal, {
-          onRollback: () => handleDeleteConfirm('rollback'),
-          onLedgerOnly: () => handleDeleteConfirm('ledger-only'),
-          onCancel: () => setDelModal(null),
-        }) : null)
+        archive ? renderArchiveModal(archive, () => setArchive(null)) : null)
     }
 
     // ---- 纯渲染函数（导出于 module.exports，供测试直接调用） ----------------
@@ -2047,6 +2093,37 @@ window.__ModuleLoader__.load({
         }, h('span', {}, '⚠️'), h('span', {}, U.actionError)))
       }
 
+      // 成功提示（如放回待办）
+      if (U.actionNotice) {
+        items.push(h('div', {
+          key: 'action-notice',
+          style: {
+            display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, padding: '7px 10px',
+            borderRadius: 8, fontSize: 12, color: C.success, wordBreak: 'break-all',
+            border: '1px solid color-mix(in srgb, ' + C.success + ' 40%, transparent)',
+            background: 'color-mix(in srgb, ' + C.success + ' 7%, transparent)',
+          },
+        }, h('span', {}, '✅'), h('span', {}, U.actionNotice)))
+      }
+
+      // DEV-026：建队指令注入提示（成功提示主对话已收到，失败降级为普通开始）
+      if (U.teamNotice) {
+        const tn = U.teamNotice
+        const tone = tn.prompted ? C.success : C.warn
+        items.push(h('div', {
+          key: 'team-notice-' + (tn.id || 'x'),
+          style: {
+            display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, padding: '7px 10px',
+            borderRadius: 8, fontSize: 12, color: tone, wordBreak: 'break-all',
+            border: '1px solid color-mix(in srgb, ' + tone + ' 40%, transparent)',
+            background: 'color-mix(in srgb, ' + tone + ' 7%, transparent)',
+          },
+        }, h('span', {}, tn.prompted ? '🤝' : 'ℹ️'),
+          h('span', {}, tn.prompted
+            ? `任务 ${tn.id} 已登记并通知主对话建队执行（面板与主对话同步更新）`
+            : `任务 ${tn.id} 已登记（未注入建队指令，降级为普通开始；可到主对话手动建队）`)))
+      }
+
       // ---- 项目卡：名称 / 路径 / purpose / 新鲜度徽章 / 更新提示
       const fresh = ledger.status && ledger.status.fresh
       const freshLabel = fresh ? '账本新鲜' : '账本过期'
@@ -2103,6 +2180,8 @@ window.__ModuleLoader__.load({
             onEditCancel: U.onTaskEditCancel,
             onPause: U.onTaskPause,
             onResume: U.onTaskResume,
+            onReturnTodo: U.onReturnTodo,
+            returning: U.returningId === t.id,
             working: U.taskWorking,
             onOpenSource: typeof U.onOpenSource === 'function' ? (() => U.onOpenSource(t.type, 'current')) : undefined,
           }))

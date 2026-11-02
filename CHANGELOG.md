@@ -1,3 +1,22 @@
+## [0.7.0] - 2026-11-02
+
+### Added
+- 「开始并建队」按钮（DEV-026）：开始任务时登记账本 + sessionController.prompt 注入建队指令给主对话 agent（mode=queue，失败降级普通开始）——插件只做登记与注入，建队执行由 agent 完成
+- 判断型操作 agent 化（DEV-033）：返回待办/删除按钮注入动作指令给主对话 agent（POST /awf/agent/act），agent 分析未提交改动/修改范围后执行并更新账本，程序不再直接改 todo/current/done.md；通用动作指令构建器 buildActPrompt（start/return-todo/delete）
+- 事件推送（DEV-033 块 B）：GET /awf/events（SSE）+ fs.watch tasks 目录，任何写者（agent/程序/手动）改账本文件即广播，前端 EventSource 订阅立即刷新（替代 15s 轮询，轮询保留兜底）——UI 数据状态驱动，不再关心谁改的账本
+- 项目门禁 compile 纳入 team-prompt / team-start 测试文件（project.yaml compile 命令）
+
+### Changed
+- 步骤条语义（DEV-033）：active 状态映射「认领」而非「实现」——开始任务只登记账本，未认领/方案/实现；进度标签「实现进度」→「进度」
+- 删除交互：从 dry-run 回退清单弹框改为注入 agent 判断（移除 delModal 程序写链路）
+- 插件定位固化（README）：让 agent 开发更规范（判断型写操作由 agent 执行）+ 让用户更方便使用 agent（按钮=意图入口，减少重复输入）
+
+### Fixed
+- sessionController.prompt 必传 AbortSignal（DEV-026 P1）：host 实现首行 throwIfAborted，缺第二参必抛——promptSession 显式传 NEVER_ABORTED_SIGNAL，注入不再恒降级
+- 「deleting is not defined」运行时错误（DEV-033）：删除链路重构后 useCallback 依赖数组残留未定义标识符
+
+---
+
 ## [0.6.0] - 2026-11-02
 
 ### Added

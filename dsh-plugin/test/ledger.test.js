@@ -11,6 +11,7 @@ import {
   parseTodoRows, findBlock, isWhitelistedPath, todayLocal, slugify,
   renderTaskBlock, todoCrud, todoEdit, updateTaskFields, parseBlockFieldMap, blockTitle,
   parseScopeFiles, deleteTask, taskEdit, revertPreview, readSource, parseCheckItems,
+  returnTaskToTodo,
 } from '../src/ledger.js'
 
 test('parseIndex: 解析全局索引表格，忽略表头/分隔/正文行', () => {
@@ -872,4 +873,52 @@ test('ledgerOf: current 任务块带 checkItems（有勾选/无勾选）', async
   })
   const none = led.current.find((c) => c.id === 'DEV-711')
   assert.equal(none.checkItems, null)
+})
+test('returnTaskToTodo: current 块移除并恢复 todo 行（startTask 逆操作）；无块返回 not-found', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'awf-return-'))
+  const awf = join(dir, 'agent-workflow', 'tasks', 'dev')
+  await mkdir(awf, { recursive: true })
+  // 先 startTask 造一个 active 块，再放回
+  await writeFile(join(awf, 'todo.md'), [
+    '# 待开发',
+    '',
+    '| 任务ID | 优先级 | 描述 | 登记日期 |',
+    '|--------|--------|------|----------|',
+    '| DEV-300 | P1 | 回退还任务 | 2026-11-01 |',
+  ].join('\n') + '\n')
+  await writeFile(join(awf, 'current.md'), '# 正在开发\n\n（暂无进行中任务）\n')
+  const started = await startTask({ projectPath: dir, type: 'dev', id: 'DEV-300' })
+  assert.equal(started.ok, true)
+
+  // 放回
+  const r = await returnTaskToTodo({ projectPath: dir, type: 'dev', id: 'DEV-300' })
+  assert.equal(r.ok, true)
+  assert.equal(r.task.id, 'DEV-300')
+  assert.equal(r.task.prio, 'P1')
+  assert.equal(r.task.desc, '回退还任务')
+
+  // current.md 应移除块（无 ## [DEV-300]）
+  const cur = await readFile(join(awf, 'current.md'), 'utf8')
+  assert.ok(!cur.includes('## [DEV-300]'), 'current.md 应移除任务块')
+
+  // todo.md 应恢复行 + 保留表头
+  const todo = await readFile(join(awf, 'todo.md'), 'utf8')
+  assert.ok(todo.includes('| DEV-300 | P1 | 回退还任务 |'), 'todo.md 应恢复该任务行')
+  assert.ok(todo.includes('| 任务ID | 优先级 | 描述 | 登记日期 |'), '表头应保留')
+
+  // 放回后可再次 startTask（闭环）
+  const again = await startTask({ projectPath: dir, type: 'dev', id: 'DEV-300' })
+  assert.equal(again.ok, true)
+  assert.equal(again.task.status, 'active')
+
+  // 无此块 → not-found 且文件不变化
+  const before = await snapshotDir(dir)
+  const miss = await returnTaskToTodo({ projectPath: dir, type: 'dev', id: 'DEV-999' })
+  assert.equal(miss.ok, false)
+  assert.equal(miss.code, 'not-found')
+  assert.deepEqual(await snapshotDir(dir), before)
+
+  // 非法 type / id
+  assert.equal((await returnTaskToTodo({ projectPath: dir, type: 'test', id: 'DEV-300' })).code, 'bad-type')
+  assert.equal((await returnTaskToTodo({ projectPath: dir, type: 'dev', id: 'dev-300' })).code, 'bad-id')
 })
