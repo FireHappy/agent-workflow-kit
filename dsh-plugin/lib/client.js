@@ -2501,6 +2501,9 @@ window.__ModuleLoader__.load({
             // 任务卡恢复单列：步骤条、验收进度和操作区内容高度不同，双列会造成行内卡片错位。
             display: 'flex', flexDirection: 'column',
             gap: 10, width: '100%',
+            // DEV-043：长列表滚动容器——任务多时不撑高面板，区域内滚动
+            maxHeight: 320, overflowY: 'auto',
+            paddingRight: 4,
           },
         }, taskCards))
       } else {
@@ -2531,7 +2534,13 @@ window.__ModuleLoader__.load({
           h('span', { style: { fontSize: 12, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType)),
           h('span', { style: { fontSize: 11, color: C.faint } }, String(typeRows.length))))
         if (typeRows.length > 0) {
-          cardChildren.push(h('div', { key: 'rows' },
+          cardChildren.push(h('div', {
+            key: 'rows',
+            style: {
+              // DEV-043：待办长列表滚动容器（同当前任务）
+              maxHeight: 280, overflowY: 'auto', paddingRight: 4,
+            },
+          },
             typeRows.map((r) => {
               const key = r.type + ':' + r.id
               return h(TodoRow, { key, row: r, onOpen: U.onOpenSource })
