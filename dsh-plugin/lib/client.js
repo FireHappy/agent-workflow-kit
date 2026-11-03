@@ -2577,7 +2577,8 @@ window.__ModuleLoader__.load({
 
       items.push(h('div', {
         key: 'foot',
-        style: Object.assign(muted({ marginTop: 10 }), { textAlign: 'center' }),
+        // DEV-043：底部提示文字提亮（dim→sub），与待办/最近完成一致
+        style: Object.assign({ color: C.sub, fontSize: 12, lineHeight: 1.5, marginTop: 10 }, { textAlign: 'center' }),
       },
         `账本数据来自 agent-workflow/tasks/*，每 ${POLL_MS / 1000}s 自动刷新`))
 
