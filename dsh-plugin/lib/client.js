@@ -40,6 +40,27 @@ window.__ModuleLoader__.load({
 
     const POLL_MS = 5000
     const LS_KEY = 'dsh-awf-dashboard.project'
+    // DEV-108：跟随宿主对话框字体大小——读取宿主根元素 font-size 计算缩放系数。
+    //   用户在 DSH 设置里调大/调小字体 → 宿主 root font-size 变化 → 本面板字号等比缩放。
+    //   基准按宿主默认 14px；F(n) 返回缩放后字号（保留整数）。
+    let HOST_FONT_SCALE = 1
+    try {
+      const rootFont = typeof window !== 'undefined' && window.getComputedStyle
+        ? parseFloat(window.getComputedStyle(document.documentElement).fontSize)
+        : NaN
+      if (Number.isFinite(rootFont) && rootFont > 0) HOST_FONT_SCALE = rootFont / 14
+    } catch { /* 宿主未就绪时保持 1 */ }
+    // DEV-108：宿主字体变化时同步（MutationObserver 监听 <html> 属性/子树变化，
+    //   宿主调对话框字体大小通常改 root font-size 或 class；变化后重读 scale 并触发重渲染）
+    const refreshHostFontScale = () => {
+      try {
+        const rootFont = window.getComputedStyle
+          ? parseFloat(window.getComputedStyle(document.documentElement).fontSize)
+          : NaN
+        if (Number.isFinite(rootFont) && rootFont > 0) HOST_FONT_SCALE = rootFont / 14
+      } catch { /* ignore */ }
+    }
+    const F = (n) => Math.round(n * HOST_FONT_SCALE)
     // DEV-042：自动回填已停用——面板不再在账本刷新后自动派发回填子代理写开发进度
     //      （用户：开发中的任务无需反复填写进度，完成后归档即可）。保留节流变量仅为
     //      兼容旧客户端代码引用，不再有自动调用。
@@ -288,7 +309,7 @@ window.__ModuleLoader__.load({
     // ---- 工具 -------------------------------------------------------------
 
     const row = (extra) => Object.assign({ display: 'flex', alignItems: 'center', gap: 6 }, extra || {})
-    const muted = (extra) => Object.assign({ color: C.dim, fontSize: 12, lineHeight: 1.5 }, extra || {})
+    const muted = (extra) => Object.assign({ color: C.dim, fontSize: F(12), lineHeight: 1.5 }, extra || {})
 
     const cardStyle = {
       border: '1px solid ' + C.border,
@@ -299,7 +320,7 @@ window.__ModuleLoader__.load({
     }
 
     const buttonStyle = (primary) => ({
-      fontSize: 11, padding: '3px 12px', borderRadius: 999, cursor: 'pointer',
+      fontSize: F(11), padding: '3px 12px', borderRadius: 999, cursor: 'pointer',
       border: '1px solid ' + (primary ? 'color-mix(in srgb, ' + C.accent + ' 55%, transparent)' : C.border),
       background: primary ? 'color-mix(in srgb, ' + C.accent + ' 14%, transparent)' : C.surface,
       color: primary ? C.accent : C.sub,
@@ -309,7 +330,7 @@ window.__ModuleLoader__.load({
 
     /** 危险实心按钮：删除并回退修改（destroy 语义）。 */
     const dangerSolid = {
-      fontSize: 12, padding: '5px 14px', borderRadius: C.radiusSm, cursor: 'pointer',
+      fontSize: F(12), padding: '5px 14px', borderRadius: C.radiusSm, cursor: 'pointer',
       border: '1px solid ' + C.error, background: C.error, color: '#fff',
       fontWeight: 700, lineHeight: '18px', whiteSpace: 'nowrap',
       transition: 'opacity .15s ease',
@@ -317,7 +338,7 @@ window.__ModuleLoader__.load({
 
     /** 危险文字按钮：当前任务卡上的「删除」。 */
     const dangerTextStyle = {
-      fontSize: 11, padding: '2px 10px', borderRadius: 999, cursor: 'pointer',
+      fontSize: F(11), padding: '2px 10px', borderRadius: 999, cursor: 'pointer',
       border: '1px solid color-mix(in srgb, ' + C.error + ' 45%, transparent)',
       background: 'color-mix(in srgb, ' + C.error + ' 8%, transparent)',
       color: C.error, fontWeight: 600, lineHeight: '16px', whiteSpace: 'nowrap',
@@ -325,7 +346,7 @@ window.__ModuleLoader__.load({
 
     /** 表单输入（含 select）：主题令牌 + 紧凑尺寸。 */
     const inputStyle = {
-      fontSize: 12, padding: '3px 8px', borderRadius: C.radiusSm,
+      fontSize: F(12), padding: '3px 8px', borderRadius: C.radiusSm,
       background: C.surface, color: C.text,
       border: '1px solid ' + C.border, outline: 'none',
     }
@@ -334,7 +355,7 @@ window.__ModuleLoader__.load({
      * 暂停/开始按钮固定最小宽度 + busy 文字用同宽占位，避免「暂停」→「暂停中…」
      * 文字变长导致按钮变宽、卡片底部行 layout 跳动（用户反馈「背景文字跳动」）。 */
     const tinyBtn = (busy) => Object.assign(buttonStyle(), {
-      fontSize: 11, padding: '2px 10px', minWidth: 68,
+      fontSize: F(11), padding: '2px 10px', minWidth: 68,
       opacity: busy ? 0.4 : 1, cursor: busy ? 'default' : 'pointer',
     })
 
@@ -414,9 +435,9 @@ window.__ModuleLoader__.load({
             background: 'linear-gradient(180deg, ' + C.accent + ', ' + C.success + ')',
           },
         }),
-        h('span', { style: { fontSize: 12, fontWeight: 700, letterSpacing: '.02em', color: C.text } }, label),
+        h('span', { style: { fontSize: F(12), fontWeight: 700, letterSpacing: '.02em', color: C.text } }, label),
         count != null
-          ? h('span', { style: { fontSize: 11, color: C.faint, background: C.hover, padding: '0 6px', borderRadius: 999, lineHeight: '16px' } }, String(count))
+          ? h('span', { style: { fontSize: F(11), color: C.faint, background: C.hover, padding: '0 6px', borderRadius: 999, lineHeight: '16px' } }, String(count))
           : null)
     }
 
@@ -477,16 +498,16 @@ window.__ModuleLoader__.load({
               padding: '9px 14px', borderBottom: '1px solid ' + C.hairline, flexShrink: 0,
             },
           },
-            h('div', { style: { fontSize: 13, fontWeight: 800, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
+            h('div', { style: { fontSize: F(13), fontWeight: 800, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
             h('button', {
               onClick: onClose,
               style: Object.assign(buttonStyle(), {
-                padding: '0 7px', fontSize: 11, lineHeight: '17px', flexShrink: 0,
+                padding: '0 7px', fontSize: F(11), lineHeight: '17px', flexShrink: 0,
                 background: 'transparent', borderColor: 'transparent',
               }),
             }, '✕')),
           h('div', {
-            style: { padding: '12px 14px', overflowY: 'auto', fontSize: 12, color: C.text, flex: 1, minHeight: 0 },
+            style: { padding: '12px 14px', overflowY: 'auto', fontSize: F(12), color: C.text, flex: 1, minHeight: 0 },
           }, children),
           // DEV-108：右下角拖拽手柄（nwse-resize 光标 + 斜纹三角）
           h('div', {
@@ -899,7 +920,7 @@ window.__ModuleLoader__.load({
           marginTop: 4, marginBottom: 6, padding: '7px 9px', borderRadius: C.radiusSm,
           border: '1px solid color-mix(in srgb, ' + C.warn + ' 45%, transparent)',
           background: 'color-mix(in srgb, ' + C.warn + ' 7%, transparent)',
-          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 11,
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: F(11),
         },
       },
         h('span', { style: row({ gap: 6, alignItems: 'center', flexWrap: 'wrap' }) },
@@ -908,7 +929,7 @@ window.__ModuleLoader__.load({
             disabled: vBusy,
             title: '程序运行 [cmd] 命令类验收标准并写入带证据勾选（命令/退出码/时间/摘要，不写判断型内容）',
             style: Object.assign(buttonStyle(true), {
-              padding: '2px 9px', fontSize: 11,
+              padding: '2px 9px', fontSize: F(11),
               opacity: vBusy ? 0.4 : 1, cursor: vBusy ? 'default' : 'pointer',
             }),
           }, '⚙ 程序验证命令类标准'),
@@ -944,10 +965,10 @@ window.__ModuleLoader__.load({
           marginBottom: 3,
         },
       },
-        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text } }, t.id || '?'),
+        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: F(11), color: C.text } }, t.id || '?'),
         badgeRow)
 
-      const meta = h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: C.faint, marginTop: 3 } },
+      const meta = h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: F(11), color: C.faint, marginTop: 3 } },
         t.owner
           ? h('span', { style: row({ gap: 4 }) },
               h('span', { style: { color: C.dim } }, '👤'), h('span', {}, t.owner))
@@ -962,14 +983,14 @@ window.__ModuleLoader__.load({
         onClick: clickable ? () => onOpenSource(t.type || 'dev', 'current', t) : undefined,
         style: {
           display: 'flex', flexDirection: 'column', gap: 0,
-          padding: '7px 2px', borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+          padding: '7px 2px', borderBottom: '1px solid ' + C.hairline, fontSize: F(12),
           cursor: clickable ? 'pointer' : 'default',
           borderRadius: 6,
           transition: 'background .15s ease',
         },
       },
         rowHead,
-        h('div', { style: { fontSize: 13, fontWeight: 600, color: C.text, lineHeight: 1.45 } },
+        h('div', { style: { fontSize: F(13), fontWeight: 600, color: C.text, lineHeight: 1.45 } },
           t.title || '（无标题）'),
         meta)
     }
@@ -983,13 +1004,13 @@ window.__ModuleLoader__.load({
         title: clickable ? '点击查看归档' : undefined,
         style: {
           display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px',
-          borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+          borderBottom: '1px solid ' + C.hairline, fontSize: F(12),
           cursor: clickable ? 'pointer' : 'default',
         },
       },
-        h('span', { style: { color: C.success, fontSize: 11, flexShrink: 0, fontWeight: 700 } }, '✓'),
-        h('span', { style: { fontFamily: C.mono, fontSize: 11, color: C.sub, flexShrink: 0 } }, r.date),
-        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text, flexShrink: 0 } }, r.id),
+        h('span', { style: { color: C.success, fontSize: F(11), flexShrink: 0, fontWeight: 700 } }, '✓'),
+        h('span', { style: { fontFamily: C.mono, fontSize: F(11), color: C.sub, flexShrink: 0 } }, r.date),
+        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: F(11), color: C.text, flexShrink: 0 } }, r.id),
         h('span', {
           style: {
             // DEV-043：描述文字提亮（dim→sub），最近完成行更易读
@@ -997,7 +1018,7 @@ window.__ModuleLoader__.load({
             whiteSpace: 'nowrap', flex: 1, minWidth: 0,
           },
         }, r.desc || '—'),
-        clickable ? h('span', { style: { color: C.sub, fontSize: 12, flexShrink: 0 } }, '›') : null)
+        clickable ? h('span', { style: { color: C.sub, fontSize: F(12), flexShrink: 0 } }, '›') : null)
     }
 
     /**
@@ -1018,14 +1039,14 @@ window.__ModuleLoader__.load({
         onClick: clickable ? () => onOpen(row.type || 'dev', 'todo', row) : undefined,
         style: {
           display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px',
-          borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+          borderBottom: '1px solid ' + C.hairline, fontSize: F(12),
           cursor: clickable ? 'pointer' : 'default',
           borderRadius: 6,
           transition: 'background .15s ease',
         },
       },
         h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(row.type)),
-        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text, flexShrink: 0 } }, row.id),
+        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: F(11), color: C.text, flexShrink: 0 } }, row.id),
         h('span', {
           style: {
             // DEV-043：待办描述提亮（dim→sub），与最近完成一致更易读
@@ -1058,7 +1079,7 @@ window.__ModuleLoader__.load({
           className: 'awf-toggle-btn' + (value === v ? ' awf-toggle-btn-active' : ''),
           onClick: () => onChange(v),
           style: {
-            fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+            fontSize: F(11), padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
             display: 'inline-flex', alignItems: 'center', gap: 5,
             border: '1px solid ' + (value === v ? 'color-mix(in srgb, ' + C.accent + ' 45%, transparent)' : 'transparent'),
             background: value === v ? C.hoverAccent : 'transparent',
@@ -1072,7 +1093,7 @@ window.__ModuleLoader__.load({
                 key: 'count-' + v,
                 className: 'awf-toggle-count',
                 style: {
-                  fontSize: 10, lineHeight: '15px', fontWeight: 700, minWidth: 16,
+                  fontSize: F(10), lineHeight: '15px', fontWeight: 700, minWidth: 16,
                   textAlign: 'center', borderRadius: 999, padding: '0 4px',
                   background: value === v
                     ? 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)'
@@ -1102,7 +1123,7 @@ window.__ModuleLoader__.load({
       // DEV-037：进行中（active/verify/review/handoff）且未满 100% 时挂流光动画类
       const live = !!(LIVE_STATUS[status]) && pct > 0 && pct < 100
       return h('div', { className: 'awf-check', style: { marginBottom: 6 } },
-        h('div', { style: row({ gap: 6, fontSize: 11, color: C.sub }) },
+        h('div', { style: row({ gap: 6, fontSize: F(11), color: C.sub }) },
           h('span', { style: { fontWeight: 600, color: C.text } }, label),
           h('span', {}, String(done) + '/' + String(total) + ' · ' + String(pct) + '%')),
         h('div', {
@@ -1172,10 +1193,10 @@ window.__ModuleLoader__.load({
           return h('span', { className: 'awf-dot', style: { background: '#fff' } })
         }
         if (cur && paused) {
-          return h('span', { style: { fontSize: 11, fontWeight: 900, lineHeight: 1 } }, '⏸')
+          return h('span', { style: { fontSize: F(11), fontWeight: 900, lineHeight: 1 } }, '⏸')
         }
         if (done) {
-          return h('span', { style: { fontSize: 11, fontWeight: 900, lineHeight: 1 } }, '✓')
+          return h('span', { style: { fontSize: F(11), fontWeight: 900, lineHeight: 1 } }, '✓')
         }
         // 未到：空心节点不放内容
         return null
@@ -1219,16 +1240,16 @@ window.__ModuleLoader__.load({
         },
       },
         h('div', { style: Object.assign({ justifyContent: 'space-between' }, row({ marginBottom: 8 })) },
-          h('span', { style: row({ gap: 6, fontSize: 11, fontWeight: 700, color: C.dim }) },
+          h('span', { style: row({ gap: 6, fontSize: F(11), fontWeight: 700, color: C.dim }) },
             h('span', { style: { color: type.color } }, type.label),
             h('span', {}, '流程')),
-          h('span', { style: row({ gap: 8, fontSize: 11 }) },
+          h('span', { style: row({ gap: 8, fontSize: F(11) }) },
             h('span', { style: { color: C.success, fontWeight: 600, whiteSpace: 'nowrap' } },
               '✓ 已完成 ' + index),
             paused
-              ? h('span', { style: { fontSize: 11, fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
+              ? h('span', { style: { fontSize: F(11), fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
                   '已暂停 · ' + activeStep.label)
-              : h('span', { style: row({ gap: 5, fontSize: 11, color: C.accent, fontWeight: 600, whiteSpace: 'nowrap' }) },
+              : h('span', { style: row({ gap: 5, fontSize: F(11), color: C.accent, fontWeight: 600, whiteSpace: 'nowrap' }) },
                   // DEV-037：进行中指示点（呼吸），与当前步骤文字联动
                   h('span', { className: 'awf-live-dot' }),
                   h('span', {}, '当前 · ' + activeStep.label)),
@@ -1251,7 +1272,7 @@ window.__ModuleLoader__.load({
           background: 'color-mix(in srgb, ' + C.accent + ' 6%, transparent)',
         },
       },
-        h('div', { style: { fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 7 } }, '＋ 新增待办行'),
+        h('div', { style: { fontSize: F(12), fontWeight: 700, color: C.text, marginBottom: 7 } }, '＋ 新增待办行'),
         h('div', { style: row({ gap: 6, flexWrap: 'wrap' }) },
           h('select', {
             value: f.type || 'dev', disabled: busy,
@@ -1272,7 +1293,7 @@ window.__ModuleLoader__.load({
           style: Object.assign({}, inputStyle, { width: '100%', marginTop: 6, boxSizing: 'border-box' }),
         }),
         f.error
-          ? h('div', { style: { marginTop: 6, fontSize: 11, color: C.error, wordBreak: 'break-all' } }, '⚠️ ' + f.error)
+          ? h('div', { style: { marginTop: 6, fontSize: F(11), color: C.error, wordBreak: 'break-all' } }, '⚠️ ' + f.error)
           : null,
         h('div', { style: row({ gap: 6, justifyContent: 'flex-end', marginTop: 8 }) },
           h('button', {
@@ -1374,7 +1395,7 @@ window.__ModuleLoader__.load({
         const tabBtn = (label, active, onClick) => h('button', {
           onClick: () => onClick && onClick(),
           style: {
-            fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+            fontSize: F(11), padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
             border: '1px solid ' + (active ? C.accent : 'transparent'),
             background: active ? C.hoverAccent : 'transparent',
             color: active ? C.text : C.sub,
@@ -1386,9 +1407,9 @@ window.__ModuleLoader__.load({
           onClose, width: 640,
         },
           s.busy
-            ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: 12 } }, '加载中…')
+            ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: F(12) } }, '加载中…')
             : s.error
-              ? h('div', { style: { padding: '12px', color: C.error, fontSize: 12, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
+              ? h('div', { style: { padding: '12px', color: C.error, fontSize: F(12), wordBreak: 'break-all' } }, '⚠️ ' + s.error)
               : data
                 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
                     // 顶部徽章行（对齐归档查看）：类型 / 优先级 / 文件名
@@ -1398,10 +1419,10 @@ window.__ModuleLoader__.load({
                       meta.prio ? h(Pill, { color: prioStyle.color, variant: 'soft', dataPrio: meta.prio }, meta.prio) : null,
                       h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, s.file + '.md')),
                     // 任务描述（粗体，对齐归档查看）
-                    h('div', { style: { fontSize: 13, fontWeight: 700, color: C.text, lineHeight: 1.5 } },
+                    h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.text, lineHeight: 1.5 } },
                       metaTitle || '（无描述）'),
                     // 小节标题：任务块原文（markdown）
-                    h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
+                    h('div', { style: { fontSize: F(12), fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
                       '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
                     // DEV-106：阅读/编辑 tab 条
                     h('div', { style: { display: 'flex', gap: 4, marginBottom: 2 } },
@@ -1413,7 +1434,7 @@ window.__ModuleLoader__.load({
                             style: {
                               margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 340,
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              fontSize: 12, lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
+                              fontSize: F(12), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
                             // 渲染结果以 HTML 注入（mdToHtml 已转义，安全）
                           }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(data.content || '') } }))
@@ -1424,7 +1445,7 @@ window.__ModuleLoader__.load({
                             spellCheck: false,
                             style: {
                               margin: 0, padding: '10px 12px', borderRadius: 8,
-                              fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
+                              fontFamily: C.mono, fontSize: F(12), lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
                               maxHeight: 560, minHeight: 340, overflowY: 'auto',
@@ -1433,7 +1454,7 @@ window.__ModuleLoader__.load({
                           }),
                           h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' } },
                             s.saveError
-                              ? h('span', { style: { fontSize: 11, color: C.error, marginRight: 'auto' } }, '⚠️ ' + s.saveError)
+                              ? h('span', { style: { fontSize: F(11), color: C.error, marginRight: 'auto' } }, '⚠️ ' + s.saveError)
                               : null,
                             h('button', {
                               onClick: onEditCancel,
@@ -1445,7 +1466,7 @@ window.__ModuleLoader__.load({
                               title: dirty ? '保存修改到 ' + s.file + '.md' : '未修改',
                               style: Object.assign(buttonStyle({ color: C.accent }), { opacity: saving || !dirty ? 0.5 : 1, cursor: saving || !dirty ? 'default' : 'pointer' }),
                             }, saving ? '保存中…' : '保存'))))
-                : h('div', { style: { padding: '12px', color: C.dim, fontSize: 12 } }, '无内容'))
+                : h('div', { style: { padding: '12px', color: C.dim, fontSize: F(12) } }, '无内容'))
     }
 
     /** 删除任务二次确认弹框。state: {task, view, busy, error}；handlers: {onRollback, onLedgerOnly, onCancel}。 */
@@ -1457,7 +1478,7 @@ window.__ModuleLoader__.load({
       const busy = !!s.busy
 
       const errorLine = s.error
-        ? h('div', { key: 'err', style: { fontSize: 12, color: C.error, marginTop: 10, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
+        ? h('div', { key: 'err', style: { fontSize: F(12), color: C.error, marginTop: 10, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
         : null
 
       const actionButtons = (withRollback) => h('div', {
@@ -1495,7 +1516,7 @@ window.__ModuleLoader__.load({
             },
           },
             h('span', { style: { fontSize: 15 } }, '⚠️'),
-            h('span', { style: { fontSize: 12.5, color: C.error, fontWeight: 600 } }, '无法获取回退文件清单')),
+            h('span', { style: { fontSize: F(12), color: C.error, fontWeight: 600 } }, '无法获取回退文件清单')),
           errorLine,
           h('div', { style: { textAlign: 'center', marginTop: 14 } },
             h('button', { onClick: H.onCancel, style: buttonStyle() }, '取消')))
@@ -1510,9 +1531,9 @@ window.__ModuleLoader__.load({
           },
             h('span', { style: { fontSize: 15 } }, '⚠️'),
             h('span', {
-              style: { fontSize: 12.5, color: C.error, fontWeight: 700, lineHeight: 1.5 },
+              style: { fontSize: F(12), color: C.error, fontWeight: 700, lineHeight: 1.5 },
             }, '删除后将回退这些文件的未提交修改，不可恢复')),
-          h('div', { style: { fontSize: 12, color: C.sub, margin: '10px 0 6px' } },
+          h('div', { style: { fontSize: F(12), color: C.sub, margin: '10px 0 6px' } },
             '将回退以下 ' + view.files.length + ' 个文件：'),
           h('div', { style: { border: '1px solid ' + C.border, borderRadius: 8, overflow: 'hidden' } },
             view.files.map((f, i) => {
@@ -1520,7 +1541,7 @@ window.__ModuleLoader__.load({
               return h('div', {
                 key: i,
                 style: {
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '5px 9px', fontSize: 12,
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '5px 9px', fontSize: F(12),
                   borderBottom: i < view.files.length - 1 ? '1px solid ' + C.hairline : 'none',
                   background: C.surface,
                 },
@@ -1528,7 +1549,7 @@ window.__ModuleLoader__.load({
                 h(Pill, { color: st.color }, fileStatusLabel(f.status)),
                 h('span', {
                   style: {
-                    fontFamily: C.mono, fontSize: 11, color: C.text,
+                    fontFamily: C.mono, fontSize: F(11), color: C.text,
                     wordBreak: 'break-all', flex: 1, minWidth: 0,
                   },
                 }, f.path))
@@ -1546,10 +1567,10 @@ window.__ModuleLoader__.load({
           },
             h('span', { style: { fontSize: 15 } }, '⚠️'),
             h('div', {},
-              h('div', { style: { fontSize: 12.5, color: C.warn, fontWeight: 700 } }, '无法回退未提交修改'),
-              h('div', { style: { fontSize: 12, color: C.sub, marginTop: 3, lineHeight: 1.5 } },
+              h('div', { style: { fontSize: F(12), color: C.warn, fontWeight: 700 } }, '无法回退未提交修改'),
+              h('div', { style: { fontSize: F(12), color: C.sub, marginTop: 3, lineHeight: 1.5 } },
                 deleteReasonText(view.reason)))),
-          h('div', { style: { fontSize: 12, color: C.sub, marginTop: 10, lineHeight: 1.5 } },
+          h('div', { style: { fontSize: F(12), color: C.sub, marginTop: 10, lineHeight: 1.5 } },
             '仍可「仅删除账本」：跳过回退，只从账本中移除该任务块（done.md 记「已撤销」）。'),
           errorLine,
           actionButtons(false))
@@ -1566,7 +1587,7 @@ window.__ModuleLoader__.load({
         body = h('div', { style: { textAlign: 'center', color: C.dim, padding: '14px 0' } }, '加载归档…')
       } else if (s.error) {
         body = h('div', { style: { textAlign: 'center', color: C.error, padding: '10px 0' } },
-          h('div', { style: { fontSize: 13, fontWeight: 700 } }, '归档读取失败'),
+          h('div', { style: { fontSize: F(13), fontWeight: 700 } }, '归档读取失败'),
           h('div', { style: muted({ marginTop: 6, wordBreak: 'break-all' }) }, s.error))
       } else if (s.data) {
         const doneRow = s.data.row || {}
@@ -1576,18 +1597,18 @@ window.__ModuleLoader__.load({
             h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(s.data.type)),
             doneRow.prio ? h(Pill, { color: (PRIO_STYLE[doneRow.prio] || { color: C.faint }).color, variant: 'soft', dataPrio: doneRow.prio }, doneRow.prio) : null,
             doneRow.date ? h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, '完成于 ' + doneRow.date) : null),
-          h('div', { style: { fontSize: 13, fontWeight: 700, color: C.text, marginTop: 8, lineHeight: 1.5 } },
+          h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.text, marginTop: 8, lineHeight: 1.5 } },
             doneRow.desc || '（无描述）'),
-          h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
+          h('div', { style: { fontSize: F(12), fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
             '任务块原文（markdown）'),
-          h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
+          h('div', { style: { fontSize: F(12), fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
             '任务块原文（markdown）'),
           // DEV-106：归档查看同样走 md 渲染（与源文件面板阅读态一致）
           h('div', {
             style: {
               margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 320,
               background: C.raised, border: '1px solid ' + C.hairline,
-              fontSize: 12, lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
+              fontSize: F(12), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
             },
           }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(s.data.block || '（该任务归档时未保留详细任务块，仅摘要）') } })),
           h('div', { style: { textAlign: 'center', marginTop: 12 } },
@@ -1619,10 +1640,10 @@ window.__ModuleLoader__.load({
         },
       },
         h('span', { style: { fontSize: 24, lineHeight: 1 } }, icon),
-        h('div', { style: { fontWeight: 800, fontSize: 13, color: C.text, marginTop: 10 } }, title),
+        h('div', { style: { fontWeight: 800, fontSize: F(13), color: C.text, marginTop: 10 } }, title),
         desc ? h('div', {
           // DEV-043：引导卡说明文字提亮（muted/dim→sub），与待办/最近完成/底部提示一致
-          style: { color: C.sub, fontSize: 12, lineHeight: 1.5, marginTop: 6, maxWidth: 260 },
+          style: { color: C.sub, fontSize: F(12), lineHeight: 1.5, marginTop: 6, maxWidth: 260 },
         }, desc) : null,
         extra || null,
         action || null)
@@ -1655,13 +1676,13 @@ window.__ModuleLoader__.load({
                 onClick: busy ? undefined : onUpgrade,
                 disabled: busy,
                 style: Object.assign(buttonStyle(true), {
-                  marginTop: 12, padding: '5px 16px', fontSize: 12,
+                  marginTop: 12, padding: '5px 16px', fontSize: F(12),
                   opacity: busy ? 0.65 : 1, cursor: busy ? 'wait' : 'pointer',
                 }),
               }, spin, busy ? '更新中…' : '更新/整理工作流')
             : null,
           extra: error
-            ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
+            ? h('div', { style: { marginTop: 10, fontSize: F(12), color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
                 '⚠️ ' + error)
             : null,
         })
@@ -1684,7 +1705,7 @@ window.__ModuleLoader__.load({
           title: '初始化中…',
           desc: '已派发 agent 子代理为项目生成完整工作流框架（读取项目上下文后配置 project.yaml、工作流文件与初始账本），完成后面板自动刷新。',
           extra: error
-            ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
+            ? h('div', { style: { marginTop: 10, fontSize: F(12), color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
                 '⚠️ ' + error)
             : null,
         })
@@ -1698,13 +1719,13 @@ window.__ModuleLoader__.load({
               onClick: busy ? undefined : onInit,
               disabled: busy,
               style: Object.assign(buttonStyle(true), {
-                marginTop: 12, padding: '5px 16px', fontSize: 12,
+                marginTop: 12, padding: '5px 16px', fontSize: F(12),
                 opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
               }),
             }, '初始化工作流（agent 配置）')
           : null,
         extra: error
-          ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
+          ? h('div', { style: { marginTop: 10, fontSize: F(12), color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
               '⚠️ ' + error)
           : null,
       })
@@ -1715,6 +1736,21 @@ window.__ModuleLoader__.load({
     function Dashboard(p) {
       const props = p || {}
       const anchorRoot = useAnchorRoot(props)
+
+      // DEV-108：跟随宿主字体——root 字号变化时刷新 scale 并强制重渲染
+      const [, forceFontTick] = useState(0)
+      useEffect(() => {
+        refreshHostFontScale()
+        if (typeof MutationObserver === 'undefined') return undefined
+        const onMut = () => {
+          const before = HOST_FONT_SCALE
+          refreshHostFontScale()
+          if (HOST_FONT_SCALE !== before) forceFontTick((t) => t + 1)
+        }
+        const obs = new MutationObserver(onMut)
+        obs.observe(document.documentElement, { attributes: true, childList: true, subtree: true, attributeFilter: ['class', 'style', 'data-font-size'] })
+        return () => obs.disconnect()
+      }, [])
 
       const [projects, setProjects] = useState(null)
       const [indexReady, setIndexReady] = useState(false)
@@ -2457,7 +2493,7 @@ window.__ModuleLoader__.load({
 
       return h('div', {
         style: {
-          fontSize: 13, color: C.text, height: '100%', overflowY: 'auto',
+          fontSize: F(13), color: C.text, height: '100%', overflowY: 'auto',
           padding: '12px 12px 20px', boxSizing: 'border-box',
         },
       },
@@ -2498,7 +2534,7 @@ window.__ModuleLoader__.load({
       }
       if (canRegister) {
         extras.push(h('label', {
-          style: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12, color: C.text, cursor: 'pointer' },
+          style: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: F(12), color: C.text, cursor: 'pointer' },
         },
           h('input', {
             type: 'checkbox',
@@ -2518,7 +2554,7 @@ window.__ModuleLoader__.load({
         }, '登记当前项目'))
       }
       if (U.regError) {
-        extras.push(h('div', { style: { marginTop: 8, fontSize: 12, color: C.error } }, U.regError))
+        extras.push(h('div', { style: { marginTop: 8, fontSize: F(12), color: C.error } }, U.regError))
       }
       return h(EmptyState, {
         icon: '🗂️',
@@ -2541,7 +2577,7 @@ window.__ModuleLoader__.load({
       if (vs.status === 'latest') {
         return h('div', {
           style: Object.assign(muted({ marginBottom: 8 }), {
-            fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+            fontSize: F(11), display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
           }),
         },
           h('span', { style: { color: C.success } }, '●'),
@@ -2552,26 +2588,26 @@ window.__ModuleLoader__.load({
         return h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 8px',
-            fontSize: 12, borderRadius: C.radiusSm, flexWrap: 'wrap',
+            fontSize: F(12), borderRadius: C.radiusSm, flexWrap: 'wrap',
             background: 'color-mix(in srgb, ' + C.error + ' 10%, transparent)',
             color: C.text, border: '1px solid ' + C.error,
           },
         },
           h('span', { style: { color: C.error } }, '⚠'),
           h('span', null, `工作流可升级：${vs.installed || vs.scaffold || '未知'} → ${vs.upgradeTo || '最新'}`),
-          U.upgrading ? h('span', { style: { fontSize: 11, color: C.success } }, '升级指令已发给 agent，完成后自动刷新')
+          U.upgrading ? h('span', { style: { fontSize: F(11), color: C.success } }, '升级指令已发给 agent，完成后自动刷新')
             : typeof U.onUpgrade === 'function'
               ? h('button', {
                   onClick: U.onUpgrade,
                   style: Object.assign(buttonStyle(true), {
-                    padding: '2px 10px', minHeight: 0, fontSize: 12, cursor: 'pointer',
+                    padding: '2px 10px', minHeight: 0, fontSize: F(12), cursor: 'pointer',
                   }),
                 }, '去升级')
               : null,
-          U.upError ? h('div', { style: { fontSize: 11, color: C.error, width: '100%' } }, U.upError) : null)
+          U.upError ? h('div', { style: { fontSize: F(11), color: C.error, width: '100%' } }, U.upError) : null)
       }
       return h('div', {
-        style: Object.assign(muted({ marginBottom: 8 }), { fontSize: 11 }),
+        style: Object.assign(muted({ marginBottom: 8 }), { fontSize: F(11) }),
       }, '未检测到版本源（登记 agent-workflow-kit 项目后可对比框架版本）')
     }
 
@@ -2599,7 +2635,7 @@ window.__ModuleLoader__.load({
           key: 'action-error',
           style: {
             display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, padding: '7px 10px',
-            borderRadius: 8, fontSize: 12, color: C.error, wordBreak: 'break-all',
+            borderRadius: 8, fontSize: F(12), color: C.error, wordBreak: 'break-all',
             border: '1px solid color-mix(in srgb, ' + C.error + ' 40%, transparent)',
             background: 'color-mix(in srgb, ' + C.error + ' 7%, transparent)',
           },
@@ -2620,7 +2656,7 @@ window.__ModuleLoader__.load({
               : (vs.status === 'outdated' ? '工作流可升级：' + (vs.installed || vs.scaffold || '?') + ' → ' + (vs.upgradeTo || '最新') + '（点击升级）' : '框架版本'),
             style: {
               display: 'inline-flex', alignItems: 'center', gap: 4,
-              fontSize: 11, color: vs.status === 'outdated' ? C.warn : C.dim,
+              fontSize: F(11), color: vs.status === 'outdated' ? C.warn : C.dim,
               background: C.surface,
               border: '1px solid color-mix(in srgb, ' + (vs.status === 'outdated' ? C.warn : C.border) + ' 55%, transparent)',
               borderRadius: C.radiusSm, padding: '1px 7px', flexShrink: 0, fontWeight: 600,
@@ -2657,7 +2693,7 @@ window.__ModuleLoader__.load({
             marginTop: 3, minWidth: 0,
           },
         },
-          h('div', { style: { fontFamily: C.mono, fontSize: 11, color: C.faint, wordBreak: 'break-all', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          h('div', { style: { fontFamily: C.mono, fontSize: F(11), color: C.faint, wordBreak: 'break-all', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             proj.path || ''),
           copyBtn)))
 
@@ -2687,7 +2723,7 @@ window.__ModuleLoader__.load({
         items.push(h('div', {
           key: 'cur-none',
           style: {
-            color: C.faint, fontSize: 12, textAlign: 'center',
+            color: C.faint, fontSize: F(12), textAlign: 'center',
             padding: '10px 0', borderBottom: '1px solid ' + C.hairline,
           },
         }, '当前无进行中任务 · 全部空闲'))
@@ -2714,7 +2750,7 @@ window.__ModuleLoader__.load({
           borderTop: '1px solid ' + C.hairline,
         },
       },
-        h('span', { style: { fontSize: 12, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType))))
+        h('span', { style: { fontSize: F(12), fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType))))
       if (typeRows.length > 0) {
         cardChildren.push(h('div', {
           key: 'rows',
@@ -2732,7 +2768,7 @@ window.__ModuleLoader__.load({
           key: 'rows-empty',
           style: {
             padding: '10px 0', textAlign: 'center',
-            color: C.faint, fontSize: 12,
+            color: C.faint, fontSize: F(12),
           },
         }, '该类型暂无未开始任务'))
       }
@@ -2768,7 +2804,7 @@ window.__ModuleLoader__.load({
     }
 
     function TabTitle() {
-      return h('span', { style: { fontWeight: 600, fontSize: 12 } }, 'Agent Workflow')
+      return h('span', { style: { fontWeight: 600, fontSize: F(12) } }, 'Agent Workflow')
     }
 
     // ---- 插件体 -----------------------------------------------------------
