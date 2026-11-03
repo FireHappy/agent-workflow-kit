@@ -964,13 +964,19 @@ window.__ModuleLoader__.load({
      * 待办行（DEV-044 对齐「最近完成」轻量行风格）：只读展示 类型/ID/描述/优先级，
      * 无任何操作按钮（含源文件）。
      */
-    function TodoRow({ row }) {
+    function TodoRow({ row, onOpen }) {
       const typeStyle = TYPE_STYLE[row.type] || { color: C.faint }
+      const clickable = typeof onOpen === 'function'
       return h('div', {
-        className: 'awf-row',
+        className: 'awf-row' + (clickable ? ' awf-row-clickable' : ''),
+        title: clickable ? '点击查看/编辑源文件（' + row.id + ' → ' + (row.type || 'dev') + '/todo.md）' : undefined,
+        onClick: clickable ? () => onOpen(row.type || 'dev', 'todo', row) : undefined,
         style: {
           display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px',
           borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+          cursor: clickable ? 'pointer' : 'default',
+          borderRadius: 6,
+          transition: 'background .15s ease',
         },
       },
         h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(row.type)),
@@ -2528,7 +2534,7 @@ window.__ModuleLoader__.load({
           cardChildren.push(h('div', { key: 'rows' },
             typeRows.map((r) => {
               const key = r.type + ':' + r.id
-              return h(TodoRow, { key, row: r })
+              return h(TodoRow, { key, row: r, onOpen: U.onOpenSource })
             })))
         } else {
           cardChildren.push(h('div', {
