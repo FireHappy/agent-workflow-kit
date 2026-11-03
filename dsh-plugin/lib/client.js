@@ -1227,7 +1227,9 @@ window.__ModuleLoader__.load({
         const saving = !!s.saving
         // DEV-043：dirty = 草稿与原文不一致（保存按钮默认禁用，修改后激活）
         const dirty = !!data && (s.draft != null ? s.draft !== data.content : false)
-        const meta = s.meta || {} // 任务对象（id/prio/date/title），来自 TaskCard 点击
+        const meta = s.meta || {} // 任务对象（id/prio/title/updated）或归档行（id/prio/desc/date）
+        const metaTitle = meta.title || meta.desc || ''
+        const metaUpdated = meta.updated || meta.date || ''
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
         return h(ModalShell, {
@@ -1248,7 +1250,7 @@ window.__ModuleLoader__.load({
                       h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, s.file + '.md')),
                     // 任务描述（粗体，对齐归档查看）
                     h('div', { style: { fontSize: 13, fontWeight: 700, color: C.text, lineHeight: 1.5 } },
-                      meta.title || '（无描述）'),
+                      metaTitle || '（无描述）'),
                     // 小节标题：任务块原文（markdown）
                     h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
                       '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
@@ -1264,7 +1266,7 @@ window.__ModuleLoader__.load({
                               fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              maxHeight: 460, minHeight: 280, overflowY: 'auto',
+                              maxHeight: 560, minHeight: 340, overflowY: 'auto',
                               resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             },
                           }),
@@ -1281,7 +1283,7 @@ window.__ModuleLoader__.load({
                       : h('div', {},
                           h('pre', {
                             style: {
-                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 460,
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560,
                               background: C.raised, border: '1px solid ' + C.hairline,
                               fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
                               color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
@@ -2239,8 +2241,10 @@ window.__ModuleLoader__.load({
           ? renderErrorBody(error, loadLedger)
           : ledger
             ? renderLedgerBody(ledger, {
-                // DEV-044 纯看板：只读交互（归档查看 / 类型 toggle / 项目路径复制）
-                onOpenArchive: handleOpenArchive,
+                // DEV-044 纯看板：只读交互（类型 toggle / 项目路径复制）
+                // DEV-043：归档查看与源文件面板同步——最近完成行点击打开 done.md 源文件
+                //   （复用 SourcePanel：同款徽章行/内容区/保存按钮，可编辑写回 done.md）
+                onOpenArchive: (r) => r && openSource(r.type || 'dev', 'done', r),
                 onOpenSource: openSource, // DEV-043：任务行点击打开源文件（current.md）查看/编辑
                 actionError,
                 todoType,
