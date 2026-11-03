@@ -481,7 +481,7 @@ window.__ModuleLoader__.load({
         h('div', {
           className: 'awf-modal-card',
           style: {
-            width: customSize ? customSize.w : (width || 640),
+            width: customSize ? customSize.w : (width || 720),
             height: customSize ? customSize.h : undefined,
             maxWidth: 'calc(100vw - 40px)', maxHeight: '88vh',
             minWidth: 320, minHeight: 180,
@@ -1391,7 +1391,7 @@ window.__ModuleLoader__.load({
         const metaTitle = meta.title || meta.desc || ''
         const metaUpdated = meta.updated || meta.date || ''
         // DEV-109：预览/编辑内容区固定高度（避免两态切换时弹框高度跳动）
-        const BODY_H = 480
+        const BODY_H = 560
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
         // DEV-106：预览/编辑分段控件（参照目标样式：同一胶囊容器内两个选项，选中项高亮）
@@ -1417,7 +1417,7 @@ window.__ModuleLoader__.load({
           : label)
         return h(ModalShell, {
           title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
-          onClose, width: 720,
+          onClose, width: 800,
         },
           s.busy
             ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: F(12) } }, '加载中…')
@@ -1635,7 +1635,7 @@ window.__ModuleLoader__.load({
       } else {
         body = h('div', { style: { textAlign: 'center', color: C.dim, padding: '14px 0' } }, '（无归档数据）')
       }
-      return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 640 }, body)
+      return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 720 }, body)
     }
 
     /**
