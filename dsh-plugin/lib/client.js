@@ -171,6 +171,10 @@ window.__ModuleLoader__.load({
     // 与按压反馈（不移动布局）。
     const AWF_HOVER_CSS =
       '.awf-card{transition:border-color .15s ease}' +
+      // DEV-043：任务行可点击查看源文件 → hover 背景反馈
+      '.awf-row-clickable:hover{background:color-mix(in srgb,var(--dsw-alias-interactive-bg-hover,#00000014) 60%,transparent)!important}' +
+      '.awf-row-clickable .awf-source-hint{transition:opacity .15s ease}' +
+      '.awf-row-clickable:hover .awf-source-hint{opacity:1!important}' +
       '.awf-card button:disabled,.awf-row button:disabled{opacity:.4!important;cursor:not-allowed!important}' +
       '.awf-card button,.awf-row button{transition:background .15s ease,border-color .15s ease,color .15s ease,transform .08s ease}' +
       '.awf-card button:active:not(:disabled),.awf-row button:active:not(:disabled){transform:translateY(1px)}' +
@@ -243,6 +247,9 @@ window.__ModuleLoader__.load({
       'background:var(--dsw-alias-brand-primary,#4f8ef7);flex-shrink:0;' +
       'animation:awf-blip 1.6s ease-in-out infinite}' +
       '.awf-pill-live .awf-dot{animation:awf-blip 1.6s ease-in-out infinite}' +
+      // DEV-041 升级中按钮旋转：引用同文件内其他动画命名风格（awf-* 前缀，跟随主题）
+      '@keyframes awf-rot{from{transform:rotate(0)}to{transform:rotate(360deg)}}' +
+      '.awf-spin{animation:awf-rot .9s linear infinite!important}' +
       // 未完成进度条流光：白色高光条在轨道内从左滑到右（overflow:hidden 裁剪，不溢出）
       '@keyframes awf-shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}' +
       '.awf-progress-live::after{content:"";position:absolute;top:0;bottom:0;left:0;width:38%;' +
@@ -875,14 +882,21 @@ window.__ModuleLoader__.load({
      * 当前任务行（DEV-044 对齐「最近完成」轻量行风格）：无卡片边框、hairline 分隔、
      * 紧凑单行布局。徽章行只保留账本事实：类型 / 优先级 / Owner。
      */
-    function TaskCard({ t, flush }) {
+    function TaskCard({ t, flush, onOpenSource }) {
       const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
       const pst = PRIO_STYLE[t.prio] || { color: C.faint }
+      const clickable = typeof onOpenSource === 'function'
 
-      // 徽章行：类型=中性 chip / 优先级=实底或浅底（Owner 进 meta 行，避免重复展示）
+      // 徽章行：类型=中性 chip / 优先级=实底或浅底（Owner 进 meta 行，避免重复展示）；DEV-043：可点击查看源文件角标
       const badgeRow = h('div', { className: 'awf-badge-row', style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' } },
         h(Pill, { color: type.color, variant: 'chip' }, type.label),
-        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null)
+        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null,
+        clickable
+          ? h('span', {
+              className: 'awf-source-hint',
+              style: { fontFamily: C.mono, fontSize: 10, color: C.accent, opacity: 0.85 },
+            }, '📄 源文件')
+          : null)
 
       // 行头：ID（左）+ 徽章行（右），与最近完成行的紧凑间距一致
       const rowHead = h('div', {
@@ -904,10 +918,15 @@ window.__ModuleLoader__.load({
         t.mode ? h('span', { style: { color: C.faint } }, t.mode) : null)
 
       return h('div', {
-        className: 'awf-row',
+        className: 'awf-row' + (clickable ? ' awf-row-clickable' : ''),
+        title: clickable ? '点击查看/编辑源文件（' + t.id + ' → ' + (t.type || 'dev') + '/current.md）' : undefined,
+        onClick: clickable ? () => onOpenSource(t.type || 'dev', 'current') : undefined,
         style: {
           display: 'flex', flexDirection: 'column', gap: 0,
           padding: '7px 2px', borderBottom: '1px solid ' + C.hairline, fontSize: 12,
+          cursor: clickable ? 'pointer' : 'default',
+          borderRadius: 6,
+          transition: 'background .15s ease',
         },
       },
         rowHead,
@@ -1477,6 +1496,20 @@ window.__ModuleLoader__.load({
     /** 未初始化/半初始化引导卡：区分「从未初始化」（初始化骨架）与「已有工作流文件夹但项目事实不完整」（引导升级整理）。 */
     function renderInitCard({ busy, error, onInit, needsUpgrade, onUpgrade }) {
       if (needsUpgrade) {
+        // DEV-041+升级中：按钮「更新中…」+ 旋转动画图标 + 禁点（busy=upgrading）
+        const spin = busy
+          ? h('span', {
+              className: 'awf-spin',
+              style: {
+                display: 'inline-block', width: 10, height: 10, marginRight: 6,
+                border: '2px solid ' + C.surface,
+                borderTopColor: C.text,
+                borderRadius: '50%',
+                animation: 'awf-rot 0.9s linear infinite',
+                verticalAlign: '-1px',
+              },
+            })
+          : null
         return h(EmptyState, {
           icon: '🔄', tone: 'accent',
           title: '工作流需要更新整理',
@@ -1487,9 +1520,9 @@ window.__ModuleLoader__.load({
                 disabled: busy,
                 style: Object.assign(buttonStyle(true), {
                   marginTop: 12, padding: '5px 16px', fontSize: 12,
-                  opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
+                  opacity: busy ? 0.65 : 1, cursor: busy ? 'wait' : 'pointer',
                 }),
-              }, busy ? '升级整理中…' : '更新/整理工作流')
+              }, spin, busy ? '更新中…' : '更新/整理工作流')
             : null,
           extra: error
             ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
@@ -2212,13 +2245,22 @@ window.__ModuleLoader__.load({
       const versionBar = null
 
       const body = notInit
-        ? renderInitCard({ busy: initBusy, error: initError, onInit: handleInit, needsUpgrade, onUpgrade: needsUpgrade ? handleUpgrade : undefined })
+        ? renderInitCard({
+            // DEV-041：needsUpgrade 引导卡按钮的 busy 绑定升级中态（upgrading），
+            //   点击后变「更新中…」+旋转动画+禁点；未初始化卡仍用 initBusy
+            busy: needsUpgrade ? upgrading : initBusy,
+            error: needsUpgrade ? upError : initError,
+            onInit: handleInit,
+            needsUpgrade,
+            onUpgrade: needsUpgrade ? handleUpgrade : undefined,
+          })
         : error
           ? renderErrorBody(error, loadLedger)
           : ledger
             ? renderLedgerBody(ledger, {
                 // DEV-044 纯看板：只读交互（归档查看 / 类型 toggle / 项目路径复制）
                 onOpenArchive: handleOpenArchive,
+                onOpenSource: openSource, // DEV-043：任务行点击打开源文件（current.md）查看/编辑
                 actionError,
                 todoType,
                 onTodoTypeChange: handleTodoTypeChange,
@@ -2458,6 +2500,7 @@ window.__ModuleLoader__.load({
         ledger.current.forEach((t, i) => {
           taskCards.push(h(TaskCard, {
             key: 'cur-' + i, t, flush: true,
+            onOpenSource: U.onOpenSource,
           }))
         })
         items.push(h('div', {

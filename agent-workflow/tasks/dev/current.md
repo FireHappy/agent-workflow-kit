@@ -31,6 +31,34 @@
 
 ### 下一步
 已实现（AUTO_BACKFILL_ENABLED=false + 守卫）→ 回归验证 → profile 同步 → GUI 确认 → 归档。
+
+## [DEV-043] 任务卡查看/编辑源文件 + 升级按钮更新中动画
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | review |
+| Owner | agent |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发（2026-11-03：任务信息点击后能看源文件并可编辑；升级按钮点击后变「更新中…」+动画+禁点） |
+| 修改范围 | dsh-plugin/lib/client.js（TaskCard 点击打开源文件 / SourcePanel 编辑保存链路接通 / 升级按钮 upgrading 绑定+旋转动画） |
+| 分支/工作区 | dev（当前工作区） |
+| 依赖 | DEV-041（升级引导卡）、DEV-042 |
+| 最近更新 | 2026-11-03 |
+
+### 目标
+①「当前任务」任务行可点击打开源文件（current.md）查看并可编辑保存（/awf/source + /awf/source-write 已有）；②「工作流需要更新整理」引导卡按钮点击后变「更新中…」+ 旋转动画 + 不可点击，直到升级完成回调/账本刷新结束。
+
+### 验收标准
+- [x] TaskCard 整行可点击 → 打开源文件面板（tasks/<type>/current.md）
+- [x] 源文件面板支持编辑（textarea）+ 保存写回（/awf/source-write）+ 取消
+- [x] 升级按钮：busy 绑定 upgrading（非 initBusy）；文案「更新中…」；旋转动画 awf-rot；disabled + cursor wait
+- [x] node --check client.js 通过；11/11 断言；check_workflow.sh 全绿
+- [x] profile 同步（桌面）三文件一致
+- [x] 本地 commit（禁 push）
+
+### 下一步
+GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新；升级按钮点击后动画禁点。重启 DSH 使服务端路由生效。独立复核后归档。
 ## [DEV-041] 工作流更新升级闭环：检测已有文件夹 → agent 整理合并 → 完成回调通知面板刷新
 
 | 字段 | 内容 |
