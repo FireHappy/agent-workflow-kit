@@ -1247,6 +1247,64 @@ window.__ModuleLoader__.load({
           h('button', { onClick: onCancel, disabled: busy, style: buttonStyle() }, '取消')))
     }
 
+    /** 轻量 markdown → HTML（安全转义，仅支持源文件常见的语法子集）。
+     *  支持：# 标题 / ## 任务块标题 / -·或 1. 列表 / **粗体** / `行内代码` /
+     *  ``` 代码块 / | 表格 | / [链接](url) / > 引用 / --- 分隔线。
+     *  所有原文先转义，再按行规则组块，避免 XSS。 */
+    function mdToHtml(md) {
+      const esc = (s) => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+      const inline = (s) => esc(s)
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:1px 4px;border-radius:4px;font-size:11px">$1</code>')
+        .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--dsw-alias-brand-primary,#4f8ef7)">$1</a>')
+      const lines = String(md == null ? '' : md).split('\n')
+      const html = []
+      let inCode = false
+      let codeBuf = []
+      let inTable = false
+      let tableBuf = []
+      const flushTable = () => {
+        if (tableBuf.length === 0) return
+        const rows = tableBuf.map((r) => {
+          const cells = r.split('|').filter((_, i, a) => !(i === 0 || i === a.length - 1 || (i === 1 && a.length === 2)))
+          return '<tr>' + cells.map((c) => '<td style="padding:3px 8px;border:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));font-size:11px">' + inline(c.trim()) + '</td>').join('') + '</tr>'
+        })
+        html.push('<table style="border-collapse:collapse;margin:6px 0;max-width:100%">' + rows.join('') + '</table>')
+        tableBuf = []
+        inTable = false
+      }
+      for (const raw of lines) {
+        const line = raw
+        if (inCode) {
+          if (/^```/.test(line)) { inCode = false; html.push('<pre style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:8px 10px;border-radius:6px;overflow:auto;font-size:11px;line-height:1.5"><code>' + esc(codeBuf.join('\n')) + '</code></pre>') ; codeBuf = [] }
+          else codeBuf.push(line)
+          continue
+        }
+        if (/^```/.test(line)) { flushTable(); inCode = true; codeBuf = []; continue }
+        if (/^\|/.test(line)) { if (!inTable) { inTable = true; tableBuf = [] } tableBuf.push(line); continue }
+        flushTable()
+        if (/^#{1,4}\s/.test(line)) {
+          const level = line.match(/^#+/)[0].length
+          const text = inline(line.replace(/^#+\s*/, ''))
+          html.push(level <= 2
+            ? '<div style="font-weight:800;font-size:' + (level === 1 ? 15 : 13.5) + 'px;color:var(--dsw-alias-label-primary,#2c3138);margin:10px 0 4px">' + text + '</div>'
+            : '<div style="font-weight:700;font-size:12.5px;color:var(--dsw-alias-label-secondary,#8a919c);margin:8px 0 3px">' + text + '</div>')
+          continue
+        }
+        if (/^---+\s*$/.test(line)) { html.push('<hr style="border:none;border-top:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));margin:8px 0">'); continue }
+        if (/^>\s?/.test(line)) { html.push('<blockquote style="margin:6px 0;padding:4px 10px;border-left:3px solid var(--dsw-alias-border-l1,rgba(127,127,127,.16));color:var(--dsw-alias-label-secondary,#8a919c)">' + inline(line.replace(/^>\s?/, '')) + '</blockquote>'); continue }
+        if (/^\s*[-*]\s+/.test(line)) { html.push('<div style="padding:1px 0;font-size:12px;line-height:1.6">• ' + inline(line.replace(/^\s*[-*]\s+/, '')) + '</div>'); continue }
+        if (/^\s*\d+[.)]\s+/.test(line)) { html.push('<div style="padding:1px 0;font-size:12px;line-height:1.6">' + inline(line.replace(/^\s*\d+[.)]\s+/, '') ) + '</div>'); continue }
+        if (/^\s*$/.test(line)) { continue }
+        html.push('<div style="padding:1px 0;font-size:12px;line-height:1.6">' + inline(line) + '</div>')
+      }
+      if (inCode) html.push('<pre style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:8px 10px;border-radius:6px;overflow:auto;font-size:11px;line-height:1.5"><code>' + esc(codeBuf.join('\n')) + '</code></pre>')
+      flushTable()
+      return html.join('\n')
+    }
+
     /**
      * 源文件查看面板（只读）：README/任务字段编辑态的「打开源文件」目标。
      * 展示本地绝对路径（可复制）+ macOS「在访达显示」提示 + .md 原文（等宽、可滚动）。
@@ -1260,6 +1318,9 @@ window.__ModuleLoader__.load({
         const data = s.data || null
         const editing = !!s.editing
         const saving = !!s.saving
+        // DEV-106：阅读/编辑双模式——viewMode 由 props.editing 推导（编辑态=edit，否则 read），
+        // 底部「编辑」按钮进 edit；保存/取消回 read。渲染内容互斥：read=mdToHtml 预览，edit=textarea。
+        const viewMode = editing ? 'edit' : 'read'
         // DEV-043：dirty = 草稿与原文不一致（保存按钮默认禁用，修改后激活）
         const dirty = !!data && (s.draft != null ? s.draft !== data.content : false)
         const meta = s.meta || {} // 任务对象（id/prio/title/updated）或归档行（id/prio/desc/date）
@@ -1267,6 +1328,16 @@ window.__ModuleLoader__.load({
         const metaUpdated = meta.updated || meta.date || ''
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
+        const tabBtn = (label, active) => h('button', {
+          onClick: () => { /* tab 只是展示层切换，编辑态仍由父级 editing 控制 */ },
+          style: {
+            fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'default',
+            border: '1px solid ' + (active ? C.accent : 'transparent'),
+            background: active ? C.hoverAccent : 'transparent',
+            color: active ? C.text : C.sub,
+            fontWeight: active ? 700 : 500,
+          },
+        }, label)
         return h(ModalShell, {
           title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
           onClose, width: 560,
@@ -1289,9 +1360,24 @@ window.__ModuleLoader__.load({
                     // 小节标题：任务块原文（markdown）
                     h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
                       '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
-                    // 内容区（编辑 ↔ 只读，同一面板切换）
-                    editing
+                    // DEV-106：阅读/编辑 tab 条
+                    h('div', { style: { display: 'flex', gap: 4, marginBottom: 2 } },
+                      tabBtn('阅读', viewMode === 'read'),
+                      tabBtn('编辑', viewMode === 'edit')),
+                    // 内容区（阅读=渲染 / 编辑=textarea，tab 由 viewMode 切换）
+                    viewMode === 'read'
                       ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                          h('div', {
+                            style: {
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 200,
+                              background: C.raised, border: '1px solid ' + C.hairline,
+                              fontSize: 12, lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
+                            },
+                            // 渲染结果以 HTML 注入（mdToHtml 已转义，安全）
+                          }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(data.content || '') } })),
+                          h('div', { style: { textAlign: 'center', marginTop: 12 } },
+                            h('button', { onClick: () => onEditStart && onEditStart(), style: buttonStyle() }, '编辑')))
+                      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
                           h('textarea', {
                             value: s.draft != null ? s.draft : data.content,
                             onChange: (e) => onDraftChange && onDraftChange(e.target.value),
@@ -1310,23 +1396,15 @@ window.__ModuleLoader__.load({
                               ? h('span', { style: { fontSize: 11, color: C.error, marginRight: 'auto' } }, '⚠️ ' + s.saveError)
                               : null,
                             h('button', {
+                              onClick: onEditCancel,
+                              style: buttonStyle(),
+                            }, '取消'),
+                            h('button', {
                               onClick: saving ? undefined : () => onSave && onSave(s.draft != null ? s.draft : data.content),
                               disabled: saving || !dirty,
                               title: dirty ? '保存修改到 ' + s.file + '.md' : '未修改',
                               style: Object.assign(buttonStyle({ color: C.accent }), { opacity: saving || !dirty ? 0.5 : 1, cursor: saving || !dirty ? 'default' : 'pointer' }),
-                            }, saving ? '保存中…' : '保存')))
-                      : h('div', {},
-                          h('pre', {
-                            style: {
-                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560,
-                              background: C.raised, border: '1px solid ' + C.hairline,
-                              fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
-                              color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                            },
-                          }, data.content || ''),
-                          // 只读态底部（对齐归档查看「关闭」；可编辑时显示「编辑」切换）
-                          h('div', { style: { textAlign: 'center', marginTop: 12 } },
-                            h('button', { onClick: () => onEditStart && onEditStart(), style: buttonStyle() }, '编辑'))))
+                            }, saving ? '保存中…' : '保存'))))
                 : h('div', { style: { padding: '12px', color: C.dim, fontSize: 12 } }, '无内容'))
     }
 
@@ -1462,14 +1540,16 @@ window.__ModuleLoader__.load({
             doneRow.desc || '（无描述）'),
           h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
             '任务块原文（markdown）'),
-          h('pre', {
+          h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
+            '任务块原文（markdown）'),
+          // DEV-106：归档查看同样走 md 渲染（与源文件面板阅读态一致）
+          h('div', {
             style: {
               margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 320,
               background: C.raised, border: '1px solid ' + C.hairline,
-              fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
-              color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              fontSize: 12, lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
             },
-          }, s.data.block || '（该任务归档时未保留详细任务块，仅摘要）'),
+          }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(s.data.block || '（该任务归档时未保留详细任务块，仅摘要）') } })),
           h('div', { style: { textAlign: 'center', marginTop: 12 } },
             h('button', { onClick: onClose, style: buttonStyle() }, '关闭')))
       } else {
