@@ -1313,7 +1313,7 @@ window.__ModuleLoader__.load({
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
       const inline = (s) => esc(s)
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/`([^`]+)`/g, '<code style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:1px 4px;border-radius:4px;font-size:11px">$1</code>')
+        .replace(/`([^`]+)`/g, '<code style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:1px 4px;border-radius:4px;font-size:' + F(13) + 'px">$1</code>')
         .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--dsw-alias-brand-primary,#4f8ef7)">$1</a>')
       const lines = String(md == null ? '' : md).split('\n')
       const html = []
@@ -1329,7 +1329,7 @@ window.__ModuleLoader__.load({
         const isSep = (r) => /^[\s|:-]+$/.test(r.replace(/\|/g, '')) && r.includes('-')
         const bodyRows = tableBuf.slice(1).filter((r) => !isSep(r)).map((r) => cellText(r))
         const maxCols = Math.max(first.length, ...bodyRows.map((r) => r.length))
-        const tdStyle = 'padding:3px 8px;border:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));font-size:11px;vertical-align:top'
+        const tdStyle = 'padding:3px 8px;border:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));font-size:' + F(13) + 'px;vertical-align:top'
         const head = '<tr>' + first.map((c, i) => '<th style="' + tdStyle + ';font-weight:700;text-align:left;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.06))">' + inline(c) + '</th>').join('') + '</tr>'
         const rows = bodyRows.map((r) => '<tr>' + Array.from({ length: maxCols }, (_, i) => '<td style="' + tdStyle + (i === 2 ? ';word-break:break-word' : ';white-space:nowrap') + '">' + inline(r[i] || '') + '</td>').join('') + '</tr>').join('')
         // 列宽比例：描述（第3列）最宽，其余按内容自适应（fixed 布局下显式分配）
@@ -1342,7 +1342,7 @@ window.__ModuleLoader__.load({
       for (const raw of lines) {
         const line = raw
         if (inCode) {
-          if (/^```/.test(line)) { inCode = false; html.push('<pre style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:8px 10px;border-radius:6px;overflow:auto;font-size:11px;line-height:1.5"><code>' + esc(codeBuf.join('\n')) + '</code></pre>') ; codeBuf = [] }
+          if (/^```/.test(line)) { inCode = false; html.push('<pre style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:8px 10px;border-radius:6px;overflow:auto;font-size:' + F(13) + 'px;line-height:1.5"><code>' + esc(codeBuf.join('\n')) + '</code></pre>') ; codeBuf = [] }
           else codeBuf.push(line)
           continue
         }
@@ -1353,18 +1353,18 @@ window.__ModuleLoader__.load({
           const level = line.match(/^#+/)[0].length
           const text = inline(line.replace(/^#+\s*/, ''))
           html.push(level <= 2
-            ? '<div style="font-weight:800;font-size:' + (level === 1 ? 15 : 13.5) + 'px;color:var(--dsw-alias-label-primary,#2c3138);margin:10px 0 4px">' + text + '</div>'
-            : '<div style="font-weight:700;font-size:12.5px;color:var(--dsw-alias-label-secondary,#8a919c);margin:8px 0 3px">' + text + '</div>')
+            ? '<div style="font-weight:800;font-size:' + (level === 1 ? F(16) : F(14)) + 'px;color:var(--dsw-alias-label-primary,#2c3138);margin:10px 0 4px">' + text + '</div>'
+            : '<div style="font-weight:700;font-size:' + F(13) + 'px;color:var(--dsw-alias-label-secondary,#8a919c);margin:8px 0 3px">' + text + '</div>')
           continue
         }
         if (/^---+\s*$/.test(line)) { html.push('<hr style="border:none;border-top:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));margin:8px 0">'); continue }
         if (/^>\s?/.test(line)) { html.push('<blockquote style="margin:6px 0;padding:4px 10px;border-left:3px solid var(--dsw-alias-border-l1,rgba(127,127,127,.16));color:var(--dsw-alias-label-secondary,#8a919c)">' + inline(line.replace(/^>\s?/, '')) + '</blockquote>'); continue }
-        if (/^\s*[-*]\s+/.test(line)) { html.push('<div style="padding:1px 0;font-size:12px;line-height:1.6">• ' + inline(line.replace(/^\s*[-*]\s+/, '')) + '</div>'); continue }
-        if (/^\s*\d+[.)]\s+/.test(line)) { html.push('<div style="padding:1px 0;font-size:12px;line-height:1.6">' + inline(line.replace(/^\s*\d+[.)]\s+/, '') ) + '</div>'); continue }
+        if (/^\s*[-*]\s+/.test(line)) { html.push('<div style="padding:1px 0;font-size:' + F(14) + 'px;line-height:1.6">• ' + inline(line.replace(/^\s*[-*]\s+/, '')) + '</div>'); continue }
+        if (/^\s*\d+[.)]\s+/.test(line)) { html.push('<div style="padding:1px 0;font-size:' + F(14) + 'px;line-height:1.6">' + inline(line.replace(/^\s*\d+[.)]\s+/, '') ) + '</div>'); continue }
         if (/^\s*$/.test(line)) { continue }
-        html.push('<div style="padding:1px 0;font-size:12px;line-height:1.6">' + inline(line) + '</div>')
+        html.push('<div style="padding:1px 0;font-size:' + F(14) + 'px;line-height:1.6">' + inline(line) + '</div>')
       }
-      if (inCode) html.push('<pre style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:8px 10px;border-radius:6px;overflow:auto;font-size:11px;line-height:1.5"><code>' + esc(codeBuf.join('\n')) + '</code></pre>')
+      if (inCode) html.push('<pre style="background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.10));padding:8px 10px;border-radius:6px;overflow:auto;font-size:' + F(13) + 'px;line-height:1.5"><code>' + esc(codeBuf.join('\n')) + '</code></pre>')
       flushTable()
       return html.join('\n')
     }
@@ -1434,7 +1434,7 @@ window.__ModuleLoader__.load({
                             style: {
                               margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 340,
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              fontSize: F(13), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
+                              fontSize: F(14), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
                             // 渲染结果以 HTML 注入（mdToHtml 已转义，安全）
                           }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(data.content || '') } }))
