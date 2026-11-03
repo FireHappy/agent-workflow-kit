@@ -445,6 +445,9 @@ window.__ModuleLoader__.load({
     function ModalShell({ title, onClose, children, width }) {
       // DEV-108：弹框右下角拖拽调整大小（JS 实现；纯 CSS resize 对 auto 高度无效）
       const [customSize, setCustomSize] = useState(null) // {w, h} | null
+      // DEV-110：拖拽结束后 300ms 内的 click 视为拖拽残留，不关闭弹框
+      //   （拖拽放大时鼠标移出 card 到 mask 上松手，click 冒泡到 mask 会被误判为点遮罩关闭）
+      const lastResizeRef = useRef(0)
       // DEV-108/110：拖拽调整弹框大小——dir: 'right'(改宽) | 'bottom'(改高) | 'se'(宽+高)
       const onResizeStart = (e, dir) => {
         e.preventDefault()
@@ -460,6 +463,7 @@ window.__ModuleLoader__.load({
           setCustomSize({ w, h })
         }
         const up = () => {
+          lastResizeRef.current = Date.now()
           window.removeEventListener('mousemove', move)
           window.removeEventListener('mouseup', up)
         }
@@ -478,7 +482,7 @@ window.__ModuleLoader__.load({
       return h('div', {
         className: 'awf-modal-mask',
         style: overlayStyle,
-        onClick: (e) => { if (e.target === e.currentTarget && typeof onClose === 'function') onClose() },
+        // DEV-110：仅 ✕ 或 ESC 关闭；点击遮罩不关闭（避免拖拽调大小后松手误关弹框）
       },
         h('div', {
           className: 'awf-modal-card',
