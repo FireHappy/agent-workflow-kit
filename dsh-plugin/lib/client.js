@@ -1031,7 +1031,21 @@ window.__ModuleLoader__.load({
             fontWeight: value === v ? 700 : 500,
           },
         },
-          label)))
+          label,
+          counts && counts[v] != null
+            ? h('span', {
+                key: 'count-' + v,
+                className: 'awf-toggle-count',
+                style: {
+                  fontSize: 10, lineHeight: '15px', fontWeight: 700, minWidth: 16,
+                  textAlign: 'center', borderRadius: 999, padding: '0 4px',
+                  background: value === v
+                    ? 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)'
+                    : C.raised,
+                  color: value === v ? C.accent : C.sub,
+                },
+              }, String(counts[v] || 0))
+            : null)))
     }
 
     /**
@@ -2532,15 +2546,19 @@ window.__ModuleLoader__.load({
       }
 
       // ---- 待办（类型 toggle + 该类型未开始任务行；todo.md 是表格行，无进度条）
-      // DEV-100：区块常驻渲染——某类型 todo/todoRows 全空也显示「未开始任务 · 类型 0」+ 空态；
-      // 各类型 tab 挂未开始任务数量徽章（数据只取自 ledger.todoRows 过滤计数）。
+      // DEV-100：区块常驻渲染——某类型 todo/todoRows 全空也渲染（「未开始任务 · 类型」+ 空态）；
+      // 各类型 tab 挂未开始任务数量徽章（数据只取自 ledger.todoRows 过滤计数）；
+      // 标题行不再重复数量（用户反馈：tab 徽章与标题数量重复，保留 tab 徽章一处）。
       const selType = (U.todoType && (U.todoType === 'dev' || U.todoType === 'debug' || U.todoType === 'docs')) ? U.todoType : 'dev'
       const typeRows = todoRows.filter((r) => r.type === selType)
-      // DEV-043：数量标记已移除——不再计算 todoCounts（TypeToggle 不挂数量徽章）
+      const todoCounts = { dev: 0, debug: 0, docs: 0 }
+      for (const r of todoRows) {
+        if (r.type === 'dev' || r.type === 'debug' || r.type === 'docs') todoCounts[r.type]++
+      }
       items.push(h(SectionTitle, { key: 'todo-h', label: '待办' }))
       const cardChildren = []
       cardChildren.push(h('div', { key: 'toggle', style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
-        h(TypeToggle, { value: selType, onChange: U.onTodoTypeChange })))
+        h(TypeToggle, { value: selType, counts: todoCounts, onChange: U.onTodoTypeChange })))
       cardChildren.push(h('div', {
         key: 'rows-title',
         style: {
@@ -2548,7 +2566,6 @@ window.__ModuleLoader__.load({
           borderTop: '1px solid ' + C.hairline,
         },
       },
-        // DEV-043：移除数量标记——标题只保留「未开始任务 · 类型」
         h('span', { style: { fontSize: 12, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType))))
       if (typeRows.length > 0) {
         cardChildren.push(h('div', {

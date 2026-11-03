@@ -350,14 +350,13 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 - [x] 单测 `dsh-plugin/test/ledger.test.js` 11/11 全绿（`cd dsh-plugin && node --test`）：4 列回归、5 列依赖并入、5 列空 deps 不并入、表头/分隔行不产生任务、日期/ID 非法行跳过、空表返回 []、4 列不被 5 列分支误吞、真实混排结构
 - [x] 5 列样例：`parseTodoRows('| DEV-010 | P0 | 示例任务 | 依赖A; 依赖B | 2026-11-03 |')` → 1 行，desc = `示例任务（依赖 依赖A; 依赖B）`
 - [x] 4 列回归：uxrsample（只读样本）4 列行解析正常（DEV-054 含内嵌依赖描述）；验收期望行集（DEV-058/054 + DEBUG-009/024/018/015/014）用同格式 4 列 fixture 验证 dev=2 / debug=5 通过；uxrsample 样本账本已漂移（DEV-058→done、DEBUG-014/015/018→done、DEBUG-024 移除、DEBUG-009 移出待办表格），其当前 todoRows = dev 1（DEV-054）/ debug 0，未修改对方仓库
-- [x] 展示层：TypeToggle 每类型 tab 挂数量徽章（取自 ledger.todoRows 过滤计数，0 也显示）；「未开始任务 · 类型 N」的 N 改 12px + 主文字色（原 faint 11px）；区块常驻渲染（0 条时显示「未开始任务 · 类型 0」+ 空态「该类型暂无未开始任务」）；后端契约 ledger.todoRows 不变
+- [x] 展示层：TypeToggle 每类型 tab 挂数量徽章（取自 ledger.todoRows 过滤计数，0 也显示）；区块常驻渲染（0 条时显示「未开始任务 · 类型」+ 空态「该类型暂无未开始任务」）；后端契约 ledger.todoRows 不变
 - [x] 已安装副本同步：`~/.dsh/profiles/desktop/node_modules/dsh-awf-dashboard/` 的 src/、lib/、package.json（0.2.1）、README.md、cordis.patch.yml 与 kit 源逐文件 diff 一致（README 文档化的 scripts/sync-profile.sh 当前不存在于 HEAD，按等价复制操作执行）
 - [x] 版本：dsh-plugin/package.json 0.2.0 → 0.2.1；README 补 0.2.1 变更说明；kit CHANGELOG.md 无插件条目，未另加
 - [x] `node --check lib/client.js && node --check src/ledger.js` 通过；`./agent-workflow/check_workflow.sh` 全绿；本地 commit 消息含 DEV-100，未 push
-- [~] 数量徽章按用户要求移除（2026-11-03 15:40，commit c8f0f32）：TypeToggle 数量徽章、「未开始任务 · 类型 N」的数字均移除；5 列解析修复与 0 条常驻渲染保留；README 变更记录已同步说明
-- [x] 补交 DEV-100 代码（ledger.js 5 列 + test/ + package.json 0.2.1）：外部会话实现后未提交，主线核对测试 11/11 后补提交（commit 含 DEV-100，未 push）
+- [x] 并发与终态说明：另一会话曾临时提交「移除待办区数量标记」（c8f0f32）并把未提交的解析/测试/版本改动补交为 82c2aae；用户最终确认**按任务包恢复数量显示**——本会话在 82c2aae 之后补提交恢复：TypeToggle 数量徽章 + 0 条常驻渲染落地；随后用户目视面板反馈「标题数量与 tab 徽章重复」，标题行「未开始任务 · 类型」不再显示数量（保留 tab 徽章一处）；README 变更记录与已安装副本已同步为最终态
 
 ### 下一步
 无（闭环）。面板生效：刷新 DSH GUI 页面；若服务端/宿主 bundle 未重读则重启 DSH（已安装副本已更新，重启后右侧边栏 Agent Workflow 页签生效）。
 | 完成日期 | 2026-11-03 |
-| DEV-100 | P1 | 待办区兼容 5 列表格（parseTodoRows 4/5 列、deps 并入 desc）+ 各类型 tab 数量徽章 + 「未开始任务 · 类型 N」主色显眼 + 0 条常驻渲染；插件 0.2.1 | 2026-11-03 |
+| DEV-100 | P1 | 待办区兼容 5 列表格（parseTodoRows 4/5 列、deps 并入 desc）+ 各类型 tab 数量徽章 + 0 条常驻渲染（标题不重复数量）；插件 0.2.1 | 2026-11-03 |

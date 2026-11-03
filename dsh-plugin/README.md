@@ -47,7 +47,7 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 
 - 项目卡：名称（右侧带**版本号** chip：latest 绿点 / outdated 黄点可点击升级）+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
 - 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）
-- 待办（行）：类型 chip + ID + 描述 + 优先级，dev/debug/docs 三态切换；「未开始任务 · 类型 N」标题不带数量徽章（DEV-100 曾加数量徽章，2026-11-03 按用户要求移除）；数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」），解析层兼容 4/5 列任务表格
+- 待办（行）：类型 chip + ID + 描述 + 优先级，dev/debug/docs 三态切换；每个类型 tab 显示该类型未开始任务数量徽章（如「开发 2」「调试 0」，数据取自 `ledger.todoRows` 过滤计数），标题「未开始任务 · 类型」不再重复数量（tab 徽章一处即可）；数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」），解析层兼容 4/5 列任务表格
 - 最近完成（行）：✓ 日期 ID 描述，点击查看归档
 - **未初始化引导**：所选项目尚未初始化 agent-workflow 时，页签显示引导卡（图标 + 文案 + 「初始化工作流」按钮）。点击调用 `/awf/init` 生成骨架（project.yaml + tasks/*/{todo,current,done}.md + status.md），成功后自动重新加载账本显示正常看板；`already-initialized` 等错误有友好提示
 - **待办列表（只读）**：dev/debug/docs 三态切换器（默认 dev）展示未开始任务表格行（类型 / ID / 描述 / 优先级），无新增/编辑/删除/开始按钮；该类型无行时显示空态（「该类型暂无未开始任务」）；todo.md 是表格行格式、无 checkbox，不渲染待办进度条
@@ -104,7 +104,7 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
-- **0.2.1（DEV-100）**：待办区兼容 5 列任务表格 + 数量展示（后续按用户要求移除数量徽章）
+- **0.2.1（DEV-100）**：待办区兼容 5 列任务表格 + 显式任务数量
   - 解析层（`src/ledger.js` `parseTodoRows`）：同时接受 4 列 `| ID | prio | desc | date |`（回归，结果与旧版一致）与 5 列 `| ID | prio | title | deps | date |`；5 列行 `desc = title`，deps 非空时并入 desc（`title（依赖 deps）`），「开始任务」生成的块与列表展示均可见依赖；表头/分隔/畸形行（ID 不合法、日期非 YYYY-MM-DD）依旧不产生任务行
-  - 展示层（`lib/client.js` 待办区块）：DEV-100 曾加各类型 tab 数量徽章 + 「未开始任务 · 类型 N」主色，2026-11-03 按用户要求移除徽章（保留 0 条常驻渲染与空态文案）；后端契约 `ledger.todoRows` 不变
+  - 展示层（`lib/client.js` 待办区块）：每个类型 tab（开发/调试/文档）显示该类型未开始任务数量徽章（只取自 `ledger.todoRows` 过滤计数，0 也显示）；标题「未开始任务 · 类型」不重复数量（tab 徽章一处）；某类型数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」）；后端契约 `ledger.todoRows` 不变
   - 新增 `test/ledger.test.js` 单测（`cd dsh-plugin && node --test`）
