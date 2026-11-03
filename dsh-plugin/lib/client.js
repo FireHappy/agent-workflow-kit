@@ -887,16 +887,11 @@ window.__ModuleLoader__.load({
       const pst = PRIO_STYLE[t.prio] || { color: C.faint }
       const clickable = typeof onOpenSource === 'function'
 
-      // 徽章行：类型=中性 chip / 优先级=实底或浅底（Owner 进 meta 行，避免重复展示）；DEV-043：可点击查看源文件角标
+      // 徽章行：类型=中性 chip / 优先级=实底或浅底（Owner 进 meta 行，避免重复展示）
+      // DEV-043：无图标角标——整行点击直达源文件查看/编辑界面（悬停反馈即可）
       const badgeRow = h('div', { className: 'awf-badge-row', style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' } },
         h(Pill, { color: type.color, variant: 'chip' }, type.label),
-        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null,
-        clickable
-          ? h('span', {
-              className: 'awf-source-hint',
-              style: { fontFamily: C.mono, fontSize: 10, color: C.accent, opacity: 0.85 },
-            }, '📄 源文件')
-          : null)
+        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null)
 
       // 行头：ID（左）+ 徽章行（右），与最近完成行的紧凑间距一致
       const rowHead = h('div', {
@@ -1222,99 +1217,81 @@ window.__ModuleLoader__.load({
      * 展示本地绝对路径（可复制）+ macOS「在访达显示」提示 + .md 原文（等宽、可滚动）。
      * src: {type, file, busy, data:{absPath,content}, error}
      */
-    // DEV-043：源文件面板——只读展示 + 可编辑保存（src 携带编辑态：editing/draft/saving/saveError）。
-    // 编辑模式：显示 textarea（draft 内容）+ 保存/取消；保存调 onSave(draft) 由 App 写回。
-    function SourcePanel({ src, onClose, onCopy, onSave, onEditStart, onEditCancel, onDraftChange }) {
-      const s = src || {}
-      const data = s.data || null
-      const editing = !!s.editing
-      const saving = !!s.saving
-      return h(ModalShell, {
-        title: '源文件 · ' + (s.type || '') + '/' + (s.file || '') + '.md',
-        onClose, width: 560,
-      },
-        s.busy
-          ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: 12 } }, '加载中…')
-          : s.error
-            ? h('div', { style: { padding: '12px', color: C.error, fontSize: 12, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
-            : data
-              ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                  h('div', {
-                    style: {
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-                      padding: '6px 9px', borderRadius: 6,
-                      background: 'color-mix(in srgb, ' + C.surface + ' 70%, transparent)',
-                      border: '1px solid ' + C.hairline, flexWrap: 'wrap',
-                    },
-                  },
-                    h('span', {
+    // DEV-043：源文件面板——查看/编辑一体（视觉对齐「归档查看」弹层：
+      //   标题带任务 ID + 顶部徽章行 + raised 内容区 + 底部操作；编辑态 textarea 保存写回）。
+      function SourcePanel({ src, onClose, onCopy, onSave, onEditStart, onEditCancel, onDraftChange }) {
+        const s = src || {}
+        const data = s.data || null
+        const editing = !!s.editing
+        const saving = !!s.saving
+        const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
+        return h(ModalShell, {
+          title: '源文件 · ' + (s.type || '') + '/' + (s.file || '') + '.md',
+          onClose, width: 560,
+        },
+          s.busy
+            ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: 12 } }, '加载中…')
+            : s.error
+              ? h('div', { style: { padding: '12px', color: C.error, fontSize: 12, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
+              : data
+                ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                    // 顶部徽章行（对齐归档查看）：类型 / 优先级 / 可编辑标记
+                    h('div', { style: row({ gap: 8, flexWrap: 'wrap' }) },
+                      h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(s.type)),
+                      h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, s.file + '.md'),
+                      h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, data.absPath || '')),
+                    // 提示行
+                    h('div', {
                       style: {
-                        fontFamily: C.mono, fontSize: 11, color: C.dim,
-                        wordBreak: 'break-all', minWidth: 0, flex: 1,
+                        fontSize: 11, color: C.faint, lineHeight: 1.5,
+                        padding: '0 2px',
                       },
-                    }, data.absPath || ''),
-                    h('button', {
-                      onClick: () => onCopy && onCopy(data.absPath),
-                      title: '复制绝对路径到剪贴板，供系统编辑器打开',
-                      style: tinyBtn(false),
-                    }, s.copied ? '已复制 ✓' : '复制路径'),
-                    // DEV-043：编辑开关（只读 ↔ 编辑）
-                    !editing
-                      ? h('button', {
-                          onClick: () => onEditStart && onEditStart(),
-                          title: '在面板内编辑此 .md 文件并保存（写回账本）',
-                          style: tinyBtn(false),
-                        }, '编辑')
-                      : null),
-                  h('div', {
-                    style: {
-                      fontSize: 11, color: C.faint, lineHeight: 1.5,
-                      padding: '0 2px',
-                    },
-                  }, editing
-                    ? '编辑模式：修改后点「保存」写回账本文件（tasks/' + (s.type || '') + '/' + (s.file || '') + '.md）；「取消」丢弃改动。'
-                    : '提示：复制路径后在访达（Finder）按 ⌘⇧G 粘贴直达，或粘贴到任意编辑器打开查看。'),
-                  editing
-                    ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-                        h('textarea', {
-                          value: s.draft != null ? s.draft : data.content,
-                          onChange: (e) => onDraftChange && onDraftChange(e.target.value),
-                          spellCheck: false,
-                          style: {
-                            margin: 0, padding: '10px 12px', borderRadius: 6,
-                            fontFamily: C.mono, fontSize: 11, lineHeight: 1.6,
-                            color: 'var(--dsw-alias-label-primary, #2c3138)',
-                            background: 'color-mix(in srgb, ' + C.surface + ' 45%, transparent)',
-                            border: '1px solid ' + C.hairline,
-                            maxHeight: '46vh', minHeight: 120, overflowY: 'auto',
-                            resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          },
-                        }),
-                        h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' } },
-                          s.saveError
-                            ? h('span', { style: { fontSize: 11, color: C.error, marginRight: 'auto' } }, '⚠️ ' + s.saveError)
-                            : null,
-                          h('button', {
-                            onClick: saving ? undefined : () => onEditCancel && onEditCancel(),
-                            disabled: saving,
-                            style: Object.assign(tinyBtn(false), { opacity: saving ? 0.6 : 1, cursor: saving ? 'default' : 'pointer' }),
-                          }, '取消'),
-                          h('button', {
-                            onClick: saving ? undefined : () => onSave && onSave(s.draft != null ? s.draft : data.content),
-                            disabled: saving,
-                            style: Object.assign(buttonStyle({ color: C.accent }), { opacity: saving ? 0.6 : 1, cursor: saving ? 'default' : 'pointer' }),
-                          }, saving ? '保存中…' : '保存写回')))
-                    : h('pre', {
-                        style: {
-                          margin: 0, padding: '10px 12px', borderRadius: 6,
-                          fontFamily: C.mono, fontSize: 11, lineHeight: 1.6,
-                          color: 'var(--dsw-alias-label-primary, #2c3138)',
-                          background: 'color-mix(in srgb, ' + C.surface + ' 45%, transparent)',
-                          border: '1px solid ' + C.hairline,
-                          maxHeight: '46vh', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                        },
-                      }, data.content || ''))
-              : h('div', { style: { padding: '12px', color: C.dim, fontSize: 12 } }, '无内容'))
+                    }, editing
+                      ? '编辑模式：修改后点「保存写回」落到文件（tasks/' + (s.type || '') + '/' + (s.file || '') + '.md）；「取消」丢弃改动。'
+                      : '提示：复制路径后在访达（Finder）按 ⌘⇧G 粘贴直达，或粘贴到任意编辑器打开查看。'),
+                    // 内容区（编辑 ↔ 只读，同一面板切换）
+                    editing
+                      ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                          h('textarea', {
+                            value: s.draft != null ? s.draft : data.content,
+                            onChange: (e) => onDraftChange && onDraftChange(e.target.value),
+                            spellCheck: false,
+                            style: {
+                              margin: 0, padding: '10px 12px', borderRadius: 8,
+                              fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
+                              color: 'var(--dsw-alias-label-primary, #2c3138)',
+                              background: C.raised, border: '1px solid ' + C.hairline,
+                              maxHeight: 320, minHeight: 160, overflowY: 'auto',
+                              resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                            },
+                          }),
+                          h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' } },
+                            s.saveError
+                              ? h('span', { style: { fontSize: 11, color: C.error, marginRight: 'auto' } }, '⚠️ ' + s.saveError)
+                              : null,
+                            h('button', {
+                              onClick: saving ? undefined : () => onEditCancel && onEditCancel(),
+                              disabled: saving,
+                              style: Object.assign(tinyBtn(false), { opacity: saving ? 0.6 : 1, cursor: saving ? 'default' : 'pointer' }),
+                            }, '取消'),
+                            h('button', {
+                              onClick: saving ? undefined : () => onSave && onSave(s.draft != null ? s.draft : data.content),
+                              disabled: saving,
+                              style: Object.assign(buttonStyle({ color: C.accent }), { opacity: saving ? 0.6 : 1, cursor: saving ? 'default' : 'pointer' }),
+                            }, saving ? '保存中…' : '保存写回')))
+                      : h('div', {},
+                          h('pre', {
+                            style: {
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 320,
+                              background: C.raised, border: '1px solid ' + C.hairline,
+                              fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
+                              color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                            },
+                          }, data.content || ''),
+                          // 只读态底部（对齐归档查看「关闭」；可编辑时显示「编辑」切换）
+                          h('div', { style: { textAlign: 'center', marginTop: 12 } },
+                            h('button', { onClick: () => onEditStart && onEditStart(), style: buttonStyle() }, '编辑'))))
+                : h('div', { style: { padding: '12px', color: C.dim, fontSize: 12 } }, '无内容'))
     }
 
     /** 删除任务二次确认弹框。state: {task, view, busy, error}；handlers: {onRollback, onLedgerOnly, onCancel}。 */
@@ -2170,7 +2147,11 @@ window.__ModuleLoader__.load({
             setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '源文件为空或返回异常。' })
             return
           }
-          setSource({ type: t, file: f, busy: false, data: src, copied: false, error: null })
+          setSource({
+            type: t, file: f, busy: false, data: src, copied: false, error: null,
+            // DEV-043：打开即进入编辑态（查看/编辑一体，省去先看再点「编辑」的一步）
+            editing: true, draft: src.content, saveError: null,
+          })
         } catch (e) {
           const code = e && e.code
           setSource({
