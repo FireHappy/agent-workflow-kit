@@ -1390,6 +1390,8 @@ window.__ModuleLoader__.load({
         const meta = s.meta || {} // 任务对象（id/prio/title/updated）或归档行（id/prio/desc/date）
         const metaTitle = meta.title || meta.desc || ''
         const metaUpdated = meta.updated || meta.date || ''
+        // DEV-109：预览/编辑内容区固定高度（避免两态切换时弹框高度跳动）
+        const BODY_H = 480
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
         // DEV-106：预览/编辑分段控件（参照目标样式：同一胶囊容器内两个选项，选中项高亮）
@@ -1451,11 +1453,11 @@ window.__ModuleLoader__.load({
                     },
                       segBtn('预览', viewMode === 'read', () => { if (editing) onEditCancel && onEditCancel() }),
                       segBtn('编辑', viewMode === 'edit', () => { if (!editing) onEditStart && onEditStart() })),
-                    // 内容区（阅读=渲染 / 编辑=textarea，tab 由 viewMode 切换）
+                    // 内容区（阅读=渲染 / 编辑=textarea，固定高度 BODY_H，切换不跳动）
                     viewMode === 'read'
                       ? h('div', {
                             style: {
-                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 640, minHeight: 340,
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', height: BODY_H,
                               background: C.raised, border: '1px solid ' + C.hairline,
                               fontSize: F(14), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
@@ -1471,7 +1473,7 @@ window.__ModuleLoader__.load({
                               fontFamily: C.mono, fontSize: F(13), lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              maxHeight: 640, minHeight: 340, overflowY: 'auto',
+                              height: BODY_H, overflowY: 'auto',
                               resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             },
                           }),
