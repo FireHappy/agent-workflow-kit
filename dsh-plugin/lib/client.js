@@ -480,6 +480,8 @@ window.__ModuleLoader__.load({
         window.addEventListener('mouseup', up)
       }
       // DEV-108/110：拖拽调整弹框大小——dir: 'right'(改宽) | 'bottom'(改高) | 'se'(宽+高)
+      // DEV-110/112：拖拽调整弹框大小——dir 8 方向（四边+四角）
+      //   right/bottom/se：只改尺寸；left/top/nw/ne/sw：同时改位置（对面边固定）
       const onResizeStart = (e, dir) => {
         e.preventDefault()
         e.stopPropagation()
@@ -487,11 +489,22 @@ window.__ModuleLoader__.load({
         if (!card) return
         const startX = e.clientX, startY = e.clientY
         const startW = card.offsetWidth, startH = card.offsetHeight
+        const basePos = pos || centerBySize(startW, startH) // 当前左/上
         const move = (ev) => {
           const dx = ev.clientX - startX, dy = ev.clientY - startY
-          const w = dir === 'right' || dir === 'se' ? Math.max(320, startW + dx) : startW
-          const h = dir === 'bottom' || dir === 'se' ? Math.max(180, startH + dy) : startH
+          let w = startW, h = startH, x = basePos.x, y = basePos.y
+          if (dir === 'right' || dir === 'se' || dir === 'ne') w = Math.max(320, startW + dx)
+          if (dir === 'bottom' || dir === 'se' || dir === 'sw') h = Math.max(180, startH + dy)
+          if (dir === 'left' || dir === 'nw' || dir === 'sw') { // 左边缘：右缘固定
+            const nw = Math.max(320, startW - dx)
+            w = nw; x = basePos.x + (startW - nw)
+          }
+          if (dir === 'top' || dir === 'nw' || dir === 'ne') { // 上边缘：下缘固定
+            const nh = Math.max(180, startH - dy)
+            h = nh; y = basePos.y + (startH - nh)
+          }
           setCustomSize({ w, h })
+          if (x !== basePos.x || y !== basePos.y) setPos({ x, y })
         }
         const up = () => {
           lastResizeRef.current = Date.now()
@@ -519,6 +532,7 @@ window.__ModuleLoader__.load({
           className: 'awf-modal-card',
           ref: cardRef,
           style: {
+            // DEV-111：absolute 定位（默认居中，拖动标题栏移动）；高度 auto（children 内 minHeight 兜底）
             width: customSize ? customSize.w : (width || 720),
             height: customSize ? customSize.h : undefined,
             maxWidth: 'calc(100vw - 40px)', maxHeight: '88vh',
@@ -552,18 +566,44 @@ window.__ModuleLoader__.load({
               }),
             }, '✕')),
           h('div', {
-            style: { padding: '12px 14px', overflowY: 'auto', fontSize: F(12), color: C.text, flex: 1, minHeight: 0 },
+            style: { padding: '12px 14px', overflowY: 'auto', fontSize: F(12), color: C.text, flex: 1, minHeight: 460, display: 'flex', flexDirection: 'column' },
           }, children),
           // DEV-108/110：拖拽调整弹框大小 —— 右边缘(改宽) / 下边缘(改高) / 右下角(宽高)
+          // DEV-110/112：拖拽调整弹框大小 —— 四边 + 四角热区
+          h('div', { // 左边缘热区
+            onMouseDown: (e) => onResizeStart(e, 'left'),
+            title: '拖动调整弹框宽度',
+            style: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 8, cursor: 'ew-resize', zIndex: 2 },
+          }),
           h('div', { // 右边缘热区
             onMouseDown: (e) => onResizeStart(e, 'right'),
             title: '拖动调整弹框宽度',
             style: { position: 'absolute', top: 0, right: 0, bottom: 0, width: 8, cursor: 'ew-resize', zIndex: 2 },
           }),
+          h('div', { // 上边缘热区
+            onMouseDown: (e) => onResizeStart(e, 'top'),
+            title: '拖动调整弹框高度',
+            style: { position: 'absolute', left: 0, right: 0, top: 0, height: 8, cursor: 'ns-resize', zIndex: 2 },
+          }),
           h('div', { // 下边缘热区
             onMouseDown: (e) => onResizeStart(e, 'bottom'),
             title: '拖动调整弹框高度',
             style: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 8, cursor: 'ns-resize', zIndex: 2 },
+          }),
+          h('div', { // 左上角
+            onMouseDown: (e) => onResizeStart(e, 'nw'),
+            title: '拖动调整弹框大小',
+            style: { position: 'absolute', left: 0, top: 0, width: 14, height: 14, cursor: 'nwse-resize', zIndex: 3 },
+          }),
+          h('div', { // 右上角
+            onMouseDown: (e) => onResizeStart(e, 'ne'),
+            title: '拖动调整弹框大小',
+            style: { position: 'absolute', right: 0, top: 0, width: 14, height: 14, cursor: 'nesw-resize', zIndex: 3 },
+          }),
+          h('div', { // 左下角
+            onMouseDown: (e) => onResizeStart(e, 'sw'),
+            title: '拖动调整弹框大小',
+            style: { position: 'absolute', left: 0, bottom: 0, width: 14, height: 14, cursor: 'nesw-resize', zIndex: 3 },
           }),
           h('div', { // 右下角手柄（斜纹三角视觉）
             onMouseDown: (e) => onResizeStart(e, 'se'),
@@ -1445,10 +1485,6 @@ window.__ModuleLoader__.load({
         const meta = s.meta || {} // 任务对象（id/prio/title/updated）或归档行（id/prio/desc/date）
         const metaTitle = meta.title || meta.desc || ''
         const metaUpdated = meta.updated || meta.date || ''
-        // DEV-109：预览/编辑内容区固定高度（避免两态切换时弹框高度跳动）
-        //   编辑态比预览态多一行「取消/保存」按钮（约 34 + gap 6），textare 高度=BODY_H-40 补偿
-        const BODY_H = 560
-        const EDIT_BTN_ROW = 40
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
         // DEV-106：预览/编辑分段控件（参照目标样式：同一胶囊容器内两个选项，选中项高亮）
@@ -1481,7 +1517,7 @@ window.__ModuleLoader__.load({
             : s.error
               ? h('div', { style: { padding: '12px', color: C.error, fontSize: F(12), wordBreak: 'break-all' } }, '⚠️ ' + s.error)
               : data
-                ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+                ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 } },
                     // 顶部徽章行（对齐归档查看）：类型 / 优先级 / 文件名
                     // （不再显示超长「更新于…」备注，避免挤占；任务信息以内容区为准）
                     h('div', { style: row({ gap: 8, flexWrap: 'wrap' }) },
@@ -1506,17 +1542,18 @@ window.__ModuleLoader__.load({
                     },
                       segBtn('预览', viewMode === 'read', () => { if (editing) onEditCancel && onEditCancel() }),
                       segBtn('编辑', viewMode === 'edit', () => { if (!editing) onEditStart && onEditStart() })),
-                    // 内容区（阅读=渲染 / 编辑=textarea，固定高度 BODY_H，切换不跳动）
+                    // 内容区（阅读=渲染 / 编辑=textarea，flex 撑满弹框剩余高度，拖拽拉高自动跟随）
                     viewMode === 'read'
                       ? h('div', {
                             style: {
-                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', height: BODY_H,
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto',
+                              flex: 1, minHeight: 0,
                               background: C.raised, border: '1px solid ' + C.hairline,
                               fontSize: F(14), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
                             // 渲染结果以 HTML 注入（mdToHtml 已转义，安全）
                           }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(data.content || '') } }))
-                      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                      : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0 } },
                           h('textarea', {
                             value: s.draft != null ? s.draft : data.content,
                             onChange: (e) => onDraftChange && onDraftChange(e.target.value),
@@ -1526,7 +1563,7 @@ window.__ModuleLoader__.load({
                               fontFamily: C.mono, fontSize: F(13), lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              height: BODY_H - EDIT_BTN_ROW, overflowY: 'auto',
+                              flex: 1, minHeight: 0, overflowY: 'auto',
                               resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             },
                           }),
