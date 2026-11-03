@@ -6,11 +6,7 @@
 
 ## 当前进行中
 
-| 工作流 | 任务ID | 优先级 | 状态 | Owner | 任务 |
-|--------|--------|--------|------|-------|------|
-| dev | DEV-042 | P2 | active | agent | 停止自动回填：不再自动派发子代理反复填写开发进度 |
-| dev | DEV-043 | P2 | review | agent | 任务卡查看/编辑源文件 + 升级按钮更新中动画 |
-| dev | DEV-041 | P1 | active | agent | 工作流更新升级闭环：检测已有文件夹 → agent 整理合并 → 完成回调通知面板刷新 |
+（无）
 
 ## 待处理
 
@@ -29,12 +25,12 @@
 | dev | DEV-020 | P1 | 插件看板只跟随当前会话：去掉项目下拉与 localStorage 手动选择，未初始化弹引导卡（client.js 锚定/header/空态改造 + kit 源同步 + 冒烟验证） | 2026-11-03 |
 | dev | DEV-022 | P1 | 插件发版 0.2.0：看板改造（只跟随当前会话 + 轻量行风格 + 项目卡简洁化）落版本号，框架 VERSION 不动 | 2026-11-03 |
 | dev | DEV-019 | P1 | 批量升级/安装 11 个项目 agent-workflow 框架至 kit v0.5.0（6 upgrade + 5 init）；团队 awf-upgrade-all × 5 dispatcher；G1 status.md 梗阻由 captain 刷新破除；2 个超时回合 finalize 补 commit | 2026-11-02 |
-| dev | DEV-017 | P1 | 工作流路由与「项目升级」语义改进（KIT-DEV-017）：路由按目标仓库逐条决策（小任务单会话/可并行才团队/跨仓库默认 awf-dispatch、团队不承载跨仓库任务）；新增 awf upgrade + docs/upgrade.md；check 迁移 FAIL 输出修复指引（ | 2026-11-01 |
+| dev | DEV-041 | P1 | 工作流更新升级闭环：检测已有文件夹 → agent 整理合并 → 完成回调通知面板刷新（/awf/upgrade/complete + needs-upgrade 引导 + SSE 自动刷新） | 2026-11-03 |
 | docs | DOCS-002 | P1 | 团队执行流程三轨契约：docs / dev / debug 与现有工作流一一对应，含发起口令与例外 | 2026-10-31 |
 | docs | DOCS-004 | P1 | 团队启动改为 automatic：用户授权不再逐次确认，保留 3 行计划摘要与即时叫停 | 2026-10-31 |
+| dev | DEV-042 | P2 | 停止自动回填：AUTO_BACKFILL_ENABLED=false，不再自动派发子代理反复填写开发进度；路由保留可手动调用 | 2026-11-03 |
+| dev | DEV-043 | P2 | 任务卡查看/编辑源文件 + 升级按钮更新中动画：三类入口统一源文件面板（current/done/todo 可编辑保存）、列表滚动容器、ESC 关闭弹框 | 2026-11-03 |
 | dev | DEV-018 | P1 | release-prep 0.5.0：一键发版装配 | 2026-11-01 |
-| dev | DEV-016 | P3 | registry-concurrency.sh 锁残留断言按锁模式放宽：mkdir 模式断言无残留、flock 模式断言锁文件可正常获取/释放，消除 flock 平台误报 | 2026-11-01 |
-| dev | DEV-015 | P1 | awf 全局索引写入并发安全：$AGENTS_HOME 互斥锁（flock / mkdir 自旋 + 陈旧回收）串行化读改写、按 P_ID 合并、test/registry-concurrency.sh 并发回归 | 2026-11-01 |
 
-*最后更新：2026-11-03 11:52*
+*最后更新：2026-11-03 14:27*
 <!-- awf:status:end -->
