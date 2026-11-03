@@ -204,7 +204,16 @@ window.__ModuleLoader__.load({
       'font-weight:600;white-space:nowrap;box-sizing:border-box}' +
       // 进度条统一 4px 轨道（position:relative 供 DEV-037 流光 ::after 定位）
       '.awf-progress{height:4px;border-radius:99px;overflow:hidden;margin-top:3px;position:relative}' +
-      '.awf-progress-fill{height:100%;border-radius:99px;transition:width .3s ease}'
+      '.awf-progress-fill{height:100%;border-radius:99px;transition:width .3s ease}' +
+      // DEV-044：轻量行风格——最后一个行去掉底部边框（避免列表末行多余横线）；
+      // 紧凑 icon 按钮（项目卡路径复制用，替代带 minWidth 的 tinyBtn）。
+      '.awf-row:last-child{border-bottom:none!important}' +
+      '.awf-icon-btn{display:inline-flex;align-items:center;justify-content:center;' +
+      'width:22px;height:22px;padding:0;font-size:12px;line-height:1;flex-shrink:0;' +
+      'border:1px solid '+C.border+';border-radius:6px;background:'+C.surface+';color:'+C.dim+';' +
+      'cursor:pointer;transition:background .15s ease}' +
+      '.awf-icon-btn:hover{background:'+C.hover+';color:'+C.text+'}' +
+      '.awf-icon-btn-ok{color:'+C.success+'!important;border-color:color-mix(in srgb,'+C.success+' 45%,transparent)!important}'
 
     // DEV-037 进行中动画 + 流程质感：纯装饰 CSS，不影响布局，不改变既有类名契约。
     // 动画目标——① 当前步骤节点呼吸光圈（box-shadow 脉动，静态 2px 光圈无缝衔接）；
@@ -858,77 +867,54 @@ window.__ModuleLoader__.load({
     // 移除编辑/暂停/删除/放回待办/回填/验证等全部操作交互与进度/步骤条渲染；
     // 状态徽章（进行中/验证等）判断不准，一并移除——徽章行只保留账本事实：类型/优先级/Owner。
     // DEV-043：进行中任务可打开源文件（current.md）并编辑。徽章行只保留账本事实。
-    function TaskCard({ t, flush, onOpenSource }) {
+    /**
+     * 当前任务行（DEV-044 对齐「最近完成」轻量行风格）：无卡片边框、hairline 分隔、
+     * 紧凑单行布局。徽章行只保留账本事实：类型 / 优先级 / Owner。
+     */
+    function TaskCard({ t, flush }) {
       const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
       const pst = PRIO_STYLE[t.prio] || { color: C.faint }
-      const cardCls = Object.assign({}, cardStyle, flush ? { marginBottom: 0 } : {})
 
-      // 徽章行：类型=中性 chip / 优先级=实底或浅底 / Owner=accent 浅底（无状态徽章）
+      // 徽章行：类型=中性 chip / 优先级=实底或浅底（Owner 进 meta 行，避免重复展示）
       const badgeRow = h('div', { className: 'awf-badge-row', style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' } },
         h(Pill, { color: type.color, variant: 'chip' }, type.label),
-        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null,
+        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null)
+
+      // 行头：ID（左）+ 徽章行（右），与最近完成行的紧凑间距一致
+      const rowHead = h('div', {
+        style: {
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+          marginBottom: 3,
+        },
+      },
+        h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text } }, t.id || '?'),
+        badgeRow)
+
+      const meta = h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: C.faint, marginTop: 3 } },
         t.owner
-          ? h(Pill, { color: C.accent, dot: true },
-              h('span', { title: 'Owner', style: { maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis' } }, t.owner))
-          : null)
+          ? h('span', { style: row({ gap: 4 }) },
+              h('span', { style: { color: C.dim } }, '👤'), h('span', {}, t.owner))
+          : null,
+        t.updated ? h('span', { style: row({ gap: 4 }) },
+          h('span', { style: { color: C.faint } }, '↻'), h('span', {}, '更新 ' + t.updated)) : null,
+        t.mode ? h('span', { style: { color: C.faint } }, t.mode) : null)
 
-      // 源文件入口（只读交互）：打开 current.md 供查看/编辑
-      const sourceBtn = typeof onOpenSource === 'function'
-        ? h('button', {
-            onClick: () => onOpenSource(t.type, 'current'),
-            title: '打开此任务源文件（current.md）查看或编辑',
-            style: Object.assign(tinyBtn(false), { display: 'inline-flex', alignItems: 'center', gap: 4 }),
-          }, '源文件')
-        : null
-
-      return h('div', { className: 'awf-card', style: cardCls },
-        h('div', {
-          style: {
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
-            paddingBottom: 6, marginBottom: 6,
-            borderBottom: '1px solid ' + C.hairline,
-          },
+      return h('div', {
+        className: 'awf-row',
+        style: {
+          display: 'flex', flexDirection: 'column', gap: 0,
+          padding: '7px 2px', borderBottom: '1px solid ' + C.hairline, fontSize: 12,
         },
-          h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 12, color: C.text } }, t.id || '?'),
-          badgeRow),
-        h('div', { style: { fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6, lineHeight: 1.45 } },
+      },
+        rowHead,
+        h('div', { style: { fontSize: 13, fontWeight: 600, color: C.text, lineHeight: 1.45 } },
           t.title || '（无标题）'),
-        h('div', {
-          style: Object.assign(
-            { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-            { flexWrap: 'wrap' }),
-        },
-          h('div', { style: row({ gap: 8, flexWrap: 'wrap', fontSize: 11, color: C.dim }) },
-            t.owner
-              ? h('span', { title: 'Owner · ' + t.owner, style: row({ gap: 4 }) },
-                  h('span', {
-                    style: {
-                      width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
-                      background: 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
-                      color: C.accent, fontSize: 9, fontWeight: 700, display: 'inline-flex',
-                      alignItems: 'center', justifyContent: 'center',
-                    },
-                  }, (t.owner[0] || '?').toUpperCase()))
-              : null,
-            t.updated ? h('span', { style: row({ gap: 4 }) },
-              h('span', { style: { color: C.faint } }, '↻'), h('span', {}, '更新 ' + t.updated)) : null,
-            t.mode ? h('span', { style: { color: C.faint } }, t.mode) : null),
-          sourceBtn))
+        meta)
     }
 
-    /** 最近完成行：完成标记 / 日期 / ID / 描述，可点击查看归档；DEV-043 加「源文件」入口（done.md）。 */
-    function RecentRow({ r, onOpen, onOpenSource }) {
+    /** 最近完成行：完成标记 / 日期 / ID / 描述，可点击查看归档（DEV-044：无源文件按钮）。 */
+    function RecentRow({ r, onOpen }) {
       const clickable = typeof onOpen === 'function'
-      const sourceBtn = typeof onOpenSource === 'function'
-        ? h('button', {
-            onClick: (e) => {
-              e.stopPropagation() // 不触发行级「查看归档」
-              onOpenSource(r.type, 'done')
-            },
-            title: '打开此任务源文件（done.md）查看或编辑',
-            style: Object.assign(tinyBtn(false), { display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }),
-          }, '源文件')
-        : null
       return h('div', {
         className: 'awf-row',
         onClick: clickable ? () => onOpen(r) : undefined,
@@ -948,8 +934,7 @@ window.__ModuleLoader__.load({
             whiteSpace: 'nowrap', flex: 1, minWidth: 0,
           },
         }, r.desc || '—'),
-        clickable ? h('span', { style: { color: C.faint, fontSize: 12, flexShrink: 0 } }, '›') : null,
-        sourceBtn)
+        clickable ? h('span', { style: { color: C.faint, fontSize: 12, flexShrink: 0 } }, '›') : null)
     }
 
     /**
@@ -958,22 +943,15 @@ window.__ModuleLoader__.load({
      *      删除确认态 {deleting, onDeleteConfirm, onDeleteCancel, busy}。
      */
     /**
-     * 待办行（DEV-041 纯看板）：只读展示 类型/ID/描述/优先级，无任何操作按钮。
-     * DEV-043：加「源文件」入口（打开 todo.md 查看/编辑）。
+     * 待办行（DEV-044 对齐「最近完成」轻量行风格）：只读展示 类型/ID/描述/优先级，
+     * 无任何操作按钮（含源文件）。
      */
-    function TodoRow({ row, onOpenSource }) {
+    function TodoRow({ row }) {
       const typeStyle = TYPE_STYLE[row.type] || { color: C.faint }
-      const sourceBtn = typeof onOpenSource === 'function'
-        ? h('button', {
-            onClick: () => onOpenSource(row.type, 'todo'),
-            title: '打开此待办源文件（todo.md）查看或编辑',
-            style: Object.assign(tinyBtn(false), { display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }),
-          }, '源文件')
-        : null
       return h('div', {
         className: 'awf-row',
         style: {
-          display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0 5px 2px',
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px',
           borderBottom: '1px solid ' + C.hairline, fontSize: 12,
         },
       },
@@ -985,8 +963,7 @@ window.__ModuleLoader__.load({
             whiteSpace: 'nowrap', flex: 1, minWidth: 0,
           },
         }, row.desc || '—'),
-        row.prio ? h(Pill, { color: (PRIO_STYLE[row.prio] || { color: C.faint }).color, variant: 'soft', dataPrio: row.prio }, row.prio) : null,
-        sourceBtn)
+        row.prio ? h(Pill, { color: (PRIO_STYLE[row.prio] || { color: C.faint }).color, variant: 'soft', dataPrio: row.prio }, row.prio) : null)
     }
 
     /**
@@ -2142,6 +2119,15 @@ window.__ModuleLoader__.load({
         })
       }, [])
 
+      // DEV-044：项目卡路径复制（短暂反馈「已复制」）
+      const [pathCopied, setPathCopied] = useState(false)
+      const copyProjectPath = useCallback((pathStr) => {
+        copyText(pathStr, (ok) => {
+          setPathCopied(ok)
+          if (ok) setTimeout(() => setPathCopied(false), 1600)
+        })
+      }, [])
+
       // ---- DEV-043：源文件编辑（打开并编辑保存）----
       // 编辑态字段：editing（是否编辑中）/ draft（草稿）/ saving（保存中）/ saveError。
       const sourceEditStart = useCallback(() => {
@@ -2181,12 +2167,11 @@ window.__ModuleLoader__.load({
         }
       }, [selected, source, loadLedger])
 
-      // DEV-024 头部工具条：只显示当前会话锚定的项目（无下拉选择器）
-      // 项目名 + 锚定徽章 + 刷新；刷新按钮文案恒定（busy 只做 disabled+降透明）。
+      // DEV-044 头部工具条：只显示当前会话锚定的项目（无下拉选择器）：
+      // 项目名 + 刷新；刷新按钮文案恒定（busy 只做 disabled+降透明）。
       // 显示当前锚定项目：优先索引 id（如 agent-demo-02），未登记项目显示路径。
-      const projLabel = (projects || []).find((pr) => pr && pr.path === selected)
-        ? (projects || []).find((pr) => pr && pr.path === selected).id
-        : (selected || '')
+      const projRow = (projects || []).find((pr) => pr && pr.path === selected)
+      const projLabel = projRow ? projRow.id : (selected || '')
       const header = h('div', {
         className: 'awf-toolbar',
         style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 },
@@ -2203,7 +2188,6 @@ window.__ModuleLoader__.load({
               overflow: 'hidden', textOverflow: 'ellipsis',
             },
           }, projLabel || '当前会话项目…')),
-        auto && selected ? h(Pill, { color: C.success, dot: true }, '已锚定当前会话') : null,
         h('button', {
           onClick: () => { reloadProjects(); loadLedger() },
           disabled: loading,
@@ -2211,10 +2195,8 @@ window.__ModuleLoader__.load({
           style: Object.assign(buttonStyle(), { opacity: loading ? 0.6 : 1, cursor: loading ? 'default' : 'pointer' }),
         }, '刷新'))
 
-      // DEV-035：框架版本状态条（latest / outdated / unknown）
-      const versionBar = selected && versions && !notInit && !error
-        ? renderVersionBar(versions, { onUpgrade: handleUpgrade, upgrading, upError })
-        : null
+      // DEV-044：版本状态条并入项目卡（见 renderLedgerBody 项目卡），此处不再单独渲染。
+      const versionBar = null
 
       const body = notInit
         ? renderInitCard({ busy: initBusy, error: initError, onInit: handleInit })
@@ -2222,18 +2204,20 @@ window.__ModuleLoader__.load({
           ? renderErrorBody(error, loadLedger)
           : ledger
             ? renderLedgerBody(ledger, {
-                // DEV-041 纯看板：只保留只读交互（归档查看 / 类型 toggle / 源文件面板）
+                // DEV-044 纯看板：只读交互（归档查看 / 类型 toggle / 项目路径复制）
                 onOpenArchive: handleOpenArchive,
                 actionError,
                 todoType,
                 onTodoTypeChange: handleTodoTypeChange,
-
-                // t5：源文件查看
-                onOpenSource: openSource,
+                onCopyPath: copyProjectPath,
+                pathCopied,
+                versions,
+                onUpgrade: handleUpgrade,
+                upgrading,
+                upError,
                 source,
                 onCloseSource: closeSource,
                 onCopySourcePath: copySourcePath,
-                // DEV-043：源文件编辑保存
                 onSourceEditStart: sourceEditStart,
                 onSourceEditCancel: sourceEditCancel,
                 onSourceDraftChange: sourceDraftChange,
@@ -2399,11 +2383,38 @@ window.__ModuleLoader__.load({
         }, h('span', {}, '⚠️'), h('span', {}, U.actionError)))
       }
 
-      // ---- 项目卡：名称 / 路径 / purpose / 新鲜度徽章 / 更新提示
-      const fresh = ledger.status && ledger.status.fresh
-      const freshLabel = fresh ? '账本新鲜' : '账本过期'
-      const freshColor = fresh ? C.success : C.warn
+      // ---- 项目卡（DEV-044 简洁版）：名称（+版本号）/ 路径 + 复制按钮（无账本状态徽章）
       const proj = ledger.project || {}
+      const vs = U.versions || null
+      // 版本号并入第一栏：latest → 绿点 + v{installed}；outdated → 黄点 + 可升级（点击去升级）。
+      // 版本信号不存在时（未登记 kit / 读不到 AWF_VERSION）不显示。
+      const upgradable = vs && (vs.status === 'outdated' || vs.status === 'unknown') && typeof U.onUpgrade === 'function'
+      const versionChip = vs && vs.installed
+        ? h('button', {
+            onClick: upgradable ? U.onUpgrade : undefined,
+            disabled: !upgradable || !!U.upgrading,
+            title: vs.status === 'latest' ? '工作流已最新'
+              : (vs.status === 'outdated' ? '工作流可升级：' + (vs.installed || vs.scaffold || '?') + ' → ' + (vs.upgradeTo || '最新') + '（点击升级）' : '框架版本'),
+            style: {
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontSize: 11, color: vs.status === 'outdated' ? C.warn : C.dim,
+              background: C.surface,
+              border: '1px solid color-mix(in srgb, ' + (vs.status === 'outdated' ? C.warn : C.border) + ' 55%, transparent)',
+              borderRadius: C.radiusSm, padding: '1px 7px', flexShrink: 0, fontWeight: 600,
+              opacity: U.upgrading ? 0.6 : 1, cursor: upgradable && !U.upgrading ? 'pointer' : 'default',
+            },
+          },
+            vs.status === 'latest' ? h('span', { style: { color: C.success, fontWeight: 700 } }, '●') : null,
+            vs.status === 'outdated' ? h('span', { style: { color: C.warn, fontWeight: 700 } }, '⚠') : null,
+            String(vs.installed || ''))
+        : null
+      const copyBtn = typeof U.onCopyPath === 'function' && proj.path
+        ? h('button', {
+            className: 'awf-icon-btn' + (U.pathCopied ? ' awf-icon-btn-ok' : ''),
+            onClick: () => U.onCopyPath(proj.path),
+            title: '复制项目路径到剪贴板',
+          }, U.pathCopied ? '✓' : '⧉')
+        : null
       items.push(h('div', {
         key: 'proj',
         style: Object.assign({}, cardStyle, {
@@ -2411,31 +2422,21 @@ window.__ModuleLoader__.load({
           background: 'linear-gradient(180deg, ' + C.raised + ', ' + C.surface + ')',
         }),
       },
-        h('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 } },
-          h('div', { style: { minWidth: 0 } },
-            h('div', { style: { fontSize: 14, fontWeight: 800, color: C.text, lineHeight: 1.3 } },
-              proj.name || '未命名项目'),
-            h('div', { style: { fontFamily: C.mono, fontSize: 11, color: C.faint, marginTop: 3, wordBreak: 'break-all' } },
-              proj.path || '')),
-          h(Pill, { color: freshColor, dot: true }, freshLabel)),
-        proj.purpose
-          ? h('div', {
-              style: {
-                marginTop: 9, fontSize: 12, color: C.sub, lineHeight: 1.5,
-                background: 'color-mix(in srgb, ' + C.accent + ' 7%, transparent)',
-                border: '1px solid ' + C.hairline, borderRadius: 8,
-                padding: '6px 9px', wordBreak: 'break-word',
-              },
-            }, '🎯 ' + proj.purpose)
-          : null,
         h('div', {
-          style: row({ gap: 6, marginTop: 9 }),
-          color: fresh ? C.dim : 'color-mix(in srgb, ' + C.warn + ' 75%, transparent)',
+          style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
         },
-          h('span', { style: { width: 5, height: 5, borderRadius: '50%', background: fresh ? C.success : C.warn, display: 'inline-block', flexShrink: 0 } }),
-          h('span', { style: { fontSize: 11 } },
-            `status.md 更新于 ${fmtTime(ledger.status && ledger.status.updated)}` +
-            (fresh ? '' : ' → 请运行 awf status')))))
+          h('div', { style: { fontSize: 14, fontWeight: 800, color: C.text, lineHeight: 1.3, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            proj.name || '未命名项目'),
+          versionChip),
+        h('div', {
+          style: {
+            display: 'flex', alignItems: 'center', gap: 6,
+            marginTop: 3, minWidth: 0,
+          },
+        },
+          h('div', { style: { fontFamily: C.mono, fontSize: 11, color: C.faint, wordBreak: 'break-all', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            proj.path || ''),
+          copyBtn)))
 
       // ---- 当前任务（DEV-024：宽面板两列网格，窄面板 auto-fit 自动回退单列）
       items.push(h(SectionTitle, { key: 'cur-h', label: '当前任务', count: ledger.current.length }))
@@ -2444,7 +2445,6 @@ window.__ModuleLoader__.load({
         ledger.current.forEach((t, i) => {
           taskCards.push(h(TaskCard, {
             key: 'cur-' + i, t, flush: true,
-            onOpenSource: U.onOpenSource,
           }))
         })
         items.push(h('div', {
@@ -2459,11 +2459,14 @@ window.__ModuleLoader__.load({
       } else {
         items.push(h('div', {
           key: 'cur-none',
-          style: { ...cardStyle, color: C.dim, fontSize: 12, textAlign: 'center', padding: '12px' },
+          style: {
+            color: C.faint, fontSize: 12, textAlign: 'center',
+            padding: '10px 0', borderBottom: '1px solid ' + C.hairline,
+          },
         }, '当前无进行中任务 · 全部空闲'))
       }
 
-      // ---- 待办（类型 toggle + 该类型未开始任务行 CRUD；todo.md 是表格行，无进度条）
+      // ---- 待办（类型 toggle + 该类型未开始任务行；todo.md 是表格行，无进度条）
       if (ledger.todo.length > 0 || todoRows.length > 0) {
         const selType = (U.todoType && (U.todoType === 'dev' || U.todoType === 'debug' || U.todoType === 'docs')) ? U.todoType : 'dev'
         const typeRows = todoRows.filter((r) => r.type === selType)
@@ -2475,7 +2478,7 @@ window.__ModuleLoader__.load({
           key: 'rows-title',
           style: {
             display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8,
-            borderTop: '1px dashed ' + C.hairline,
+            borderTop: '1px solid ' + C.hairline,
           },
         },
           h('span', { style: { fontSize: 12, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType)),
@@ -2484,26 +2487,25 @@ window.__ModuleLoader__.load({
           cardChildren.push(h('div', { key: 'rows' },
             typeRows.map((r) => {
               const key = r.type + ':' + r.id
-              return h(TodoRow, { key, row: r, onOpenSource: U.onOpenSource })
+              return h(TodoRow, { key, row: r })
             })))
         } else {
           cardChildren.push(h('div', {
             key: 'rows-empty',
             style: {
-              marginTop: 8, padding: '14px 0', textAlign: 'center',
+              padding: '10px 0', textAlign: 'center',
               color: C.faint, fontSize: 12,
-              border: '1px dashed ' + C.hairline, borderRadius: 8,
             },
           }, '该类型暂无未开始任务'))
         }
-        items.push(h('div', { key: 'todo', className: 'awf-card', style: cardStyle }, cardChildren))
+        items.push(h('div', { key: 'todo' }, cardChildren))
       }
 
       // ---- 最近完成（仅 5 条，可点击查看归档）
       if (recent.length > 0) {
         items.push(h(SectionTitle, { key: 'recent-h', label: '最近完成', count: recent.length }))
-        items.push(h('div', { key: 'recent', className: 'awf-card', style: Object.assign({}, cardStyle, { padding: '4px 12px', marginBottom: 0 }) },
-          recent.map((r, i) => h(RecentRow, { key: 'recent-' + i, r, onOpen: U.onOpenArchive, onOpenSource: U.onOpenSource }))))
+        items.push(h('div', { key: 'recent' },
+          recent.map((r, i) => h(RecentRow, { key: 'recent-' + i, r, onOpen: U.onOpenArchive }))))
       }
 
       items.push(h('div', {
