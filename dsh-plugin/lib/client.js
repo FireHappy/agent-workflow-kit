@@ -1500,7 +1500,10 @@ window.__ModuleLoader__.load({
       },
         h('span', { style: { fontSize: 24, lineHeight: 1 } }, icon),
         h('div', { style: { fontWeight: 800, fontSize: 13, color: C.text, marginTop: 10 } }, title),
-        desc ? h('div', { style: muted({ marginTop: 6, maxWidth: 260 }) }, desc) : null,
+        desc ? h('div', {
+          // DEV-043：引导卡说明文字提亮（muted/dim→sub），与待办/最近完成/底部提示一致
+          style: { color: C.sub, fontSize: 12, lineHeight: 1.5, marginTop: 6, maxWidth: 260 },
+        }, desc) : null,
         extra || null,
         action || null)
     }
