@@ -1366,17 +1366,14 @@ window.__ModuleLoader__.load({
                       tabBtn('编辑', viewMode === 'edit', () => { if (!editing) onEditStart && onEditStart() })),
                     // 内容区（阅读=渲染 / 编辑=textarea，tab 由 viewMode 切换）
                     viewMode === 'read'
-                      ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-                          h('div', {
+                      ? h('div', {
                             style: {
                               margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 340,
                               background: C.raised, border: '1px solid ' + C.hairline,
                               fontSize: 12, lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
                             // 渲染结果以 HTML 注入（mdToHtml 已转义，安全）
-                          }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(data.content || '') } })),
-                          h('div', { style: { textAlign: 'center', marginTop: 12 } },
-                            h('button', { onClick: () => onEditStart && onEditStart(), style: buttonStyle() }, '编辑')))
+                          }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(data.content || '') } }))
                       : h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
                           h('textarea', {
                             value: s.draft != null ? s.draft : data.content,
