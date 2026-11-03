@@ -1396,15 +1396,26 @@ window.__ModuleLoader__.load({
         const segBtn = (label, active, onClick) => h('button', {
           onClick: () => onClick && onClick(),
           style: {
-            fontSize: F(12), padding: '4px 14px', cursor: 'pointer',
+            position: 'relative',
+            fontSize: F(12), padding: '4px 14px 6px', cursor: 'pointer',
             border: 'none', borderRadius: 6,
-            background: active ? C.accent : 'transparent',
-            color: active ? '#fff' : C.sub,
+            background: 'transparent',
+            // DEV-109：选中=文字高亮（accent 色 + 加粗 + 底部指示条），不用实心底
+            color: active ? C.accent : C.text,
             fontWeight: active ? 700 : 500,
-            transition: 'background .12s ease, color .12s ease',
+            transition: 'color .12s ease',
             whiteSpace: 'nowrap',
           },
-        }, label)
+          // 底部指示条（选中态）
+          ...(active
+            ? {
+                children: [
+                  label,
+                  h('span', { key: 'bar', style: { position: 'absolute', left: 8, right: 8, bottom: 1, height: 2, borderRadius: 1, background: C.accent } }),
+                ],
+              }
+            : { children: label }),
+        }, null)
         return h(ModalShell, {
           title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
           onClose, width: 720,
