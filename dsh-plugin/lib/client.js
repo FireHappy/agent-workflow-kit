@@ -445,9 +445,40 @@ window.__ModuleLoader__.load({
     function ModalShell({ title, onClose, children, width }) {
       // DEV-108：弹框右下角拖拽调整大小（JS 实现；纯 CSS resize 对 auto 高度无效）
       const [customSize, setCustomSize] = useState(null) // {w, h} | null
+      // DEV-111：弹框位置（默认居中；拖标题栏移动）
+      const [pos, setPos] = useState(null) // {x, y}（card 左上角）| null=居中
+      const cardRef = useRef(null)
       // DEV-110：拖拽结束后 300ms 内的 click 视为拖拽残留，不关闭弹框
-      //   （拖拽放大时鼠标移出 card 到 mask 上松手，click 冒泡到 mask 会被误判为点遮罩关闭）
       const lastResizeRef = useRef(0)
+      // DEV-111：按当前视口把任意目标坐标居中（读 card 尺寸）
+      const centerBySize = (w, h) => ({
+        x: Math.max(8, Math.round((window.innerWidth - w) / 2)),
+        y: Math.max(8, Math.round((window.innerHeight - h) / 2)),
+      })
+      // DEV-111：标题栏拖动移动弹框
+      const onMoveStart = (e) => {
+        if (e.button !== 0 || (e.target && e.target.tagName === 'BUTTON')) return
+        e.preventDefault()
+        e.stopPropagation()
+        const card = cardRef.current
+        if (!card) return
+        const w = card.offsetWidth, h = card.offsetHeight
+        const base = pos || centerBySize(w, h)
+        const startX = e.clientX, startY = e.clientY
+        const move = (ev) => {
+          setPos({
+            x: Math.max(-w + 80, Math.min(window.innerWidth - 40, base.x + ev.clientX - startX)),
+            y: Math.max(0, Math.min(window.innerHeight - 40, base.y + ev.clientY - startY)),
+          })
+        }
+        const up = () => {
+          lastResizeRef.current = Date.now()
+          window.removeEventListener('mousemove', move)
+          window.removeEventListener('mouseup', up)
+        }
+        window.addEventListener('mousemove', move)
+        window.addEventListener('mouseup', up)
+      }
       // DEV-108/110：拖拽调整弹框大小——dir: 'right'(改宽) | 'bottom'(改高) | 'se'(宽+高)
       const onResizeStart = (e, dir) => {
         e.preventDefault()
@@ -481,32 +512,40 @@ window.__ModuleLoader__.load({
       }, [onClose])
       return h('div', {
         className: 'awf-modal-mask',
-        style: overlayStyle,
+        style: { position: 'fixed', inset: 0, zIndex: 9999, background: C.bgMask },
         // DEV-110：仅 ✕ 或 ESC 关闭；点击遮罩不关闭（避免拖拽调大小后松手误关弹框）
       },
         h('div', {
           className: 'awf-modal-card',
+          ref: cardRef,
           style: {
             width: customSize ? customSize.w : (width || 720),
             height: customSize ? customSize.h : undefined,
             maxWidth: 'calc(100vw - 40px)', maxHeight: '88vh',
             minWidth: 320, minHeight: 180,
-            position: 'relative',
+            // DEV-111：absolute 定位（默认居中，拖动标题栏移动）
+            position: 'absolute',
+            left: pos ? pos.x : '50%',
+            top: pos ? pos.y : '50%',
+            transform: pos ? undefined : 'translate(-50%, -50%)',
             display: 'flex', flexDirection: 'column',
             background: 'var(--dsw-alias-bg-layer-3, #ffffff)',
             border: '1px solid ' + C.border, borderRadius: C.radius,
             boxShadow: '0 12px 40px rgba(0,0,0,0.35)', overflow: 'hidden',
           },
         },
-          h('div', {
+          h('div', { // DEV-111：标题栏可拖动移动弹框
+            onMouseDown: onMoveStart,
             style: {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
               padding: '9px 14px', borderBottom: '1px solid ' + C.hairline, flexShrink: 0,
+              cursor: 'move', userSelect: 'none',
             },
           },
             h('div', { style: { fontSize: F(13), fontWeight: 800, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
             h('button', {
               onClick: onClose,
+              onMouseDown: (e) => e.stopPropagation(), // 不触发标题栏拖动
               style: Object.assign(buttonStyle(), {
                 padding: '0 7px', fontSize: F(11), lineHeight: '17px', flexShrink: 0,
                 background: 'transparent', borderColor: 'transparent',
