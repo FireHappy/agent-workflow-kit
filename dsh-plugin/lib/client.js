@@ -953,15 +953,16 @@ window.__ModuleLoader__.load({
         },
       },
         h('span', { style: { color: C.success, fontSize: 11, flexShrink: 0, fontWeight: 700 } }, '✓'),
-        h('span', { style: { fontFamily: C.mono, fontSize: 11, color: C.faint, flexShrink: 0 } }, r.date),
+        h('span', { style: { fontFamily: C.mono, fontSize: 11, color: C.sub, flexShrink: 0 } }, r.date),
         h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text, flexShrink: 0 } }, r.id),
         h('span', {
           style: {
-            color: C.dim, overflow: 'hidden', textOverflow: 'ellipsis',
+            // DEV-043：描述文字提亮（dim→sub），最近完成行更易读
+            color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis',
             whiteSpace: 'nowrap', flex: 1, minWidth: 0,
           },
         }, r.desc || '—'),
-        clickable ? h('span', { style: { color: C.faint, fontSize: 12, flexShrink: 0 } }, '›') : null)
+        clickable ? h('span', { style: { color: C.sub, fontSize: 12, flexShrink: 0 } }, '›') : null)
     }
 
     /**
