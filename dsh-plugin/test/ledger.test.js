@@ -1,8 +1,9 @@
 // DEV-100：parseTodoRows 4 列回归 + 5 列兼容（依赖并入 desc）单测。
+// DEV-101：parseDoneRows 4/5/6 列归档行兼容（desc = 第 3 列，完成日期 = 行内首个 YYYY-MM-DD）单测。
 // 运行：cd dsh-plugin && node --test（package.json scripts.test = node --test "test/*.test.js"）
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseTodoRows } from '../src/ledger.js'
+import { parseTodoRows, parseDoneRows } from '../src/ledger.js'
 
 test('4 列行解析（回归：与旧实现结果一致）', () => {
   const rows = parseTodoRows('| DEV-054 | P0 | MRC physical camera route | 2026-11-03 |\n')
@@ -101,4 +102,77 @@ test('多行解析 + 单连字符 ID 前缀（DASH-100 等）均可解析', () =
   assert.equal(rows[1].desc, '面板（依赖 无）')
   // 双连字符 ID（如 KIT-DEV-017）不符合 [A-Z]+-[0-9]+ 规则 → 与账本校验一致地跳过
   assert.equal(parseTodoRows('| KIT-DEV-017 | P1 | 非法ID | | 2026-11-01 |').length, 0)
+})
+
+// ---- DEV-101：parseDoneRows 4/5/6 列归档行 ----
+
+test('parseDoneRows 4 列行解析（回归：与旧实现结果一致）', () => {
+  const rows = parseDoneRows('| DEV-010 | P0 | 示例任务 | 2026-11-03 |', 10)
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rows[0], { id: 'DEV-010', prio: 'P0', desc: '示例任务', date: '2026-11-03' })
+})
+
+test('parseDoneRows 5 列 docs 型：desc = 第 3 列，日期 = 完成日期格', () => {
+  const rows = parseDoneRows('| DOCS-002 | P1 | 设计 VST 投屏与录屏技术方案 | Phase 0 实现（DEV-024~028）已回退 | 2026-07-22 |', 10)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].id, 'DOCS-002')
+  assert.equal(rows[0].prio, 'P1')
+  assert.equal(rows[0].desc, '设计 VST 投屏与录屏技术方案')
+  assert.equal(rows[0].date, '2026-07-22')
+})
+
+test('parseDoneRows 6 列 dev/debug 型：日期后带链接列，链接含日期不抢前', () => {
+  const md = '| DEBUG-008 | P0 | 系统组件投屏状态缓存导致启停命令误判 | Server 通过 AIDL Observer 推送状态 | 2026-08-11 | agent-workflow/memory/history/debug-008-2026-08-11.md |'
+  const rows = parseDoneRows(md, 10)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].desc, '系统组件投屏状态缓存导致启停命令误判')
+  // 完成日期 = 行内第一个 YYYY-MM-DD（日期格在链接列之前，链接内的 2026-08-11 不会抢前）
+  assert.equal(rows[0].date, '2026-08-11')
+})
+
+test('parseDoneRows 表头行 / 分隔行 / 非任务行不产生记录', () => {
+  const md = [
+    '| 任务ID | 优先级 | 任务 | 摘要 | 完成日期 |',
+    '|--------|--------|------|------|----------|',
+    '| Field | Value |',
+    '| 状态 | done |',
+    '| DEV-010 | P0 | 示例任务 | 2026-11-03 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 10)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].id, 'DEV-010')
+})
+
+test('parseDoneRows 无日期行跳过（严格性：不把无日期行当完成记录）', () => {
+  assert.equal(parseDoneRows('| DEV-099 | P2 | 无日期任务 | 待定 |', 10).length, 0)
+  // 多列表格但整行不含任何 YYYY-MM-DD（如回顾表里的占位行）
+  assert.equal(parseDoneRows('| DEV-099 | P2 | 无日期任务 | 待定 | 无 |', 10).length, 0)
+  // 日期非法（非 YYYY-MM-DD）同样跳过
+  assert.equal(parseDoneRows('| DEV-099 | P2 | 日期非法 | 2026/11/03 |', 10).length, 0)
+})
+
+test('parseDoneRows 按完成日期倒序 + 截取前 n 条（保持现状语义）', () => {
+  const md = [
+    '| DEV-001 | P1 | 较早 | 2026-09-01 |',
+    '| DEV-002 | P0 | 中间 | 2026-10-01 |',
+    '| DEV-003 | P0 | 最新 | 2026-11-01 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 2)
+  assert.deepEqual(rows.map((r) => r.id), ['DEV-003', 'DEV-002'])
+})
+
+test('parseDoneRows 混排表格：4/5/6 列 + 表头 + 无日期行；空表返回 []', () => {
+  const md = [
+    '| 任务ID | 优先级 | 任务 | 摘要 | 完成日期 |',
+    '|--------|--------|------|------|----------|',
+    '| DEV-054 | P0 | MRC physical camera route | 2026-11-03 |',
+    '| DEBUG-008 | P0 | 系统组件投屏状态缓存 | 摘要 | 2026-08-11 | agent-workflow/memory/history/debug-008-2026-08-11.md |',
+    '| DOCS-002 | P1 | 设计 VST 技术方案 | 摘要 | 2026-07-22 |',
+    '| DEV-099 | P2 | 无日期 | 待定 |',
+    '',
+  ].join('\n')
+  const rows = parseDoneRows(md, 10)
+  assert.deepEqual(rows.map((r) => r.id), ['DEV-054', 'DEBUG-008', 'DOCS-002'])
+  assert.deepEqual(parseDoneRows('', 10), [])
+  assert.deepEqual(parseDoneRows('# 归档\n\n> 说明行\n', 10), [])
 })

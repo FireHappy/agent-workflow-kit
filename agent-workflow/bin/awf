@@ -748,13 +748,20 @@ status_build_block() {
     for type in dev debug docs; do
       f="agent-workflow/tasks/$type/done.md"
       [ -f "$f" ] || continue
-      r2="$(grep -E '^\| *[A-Z]+-[0-9]+' "$f" | tail -n 8 | awk -F'|' -v wf="$type" '
+      # 取该类型全部归档行（不做 tail 截断），排序在汇总后统一做：
+      # 日期倒序优先，同日按文件出现顺序倒序（越晚归档越靠前）。
+      # 记录格式：seq|wf|id|prio|desc|date；date = 行内第一个 YYYY-MM-DD（兼容 4/5/6 列 + 链接列）。
+      r2="$(grep -nE '^\| *[A-Z]+-[0-9]+' "$f" | awk -F'|' -v wf="$type" '
         function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
-        function pick_date(   i) {
-          for (i = 2; i < NF; i++) if ($i ~ /^ *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *$/) return trim($i)
-          return trim($(NF - 1))
+        {
+          seq = $1
+          sub(/^[0-9]+:/, "", $0)
+          if (match($0, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) date = substr($0, RSTART, RLENGTH)
+          else next
+          nf = split($0, parts, "|")
+          id = trim(parts[2]); prio = trim(parts[3]); desc = trim(parts[4])
+          printf "%s|%s|%s|%s|%s|%s\n", seq, wf, id, prio, desc, date
         }
-        { printf "| %s | %s | %s | %s | %s |\n", wf, trim($2), trim($3), trim($4), pick_date() }
       ')"
       if [ -n "$r2" ]; then
         done_rows="$done_rows$r2"$'\n'
@@ -765,7 +772,10 @@ status_build_block() {
     else
       printf '| 工作流 | 任务ID | 优先级 | 描述 | 完成日期 |\n' >> "$block"
       printf '|--------|--------|--------|------|----------|\n' >> "$block"
-      printf '%s' "$done_rows" | sort -t'|' -k5,5r >> "$block"
+      # 排序：日期（第6字段）倒序 → 行号（第1字段）倒序；取前 8 条，输出规格化行
+      printf '%s' "$done_rows" | sort -t'|' -k6,6r -k1,1nr \
+        | head -n 8 \
+        | awk -F'|' -v wf='' '{ printf "| %s | %s | %s | %s | %s |\n", $2, $3, $4, $5, $6 }' >> "$block"
     fi
 
     printf '\n*最后更新：%s*\n' "$(now)" >> "$block"

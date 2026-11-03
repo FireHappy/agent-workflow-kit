@@ -152,21 +152,34 @@ export function parseCheckItems(blockText) {
 }
 
 /**
- * 解析 done.md 的摘要行（`| ID | P | 描述 | 日期 |`），取最新 n 条。
+ * 解析 done.md 的摘要行，兼容 4/5/6 列归档行（`| ID | P | 标题 | 摘要… | 完成日期 [| 链接…] |`）。
  * 与 awf status 的「最近完成」一致：只认 `|` 开头的行。
+ * DEV-101：旧实现只匹配 4 列 `| ID | prio | desc | date |`，项目常用的 5 列（docs）
+ * 与 6 列（dev/debug，日期后带链接列）加宽归档行全部漏掉 → recent 恒空。现改为：
+ * 行首锚定 `| ID | prio |`（ID 形如 [A-Z]+-[0-9]+，优先级任意文本）+ 第 3 列 desc；
+ * 完成日期 = 行内第一个合法 YYYY-MM-DD 字段（兼容 4/5/6 列及日期后链接列——链接列即使
+ * 含日期也在完成日期之后，不会抢前）；无日期行跳过（严格性，不把无日期行当完成记录）。
  * @param {string} md
  * @param {number} n
  * @returns {Array<{id: string, prio: string, desc: string, date: string}>}
  */
 export function parseDoneRows(md, n) {
   const rows = []
+  let _i = 0
   for (const line of String(md).split('\n')) {
-    const m = /^\|\s*([A-Z]+-[0-9]+)\s*\|\s*([^|]*)\s*\|\s*([^|]*?)\s*\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2})\s*\|/.exec(line)
+    // 锚定行首 `| ID | prio | desc |`：ID 形如 [A-Z]+-[0-9]+，desc 为第 3 列（后续列数不限）
+    const m = /^\|\s*([A-Z]+-[0-9]+)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|/.exec(line)
     if (!m) continue
-    rows.push({ id: m[1], prio: trim(m[2]), desc: trim(m[3]), date: m[4] })
+    const dm = /[0-9]{4}-[0-9]{2}-[0-9]{2}/.exec(line)
+    if (!dm) continue
+    rows.push({ id: m[1], prio: trim(m[2]), desc: trim(m[3]), date: dm[0], _row: _i++ })
   }
-  // 按完成日期倒序（不依赖 done.md 文件顺序），取最新 n 条
-  return rows.sort((a, b) => b.date.localeCompare(a.date)).slice(0, n)
+  // 倒序：日期倒序优先；同日期按归档先后倒序（文件靠后的行 = 越晚归档，排在最前）
+  // _row 仅是排序用的内部序号，返回前剔除，保持对外契约 {id, prio, desc, date}
+  return rows
+    .sort((a, b) => (b.date.localeCompare(a.date)) || (b._row - a._row))
+    .slice(0, n)
+    .map(({ _row, ...r }) => r)
 }
 
 // ---------------------------------------------------------------------------

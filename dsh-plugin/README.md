@@ -104,6 +104,12 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.2.2（DEV-101）**：最近完成区兼容多列归档行 + 倒序修正
+  - 解析层（`src/ledger.js` `parseDoneRows`）：兼容 4/5/6 列归档表格行（dev/debug 6 列 `| ID | P | 标题 | 摘要 | 完成日期 | 链接 |`、docs 5 列），desc = 第 3 列，完成日期 = 行内第一个 YYYY-MM-DD（链接列含日期不抢前）；无日期行跳过
+  - 排序：完成日期倒序优先，**同日按归档先后倒序**（done.md 文件靠后的行 = 越晚归档 = 排最前），面板最近完成与 status.md 摘要一致
+  - `_row` 仅作排序键，返回前剔除，对外契约仍是 `{id, prio, desc, date}`
+  - 新增 parseDoneRows 单测（混合 4/5/6 列、倒序、截断、无日期跳过）；`cd dsh-plugin && node --test` 18/18 全绿
+
 - **0.2.1（DEV-100）**：待办区兼容 5 列任务表格 + 显式任务数量
   - 解析层（`src/ledger.js` `parseTodoRows`）：同时接受 4 列 `| ID | prio | desc | date |`（回归，结果与旧版一致）与 5 列 `| ID | prio | title | deps | date |`；5 列行 `desc = title`，deps 非空时并入 desc（`title（依赖 deps）`），「开始任务」生成的块与列表展示均可见依赖；表头/分隔/畸形行（ID 不合法、日期非 YYYY-MM-DD）依旧不产生任务行
   - 展示层（`lib/client.js` 待办区块）：每个类型 tab（开发/调试/文档）显示该类型未开始任务数量徽章（只取自 `ledger.todoRows` 过滤计数，0 也显示）；标题「未开始任务 · 类型」不重复数量（tab 徽章一处）；某类型数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」）；后端契约 `ledger.todoRows` 不变

@@ -885,6 +885,7 @@ export function apply(ctx) {
           `1. 整理合并（不是整体覆盖）：参照 kit（${vs.kitPath || 'agent-workflow-kit'}）的升级方式，把 agent-workflow/ 下的框架文件（bin/awf、bin/awf-dispatch、workflows/、templates/、README.md、check_workflow.sh 兼容入口等）合并为当前 kit 版本；`,
           '2. 保留清单（不得覆盖/删除）：agent-workflow/tasks/ 任务账本（含 done.md 历史）、project.yaml 项目事实（若 kit 模板有新增字段则补全而非重写）、AGENTS.md 受控区块外的自定义内容；',
           '3. 完成后更新 project.yaml 的 scaffold_version，运行 agent-workflow/bin/awf check 验证通过；',
+          '3b. 账本格式规范（升级必查，避免面板无法显示）：检查 agent-workflow/tasks/*/todo.md 的任务表格行统一为 4 列标准格式 `| 任务ID | 优先级 | 描述 | 登记日期 |`（表头/分隔行除外）；发现 5 列或畸形列（如 `| 任务ID | Priority | Title | Dependencies | Date |`）时，把依赖信息并入描述（形如 `描述（依赖 X）`）并转为标准 4 列，不要静默跳过；同时检查 current.md/done.md 任务块格式保持 `## [ID] 标题` + 字段表 + `### 下一步`；最后用 `awf status` 刷新摘要确认待办行能正常解析；',
           '4. 合并完成后调用插件完成接口：POST /awf/upgrade/complete，body {"path":"<项目绝对路径>","ok":true,"version":"v<目标版本>","note":"升级摘要"}，让面板立即刷新；失败时也调用（ok:false + note 说明原因）。',
           '5. 回报升级结果（成功/失败原因）；若面板未自动刷新，提示用户刷新。',
         ].join('\n')
