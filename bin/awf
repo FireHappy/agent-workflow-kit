@@ -206,7 +206,7 @@ write_agents() {
     nb="$(grep -c '<!-- awf:begin' "$f" || true)"
     ne="$(grep -c '<!-- awf:end' "$f" || true)"
     if [ "$nb" != "$ne" ] || [ "$nb" -gt 1 ]; then
-      die "AGENTS.md 受控区块不完整（begin $nb / end $ne）：请手工补成一对 <!-- awf:begin --> … <!-- awf:end --> 后重试；本次未改写文件"
+      die "AGENTS.md 受控区块不完整（begin $nb / end ${ne}）：请手工补成一对 <!-- awf:begin --> … <!-- awf:end --> 后重试；本次未改写文件"
     fi
     awk -v bf="$block" '
       BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
@@ -816,7 +816,7 @@ copy_drift_report() {
     src="${pair%%:*}"; dst="${pair#*:}"
     [ -f "$root/$src" ] || continue
     if [ ! -f "$root/$dst" ]; then
-      say "FAIL  生成副本缺失：$root/$dst（源 $root/$src）"
+      say "FAIL  生成副本缺失：$root/${dst}（源 $root/${src}）"
       rc=1
     elif ! cmp -s "$root/$src" "$root/$dst"; then
       say "FAIL  生成副本漂移：$src ≠ $dst"
@@ -830,7 +830,7 @@ copy_drift_report() {
     [ -f "$wf" ] || continue
     b="$(basename "$wf")"
     if [ ! -f "$root/agent-workflow/workflows/$b" ]; then
-      say "FAIL  生成副本缺失：$root/agent-workflow/workflows/$b（源 $wf）"
+      say "FAIL  生成副本缺失：$root/agent-workflow/workflows/${b}（源 ${wf}）"
       rc=1
     elif ! cmp -s "$wf" "$root/agent-workflow/workflows/$b"; then
       say "FAIL  生成副本漂移：templates/workflows/$b ≠ agent-workflow/workflows/$b"
@@ -879,7 +879,7 @@ agent-workflow/tasks/docs/done.md
   if [ "$nb" = "1" ] && [ "$ne" = "1" ]; then
     say "ok    AGENTS.md 受控区块标记成对"
   else
-    say "FAIL  AGENTS.md 受控区块标记不成对（begin $nb / end $ne）"
+    say "FAIL  AGENTS.md 受控区块标记不成对（begin $nb / end ${ne}）"
     fails=$((fails + 1))
   fi
 
@@ -1060,7 +1060,7 @@ release_write_current() {
     printf '### 验收标准\n- [ ] ./agent-workflow/check_workflow.sh 通过\n- [ ] bash test/smoke.sh 通过\n\n'
     printf '### 下一步\n执行 release-prep 打印的 git add/commit/tag/push 命令（由人触发）。\n'
   } >> "$CURRENT"
-  say "账本：$CURRENT 写入 $TASK_ID（release-prep $VERSION）"
+  say "账本：$CURRENT 写入 ${TASK_ID}（release-prep ${VERSION}）"
 }
 
 release_archive() {
@@ -1110,7 +1110,7 @@ cmd_release_prep() {
   fi
   if ! release_version_ok "$version"; then
     release_usage >&2
-    die "版本号格式错误：$version（应为 X.Y.Z）"
+    die "版本号格式错误：${version}（应为 X.Y.Z）"
   fi
   VERSION="$version"
 
@@ -1138,9 +1138,9 @@ cmd_release_prep() {
     say "[dry-run] ./bin/awf init . --force --no-register"
     say "[dry-run] ./bin/awf bootstrap"
     if [ -n "$(release_done_id)" ]; then
-      say "[dry-run] 账本：release-prep $version 已归档（$TASK_ID），跳过写入"
+      say "[dry-run] 账本：release-prep ${version} 已归档（${TASK_ID}），跳过写入"
     else
-      say "[dry-run] 账本：写 $CURRENT 块 [$TASK_ID] release-prep $version，校验后归档到 $DONE"
+      say "[dry-run] 账本：写 $CURRENT 块 [$TASK_ID] release-prep ${version}，校验后归档到 $DONE"
     fi
     say "[dry-run] 写 VERSION=$version"
     if [ -f "$ROOT/CHANGELOG.md" ] && grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
@@ -1152,11 +1152,11 @@ cmd_release_prep() {
     say "[dry-run] bash test/smoke.sh"
     say "[dry-run] 归档任务块到 done.md"
     say "[dry-run] ./agent-workflow/bin/awf status"
-    say "[dry-run] 下一步（不会执行）：git add -A && git commit -m \"release: v$version（$TASK_ID）\" && git tag -a v$version -m \"v$version\" && git push origin main v$version"
+    say "[dry-run] 下一步（不会执行）：git add -A && git commit -m \"release: v${version}（${TASK_ID}）\" && git tag -a v${version} -m \"v${version}\" && git push origin main v$version"
     return 0
   fi
 
-  say "== release-prep $version（$TASK_ID）=="
+  say "== release-prep ${version}（${TASK_ID}）=="
 
   # a0. 生成副本漂移保护（F6）：先检测再覆盖，禁止静默回滚 agent-workflow 侧改动
   local drift_out
@@ -1174,7 +1174,7 @@ cmd_release_prep() {
 
   # b. 账本（current.md；校验通过后归档）
   if [ -n "$(release_done_id)" ]; then
-    say "账本：release-prep $version 已归档（$TASK_ID），跳过写入"
+    say "账本：release-prep ${version} 已归档（${TASK_ID}），跳过写入"
   else
     release_write_current
   fi
@@ -1195,7 +1195,7 @@ cmd_release_prep() {
       { print }
     ' "$ROOT/CHANGELOG.md" > "$ROOT/CHANGELOG.md.tmp" && mv "$ROOT/CHANGELOG.md.tmp" "$ROOT/CHANGELOG.md"
     say "CHANGELOG：## [Unreleased] → ## [$version] - $(today)"
-  elif grep -q "^## \[$version\]" "$ROOT/CHANGELOG.md"; then
+  elif grep -q "^## \[${version}\]" "$ROOT/CHANGELOG.md"; then
     say "CHANGELOG：已有 ## [$version] 条目（幂等跳过）"
   else
     warn "CHANGELOG 没有 ## [Unreleased]，也没有 ## [$version]；请手动补版本条目"
@@ -1219,12 +1219,12 @@ cmd_release_prep() {
   say ""
   say "下一步（未自动执行；push 需用户明确触发）："
   say "  git add -A"
-  say "  git commit -m \"release: v$version（$TASK_ID）\""
-  say "  git tag -a v$version -m \"v$version\""
+  say "  git commit -m \"release: v${version}（${TASK_ID}）\""
+  say "  git tag -a v${version} -m \"v${version}\""
   say "  git push origin main v$version"
   say ""
-  say "建议 commit 消息：release: v$version（$TASK_ID）"
-  say "一键命令：git add -A && git commit -m \"release: v$version（$TASK_ID）\" && git tag -a v$version -m \"v$version\" && git push origin main v$version"
+  say "建议 commit 消息：release: v${version}（${TASK_ID}）"
+  say "一键命令：git add -A && git commit -m \"release: v${version}（${TASK_ID}）\" && git tag -a v${version} -m \"v${version}\" && git push origin main v$version"
 }
 
 # ---------------------------------------------------------------- upgrade
@@ -1274,7 +1274,7 @@ cmd_upgrade() {
 
   # 先校验目标确为 agent-workflow 项目，再 mkdir/cd，避免失败残留空目录
   if [ ! -f "$target/agent-workflow/project.yaml" ]; then
-    die "目标不是 agent-workflow 项目：$target（没有 agent-workflow/project.yaml；新项目请用 awf init）"
+    die "目标不是 agent-workflow 项目：${target}（没有 agent-workflow/project.yaml；新项目请用 awf init）"
   fi
   mkdir -p "$target"
   target="$(cd "$target" && pwd)"
@@ -1292,7 +1292,7 @@ cmd_upgrade() {
     dst="$awf_dir/${item%%:*}"; src="${item#*:}"
     [ -f "$src" ] || continue
     if [ "$dry_run" -eq 1 ]; then
-      say "  将覆盖 $dst（源 $src）"
+      say "  将覆盖 ${dst}（源 ${src}）"
       continue
     fi
     mkdir -p "$(dirname "$dst")"
@@ -1305,7 +1305,7 @@ cmd_upgrade() {
     [ -f "$src" ] || continue
     wf="$(basename "$src")"
     if [ "$dry_run" -eq 1 ]; then
-      say "  将覆盖 $awf_dir/workflows/$wf（源 $src）"
+      say "  将覆盖 $awf_dir/workflows/${wf}（源 ${src}）"
       continue
     fi
     cp "$src" "$awf_dir/workflows/$wf"
@@ -1317,13 +1317,13 @@ cmd_upgrade() {
   shim_cur="$(cat "$shim" 2>/dev/null || true)"
   if [ "$shim_cur" != "$shim_std" ] && [ "$force" -eq 0 ]; then
     if [ "$dry_run" -eq 1 ]; then
-      say "  将保留 $shim（与标准兼容入口不同，疑似项目自定义门禁；--force 才覆盖）"
+      say "  将保留 ${shim}（与标准兼容入口不同，疑似项目自定义门禁；--force 才覆盖）"
     else
       warn "check_workflow.sh 与标准兼容入口不同（疑似项目自定义门禁），已保留原文件；确认可替换时用 --force"
     fi
   else
     if [ "$dry_run" -eq 1 ]; then
-      say "  将覆盖 $shim（标准兼容入口）"
+      say "  将覆盖 ${shim}（标准兼容入口）"
     else
       printf '%s\n' '#!/bin/sh' '# 兼容入口：等价于 agent-workflow/bin/awf check' 'exec "$(dirname "$0")/bin/awf" check "$@"' > "$shim"
       chmod +x "$shim"
@@ -1348,10 +1348,10 @@ cmd_upgrade() {
   ( cd "$target" && "$awf_dir/bin/awf" check ) || rc=$?
   if [ "$rc" -eq 0 ]; then
     say ""
-    say "升级完成：$target（check 全部通过）"
+    say "升级完成：${target}（check 全部通过）"
   else
     say ""
-    say "升级完成：$target（check 发现 $rc 处问题，见上方 FAIL；旧账本迁移问题按指引修复后重跑 check）"
+    say "升级完成：${target}（check 发现 $rc 处问题，见上方 FAIL；旧账本迁移问题按指引修复后重跑 check）"
   fi
   [ "$shim_cur" != "$shim_std" ] && [ "$force" -eq 0 ] \
     && warn "check_workflow.sh 为项目自定义门禁（未覆盖）；请另行确认其通过"
@@ -1491,7 +1491,7 @@ write_registry_index() {
   fi
 }
 
-# 使用当前 P_* 与 $PWD；调用前必须已 load_project 且 cd 到项目根。
+# 使用当前 P_* 与 ${PWD}；调用前必须已 load_project 且 cd 到项目根。
 # 全程持锁：锁内重新读取当前 REGISTRY、按 P_ID 合并本行后原子替换，
 # 再重建 AGENTS.md 受控区块，杜绝并发 register/bootstrap 的丢失更新。
 write_registration() {

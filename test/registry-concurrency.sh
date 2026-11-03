@@ -20,7 +20,7 @@ KIT="$(cd "$(dirname "$0")/.." && pwd)"
 AWF="$KIT/bin/awf"
 N="${1:-8}"
 if [ "$N" -lt 4 ]; then
-  echo "FAIL  并发规模 N 至少为 4（当前 $N）" >&2
+  echo "FAIL  并发规模 N 至少为 4（当前 ${N}）" >&2
   exit 1
 fi
 
@@ -41,7 +41,7 @@ if command -v flock >/dev/null 2>&1; then
 else
   LOCK_PATH="mkdir 自旋（本机无 flock）"
 fi
-echo "# 并发注册测试（N=$N，锁路径：$LOCK_PATH）"
+echo "# 并发注册测试（N=${N}，锁路径：${LOCK_PATH}）"
 
 # 1. 造 N 个项目（init --no-register，不写全局索引）
 for i in $(seq 1 "$N"); do
@@ -70,7 +70,7 @@ tsv_n="$(grep -c '^p[0-9][0-9]* |' "$REG" || true)"
 if [ "$tsv_n" != "$N" ]; then
   echo "--- projects.tsv 实际内容 ---"
   cat "$REG"
-  fail "projects.tsv 行数 $tsv_n ≠ $N（丢失更新）"
+  fail "projects.tsv 行数 $tsv_n ≠ ${N}（丢失更新）"
 fi
 md_n="$(awk '/^<!-- awf:projects:begin -->/{f=1; next}
              /^<!-- awf:projects:end -->/{f=0}
@@ -107,7 +107,7 @@ md_n2="$(awk '/^<!-- awf:projects:begin -->/{f=1; next}
 if [ "$tsv_n2" != "$N" ]; then
   echo "--- projects.tsv 实际内容 ---"
   cat "$REG"
-  fail "bootstrap 后 projects.tsv 行数 $tsv_n2 ≠ $N（丢失更新）"
+  fail "bootstrap 后 projects.tsv 行数 $tsv_n2 ≠ ${N}（丢失更新）"
 fi
 [ "$md_n2" = "$N" ] || fail "bootstrap 后 AGENTS.md 表格行数 $md_n2 ≠ $N"
 for i in $(seq 1 "$N"); do
@@ -134,4 +134,4 @@ else
 fi
 
 echo ""
-echo "全部通过：并发 register/bootstrap 无丢失更新（N=$N，$LOCK_PATH）"
+echo "全部通过：并发 register/bootstrap 无丢失更新（N=${N}，${LOCK_PATH}）"

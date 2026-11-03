@@ -104,6 +104,13 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.2.4（DEV-103 等）**：看板初始化 agent 化 + 引导卡提亮
+  - 初始化改走 agent 完整配置（`lib/index.js` 新增 `POST /awf/init/agent`）：受管理子代理读项目上下文（README/技术栈/结构）→ 生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin/awf + 标准 4 列账本骨架 + 初始真实任务）→ awf check/status 验证 → 回报；替代仅空模板的最小骨架
+  - `buildActPrompt` 新增 init 动作分支（`INIT_AGENT_GUIDE`），`AGENT_ACTIONS` 白名单加入 init
+  - 引导卡：busy 态「初始化中…」标题 + 旋转动画 + 说明已派发 agent；按钮「初始化工作流（agent 配置）」；失败显示原因
+  - 引导卡说明文字提亮（EmptyState desc dim→sub），与待办/最近完成/底部提示一致
+  - 单测 26/26 全绿；check_workflow 全绿
+
 - **0.2.3（DEV-102）**：最近完成适配块式归档 + recent 全局倒序
   - 块式归档解析（`src/ledger.js` `parseDoneRows`）：新增 `## [ID] Title` 任务块形态——仅当块内 `状态` 为「完成」或「取消」计为已归档记录（active/blocked/verify/review/pending/done/archived 不算）；日期优先级 `归档日期` > `完成日期` > `最近更新`/`Last Updated`（取值的 YYYY-MM-DD 部分）；HTML 注释（`<!-- … -->`）内示例块不解析
   - 合并去重：行式 + 块式按 ID 去重、**块式优先**（近期仅以块形式归档的完成/取消项目不再从最近完成区消失）

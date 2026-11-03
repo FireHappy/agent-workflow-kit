@@ -446,3 +446,4 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 | 完成日期 | 2026-11-03 |
 | DEV-103 | P1 | 看板初始化改走 agent 完整配置：/awf/init/agent 子代理读项目上下文生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin + 初始账本），替代空模板；引导卡初始化中状态 + 按钮 | 2026-11-03 |
 
+| DEV-105 | P1 | release-prep 0.6.0：一键发版装配 | 2026-11-03 |

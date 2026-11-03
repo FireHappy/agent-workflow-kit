@@ -1086,19 +1086,19 @@ git -C "$PRUNE" config user.name smoke
 cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" <<EOF
 # demo01 · DEV-101
 
-- 目标项目：demo01（$PRUNE_TARGET）
+- 目标项目：demo01（${PRUNE_TARGET}）
 EOF
 cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
 # demo01 · DEV-101 副本
 
-- 目标项目：demo01（$PRUNE_TARGET）
+- 目标项目：demo01（${PRUNE_TARGET}）
 EOF
 git -C "$PRUNE" add dispatch/tasks/demo01-DEV-101-tracked.md
 git -C "$PRUNE" commit -qm "chore: 种子票据（只把 tracked 加入索引）"
 cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-conflict.md" <<EOF
 # demo01 · DEV-101 冲突
 
-- 目标项目：demo01（$PRUNE_TARGET）
+- 目标项目：demo01（${PRUNE_TARGET}）
 EOF
 
 if ( cd "$PRUNE" && "$DISPATCH" --prune --json > plan.json ); then
@@ -1179,8 +1179,8 @@ prune_positional=$?
 ( cd "$PRUNE" && "$DISPATCH" --apply >/dev/null 2>&1 )
 apply_only=$?
 set -e
-[ "$prune_positional" = "2" ] && ok "--prune 与位置参数同用退出 2" || bad "--prune 位置参数退出码为 $prune_positional（期望 2）"
-[ "$apply_only" = "2" ] && ok "--apply 不配 --prune 时退出 2" || bad "--apply 单独使用退出码为 $apply_only（期望 2）"
+[ "$prune_positional" = "2" ] && ok "--prune 与位置参数同用退出 2" || bad "--prune 位置参数退出码为 ${prune_positional}（期望 2）"
+[ "$apply_only" = "2" ] && ok "--apply 不配 --prune 时退出 2" || bad "--apply 单独使用退出码为 ${apply_only}（期望 2）"
 
 # 2. check 通过
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "check 通过" || bad "check 未通过"
@@ -1314,7 +1314,7 @@ set +e
 "$KIT_DIR/bin/awf-dispatch" no-such-project /dev/null >/dev/null 2>&1
 dispatch_code=$?
 set -e
-[ "$dispatch_code" = "2" ] && ok "awf-dispatch 门失败退出码为 2" || bad "awf-dispatch 退出码为 $dispatch_code（期望 2）"
+[ "$dispatch_code" = "2" ] && ok "awf-dispatch 门失败退出码为 2" || bad "awf-dispatch 退出码为 ${dispatch_code}（期望 2）"
 
 # 13. F1：check 校验状态枚举（非法值失败）
 cat > "$PROJ/agent-workflow/tasks/docs/current.md" <<'F1B'
@@ -1513,7 +1513,7 @@ set -e
 if [ "$rp_code" != "0" ] && printf '%s\n' "$rp_out" | grep -q '漂移'; then
   ok "F6 release-prep 检测漂移并拒绝覆盖"
 else
-  bad "F6 release-prep 未拒绝漂移（rc=$rp_code）：$rp_out"
+  bad "F6 release-prep 未拒绝漂移（rc=${rp_code}）：$rp_out"
 fi
 [ "$(cat "$RPD/VERSION")" = "0.0.1" ] && ok "F6 拒绝后 VERSION 未被改写" || bad "F6 拒绝后 VERSION 被改写"
 cp "$RPD/templates/workflows/release.md" "$RPD/agent-workflow/workflows/release.md"
