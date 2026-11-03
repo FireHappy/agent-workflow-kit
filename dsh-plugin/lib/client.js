@@ -1328,10 +1328,10 @@ window.__ModuleLoader__.load({
         const metaUpdated = meta.updated || meta.date || ''
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
-        const tabBtn = (label, active) => h('button', {
-          onClick: () => { /* tab 只是展示层切换，编辑态仍由父级 editing 控制 */ },
+        const tabBtn = (label, active, onClick) => h('button', {
+          onClick: () => onClick && onClick(),
           style: {
-            fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'default',
+            fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
             border: '1px solid ' + (active ? C.accent : 'transparent'),
             background: active ? C.hoverAccent : 'transparent',
             color: active ? C.text : C.sub,
@@ -1362,8 +1362,8 @@ window.__ModuleLoader__.load({
                       '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
                     // DEV-106：阅读/编辑 tab 条
                     h('div', { style: { display: 'flex', gap: 4, marginBottom: 2 } },
-                      tabBtn('阅读', viewMode === 'read'),
-                      tabBtn('编辑', viewMode === 'edit')),
+                      tabBtn('阅读', viewMode === 'read', () => { if (editing) onEditCancel && onEditCancel() }),
+                      tabBtn('编辑', viewMode === 'edit', () => { if (!editing) onEditStart && onEditStart() })),
                     // 内容区（阅读=渲染 / 编辑=textarea，tab 由 viewMode 切换）
                     viewMode === 'read'
                       ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
@@ -2707,8 +2707,8 @@ window.__ModuleLoader__.load({
 
       items.push(h('div', {
         key: 'foot',
-        // DEV-043：底部提示文字提亮（dim→sub），与待办/最近完成一致
-        style: Object.assign({ color: C.sub, fontSize: 12, lineHeight: 1.5, marginTop: 10 }, { textAlign: 'center' }),
+        // DEV-107：底部提示再淡一档（sub→dim），弱化来源行、突出内容
+        style: Object.assign({ color: C.dim, fontSize: 12, lineHeight: 1.5, marginTop: 10 }, { textAlign: 'center' }),
       },
         `账本数据来自 agent-workflow/tasks/*，每 ${POLL_MS / 1000}s 自动刷新`))
 
