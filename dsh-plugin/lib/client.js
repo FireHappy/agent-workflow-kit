@@ -2702,13 +2702,6 @@ window.__ModuleLoader__.load({
           recent.map((r, i) => h(RecentRow, { key: 'recent-' + i, r, onOpen: U.onOpenArchive }))))
       }
 
-      items.push(h('div', {
-        key: 'foot',
-        // DEV-107：底部提示再淡一档（sub→dim），弱化来源行、突出内容
-        style: Object.assign({ color: C.dim, fontSize: 12, lineHeight: 1.5, marginTop: 10 }, { textAlign: 'center' }),
-      },
-        `账本数据来自 agent-workflow/tasks/*，每 ${POLL_MS / 1000}s 自动刷新`))
-
       // 源文件查看面板（覆盖层；只读 .md 展示 + 复制路径；DEV-043 起可编辑保存）
       if (U.source) {
         items.push(h(SourcePanel, {
