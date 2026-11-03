@@ -152,31 +152,80 @@ export function parseCheckItems(blockText) {
 }
 
 /**
- * 解析 done.md 的摘要行，兼容 4/5/6 列归档行（`| ID | P | 标题 | 摘要… | 完成日期 [| 链接…] |`）。
- * 与 awf status 的「最近完成」一致：只认 `|` 开头的行。
- * DEV-101：旧实现只匹配 4 列 `| ID | prio | desc | date |`，项目常用的 5 列（docs）
- * 与 6 列（dev/debug，日期后带链接列）加宽归档行全部漏掉 → recent 恒空。现改为：
+ * 解析 done.md 的归档记录，兼容**行式**与**块式**两种归档形态并合并去重。
+ *
+ * 行式（DEV-101）：`| ID | P | 标题 | 摘要… | 完成日期 [| 链接…] |`，兼容 4/5/6 列：
  * 行首锚定 `| ID | prio |`（ID 形如 [A-Z]+-[0-9]+，优先级任意文本）+ 第 3 列 desc；
- * 完成日期 = 行内第一个合法 YYYY-MM-DD 字段（兼容 4/5/6 列及日期后链接列——链接列即使
- * 含日期也在完成日期之后，不会抢前）；无日期行跳过（严格性，不把无日期行当完成记录）。
+ * 完成日期 = 行内第一个合法 YYYY-MM-DD 字段（日期后链接列即使含日期也不会抢前）；
+ * 无日期行跳过（严格性，不把无日期行当完成记录）。
+ *
+ * 块式（DEV-102）：新架构块式归档 `## [ID] Title` + 字段表（`| Key | Value |`）：
+ * 仅当块内 `状态` 为「完成」或「取消」时计为已归档记录（active/blocked/verify/review/
+ * pending/done/archived 等不算）；日期优先级 `归档日期` > `完成日期` > `最近更新`/
+ * `Last Updated`（取值的 YYYY-MM-DD 部分）；无有效日期或非归档状态的块跳过。
+ * HTML 注释（`<!-- ... -->`）内的块与行不解析（骨架示例不污染）。
+ *
+ * 合并规则：行式 + 块式按 ID 去重，**块式优先**（块覆盖同名行记录）。
+ * 排序：日期倒序优先；同日期按文件位置倒序（文件靠后 = 越晚归档，排越前）。
  * @param {string} md
  * @param {number} n
  * @returns {Array<{id: string, prio: string, desc: string, date: string}>}
  */
 export function parseDoneRows(md, n) {
   const rows = []
-  let _i = 0
-  for (const line of String(md).split('\n')) {
-    // 锚定行首 `| ID | prio | desc |`：ID 形如 [A-Z]+-[0-9]+，desc 为第 3 列（后续列数不限）
-    const m = /^\|\s*([A-Z]+-[0-9]+)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|/.exec(line)
-    if (!m) continue
-    const dm = /[0-9]{4}-[0-9]{2}-[0-9]{2}/.exec(line)
-    if (!dm) continue
-    rows.push({ id: m[1], prio: trim(m[2]), desc: trim(m[3]), date: dm[0], _row: _i++ })
+  let cur = null // 块式：当前任务块（fields 累加，遇下一个 `## ` 或 EOF 结算）
+  let inComment = false
+  let _row = 0 // 文件行序：同日期排序键（返回前剔除，保持对外契约）
+  const lines = String(md).split('\n')
+  const finish = () => {
+    if (!cur) return
+    const st = cur.fields['状态'] || cur.fields['Status'] || ''
+    if (st === '完成' || st === '取消') {
+      const dateSrc = cur.fields['归档日期'] || cur.fields['完成日期'] || cur.fields['最近更新'] || cur.fields['Last Updated'] || ''
+      const dm = /([0-9]{4}-[0-9]{2}-[0-9]{2})/.exec(dateSrc)
+      if (dm) rows.push({ id: cur.id, prio: cur.fields['优先级'] || cur.fields['Priority'] || '', desc: cur.desc, date: dm[1], _row: cur._row })
+    }
+    cur = null
   }
-  // 倒序：日期倒序优先；同日期按归档先后倒序（文件靠后的行 = 越晚归档，排在最前）
-  // _row 仅是排序用的内部序号，返回前剔除，保持对外契约 {id, prio, desc, date}
-  return rows
+  for (const line of lines) {
+    const rowNo = _row++
+    if (!inComment && /<!--/.test(line) && !/-->/.test(line)) { inComment = true; continue }
+    if (inComment) {
+      if (/-->/.test(line)) inComment = false
+      continue
+    }
+    // 行式：`| ID | prio | desc | ...`，完成日期 = 行内第一个 YYYY-MM-DD
+    const m = /^\|\s*([A-Z]+-[0-9]+)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|/.exec(line)
+    if (m) {
+      const dm = /[0-9]{4}-[0-9]{2}-[0-9]{2}/.exec(line)
+      if (dm) rows.push({ id: m[1], prio: trim(m[2]), desc: trim(m[3]), date: dm[0], _row: rowNo })
+    }
+    // 块式：`## [ID] Title` 开始新块（结算上一个块）；其他 `## ` 标题结束当前块
+    const head = /^##\s+\[([A-Z]+-[0-9]+)\]\s+(.+)$/.exec(line)
+    if (head) {
+      finish()
+      cur = { id: head[1], desc: trim(head[2]), fields: {}, _row: rowNo }
+      continue
+    }
+    if (/^##\s/.test(line)) { finish(); continue }
+    if (cur && line.startsWith('|')) {
+      const key = secondField(line)
+      const value = trim(line.split('|')[2] || '')
+      if (key && value) cur.fields[key] = value
+    }
+  }
+  finish()
+  // 合并去重：块式优先（块记录在块结束/EOF 时结算、晚于其内行记录入列，
+  // 后写覆盖先写 → 同 ID 时块式记录胜出）
+  const byId = new Map()
+  for (const r of rows) byId.set(r.id, r)
+  const merged = []
+  for (const r of rows) {
+    if (byId.get(r.id) !== r) continue
+    merged.push(r)
+  }
+  // 倒序：日期倒序优先；同日期按文件位置倒序（文件靠后 = 越晚归档 = 排最前）
+  return merged
     .sort((a, b) => (b.date.localeCompare(a.date)) || (b._row - a._row))
     .slice(0, n)
     .map(({ _row, ...r }) => r)
@@ -255,7 +304,8 @@ export async function ledgerOf(projectPath) {
     }
     const dn = fileContent[join(dir, 'done.md')]
     if (dn !== undefined) {
-      for (const r of parseDoneRows(dn, 8)) recent.push({ type, ...r })
+      // DEV-102：全量收集行式+块式记录（不截断），聚合末尾统一全局排序取前 8
+      for (const r of parseDoneRows(dn, Number.MAX_SAFE_INTEGER)) recent.push({ type, ...r })
     }
   }
 
@@ -268,7 +318,10 @@ export async function ledgerOf(projectPath) {
     current,
     todo,
     todoRows,
-    recent: recent.slice(0, 8),
+    // DEV-102：recent 全局按日期倒序（跨类型混合、最新在前），再取前 8——修复 DEV-101 遗留
+    // （旧逻辑 dev→debug→docs 各取 8 再拼接 slice(0,8)，dev 行多时独占全部槽位）；
+    // 同日期依赖 V8 稳定排序，保持各类型内部顺序（dev→debug→docs）。
+    recent: recent.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8),
   }
 }
 

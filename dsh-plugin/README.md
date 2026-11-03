@@ -52,7 +52,7 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 - **未初始化引导**：所选项目尚未初始化 agent-workflow 时，页签显示引导卡（图标 + 文案 + 「初始化工作流」按钮）。点击调用 `/awf/init` 生成骨架（project.yaml + tasks/*/{todo,current,done}.md + status.md），成功后自动重新加载账本显示正常看板；`already-initialized` 等错误有友好提示
 - **待办列表（只读）**：dev/debug/docs 三态切换器（默认 dev）展示未开始任务表格行（类型 / ID / 描述 / 优先级），无新增/编辑/删除/开始按钮；该类型无行时显示空态（「该类型暂无未开始任务」）；todo.md 是表格行格式、无 checkbox，不渲染待办进度条
 - **源文件面板**（`GET /awf/source?path=&type=&file=`，服务端能力保留）：面板可查看/编辑 `.md` 原文并保存写回；DEV-044 起看板行上不再暴露「源文件」按钮（纯看板），面板仅由内部程序逻辑触发
-- 最近完成：done.md 摘要行按完成日期倒序**仅显示前 5 条**（日期 / ID / 描述排版），每条可点击弹出**归档查看**弹层（done 表格行 + 完整任务块 markdown 原文；归档未保留任务块的显示「该任务归档时未保留详细任务块，仅摘要」并仍展示摘要行与日期），可关闭返回
+- 最近完成：done.md 归档记录（**行式** 4/5/6 列摘要行 + **块式** `## [ID]` 任务块合并去重、块式优先；块仅统计状态=完成/取消，日期取 归档日期 > 完成日期 > 最近更新/Last Updated）全局按完成日期倒序**仅显示前 5 条**（日期 / ID / 描述排版），每条可点击弹出**归档查看**弹层（done 表格行 + 完整任务块 markdown 原文；归档未保留任务块的显示「该任务归档时未保留详细任务块，仅摘要」并仍展示摘要行与日期），可关闭返回
 - **登记当前项目**（DEV-035，`POST /awf/register`）：空索引 / 未命中态不再只提示「先运行 awf register」——面板直接给出「登记当前项目」按钮（带当前会话目录提示）。已有 `agent-workflow/` 直接登记进全局索引；没有则服务端先初始化骨架再登记；成功后自动选中并加载账本。旁路「仅本地（不推送到远端）」勾选：登记时写 `track: false` + `.gitignore` 忽略区块，工作流痕迹不进 git。手动「刷新」按钮现在同时重取项目索引（修复挂载后索引陈旧不更新的问题）
 - **框架版本监测**（DEV-035）：账本头部状态条显示项目工作流与 kit 框架的版本关系（`latest` 绿点「工作流已最新」/ `outdated` 黄条「工作流可升级 X → Y」/ `unknown` 灰字提示登记 kit）。「去升级」只注入 agent 升级意图（`POST /awf/upgrade`），升级由 agent 执行并跑 `awf check` 验证；面板不执行升级，经 SSE/轮询在 `versions.status` 变 `latest` 时自动退出「升级中」态
 
@@ -103,6 +103,12 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 - 所有路由都与平台一致走宿主 Connection 认证围栏（同 /api 网关准入），未授权请求返回 403
 
 ## 变更记录
+
+- **0.2.3（DEV-102）**：最近完成适配块式归档 + recent 全局倒序
+  - 块式归档解析（`src/ledger.js` `parseDoneRows`）：新增 `## [ID] Title` 任务块形态——仅当块内 `状态` 为「完成」或「取消」计为已归档记录（active/blocked/verify/review/pending/done/archived 不算）；日期优先级 `归档日期` > `完成日期` > `最近更新`/`Last Updated`（取值的 YYYY-MM-DD 部分）；HTML 注释（`<!-- … -->`）内示例块不解析
+  - 合并去重：行式 + 块式按 ID 去重、**块式优先**（近期仅以块形式归档的完成/取消项目不再从最近完成区消失）
+  - recent 聚合修复（DEV-101 遗留）：全部类型（dev/debug/docs）行式+块式记录**合并后全局按完成日期倒序**再取前 8——旧逻辑 dev→debug→docs 各取 8 再拼接 slice(0,8)，dev 行多时独占全部槽位、debug/docs 更新鲜记录被截掉；`recent` 输出结构与数量不变，前端无需改动
+  - 新增单测（块式完成/取消/缺日期/非归档状态/注释内块/行块去重/混合倒序 + ledgerOf 全局跨类型倒序）；`cd dsh-plugin && node --test` 26/26 全绿
 
 - **0.2.2（DEV-101）**：最近完成区兼容多列归档行 + 倒序修正
   - 解析层（`src/ledger.js` `parseDoneRows`）：兼容 4/5/6 列归档表格行（dev/debug 6 列 `| ID | P | 标题 | 摘要 | 完成日期 | 链接 |`、docs 5 列），desc = 第 3 列，完成日期 = 行内第一个 YYYY-MM-DD（链接列含日期不抢前）；无日期行跳过

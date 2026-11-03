@@ -176,3 +176,149 @@ test('parseDoneRows 混排表格：4/5/6 列 + 表头 + 无日期行；空表返
   assert.deepEqual(parseDoneRows('', 10), [])
   assert.deepEqual(parseDoneRows('# 归档\n\n> 说明行\n', 10), [])
 })
+
+// ---- DEV-102：parseDoneRows 块式归档 + ledgerOf recent 全局倒序 ----
+
+test('块式：状态=完成 + 归档日期 → 计入最近完成（desc=标题）', () => {
+  const md = [
+    '## [DEV-058] XRBI Runtime 相机诊断 APK',
+    '',
+    '| Field | Value |',
+    '|-------|-------|',
+    '| Priority | P0 |',
+    '| 状态 | 完成 |',
+    '| 归档日期 | 2026-11-03 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 10)
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rows[0], { id: 'DEV-058', prio: 'P0', desc: 'XRBI Runtime 相机诊断 APK', date: '2026-11-03' })
+})
+
+test('块式：状态=取消 同样计入已归档记录', () => {
+  const md = [
+    '## [DEBUG-027] 已取消任务',
+    '| 状态 | 取消 |',
+    '| 归档日期 | 2026-11-03 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 10)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].id, 'DEBUG-027')
+  assert.equal(rows[0].date, '2026-11-03')
+})
+
+test('块式：非归档状态（active/done/archived/pending）与缺日期块跳过', () => {
+  const md = [
+    '## [DEV-200] active 块',
+    '| 状态 | active |',
+    '| 最近更新 | 2026-11-03 |',
+    '## [DEV-201] 旧式 done 块',
+    '| 状态 | done |',
+    '| Last Updated | 2026-11-02 |',
+    '## [DEV-202] 本仓库 archived 块',
+    '| 状态 | archived |',
+    '| 完成日期 | 2026-11-01 |',
+    '## [DEV-203] 完成但无日期块',
+    '| 状态 | 完成 |',
+    '| 优先级 | P2 |',
+    '## [DEV-204] 日期键全缺的完成块',
+    '| 状态 | 完成 |',
+    '| 最近更新 | 待更新 |',
+  ].join('\n')
+  assert.deepEqual(parseDoneRows(md, 10), [])
+})
+
+test('块式：日期优先级 归档日期 > 完成日期 > 最近更新/Last Updated', () => {
+  const md = [
+    '## [DEV-301] 三键齐全',
+    '| 状态 | 完成 |',
+    '| 完成日期 | 2026-10-01 |',
+    '| 最近更新 | 2026-11-03 |',
+    '| 归档日期 | 2026-10-20 |',
+    '## [DEV-302] 仅完成日期',
+    '| 状态 | 完成 |',
+    '| 完成日期 | 2026-10-15 |',
+    '## [DEV-303] 英文键 Last Updated（带时间）',
+    '| Status | 完成 |',
+    '| Priority | P1 |',
+    '| Last Updated | 2026-10-26 11:59 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 10)
+  // 返回按日期倒序：DEV-303(10-26) > DEV-301(10-20) > DEV-302(10-15)
+  assert.equal(rows.length, 3)
+  assert.equal(rows[0].id, 'DEV-303')
+  assert.equal(rows[0].date, '2026-10-26') // Last Updated 取 YYYY-MM-DD 部分
+  assert.equal(rows[0].prio, 'P1')
+  assert.equal(rows[1].id, 'DEV-301')
+  assert.equal(rows[1].date, '2026-10-20') // 归档日期优先于更新更晚的最近更新
+  assert.equal(rows[2].id, 'DEV-302')
+  assert.equal(rows[2].date, '2026-10-15')
+})
+
+test('HTML 注释内的示例块不解析', () => {
+  const md = [
+    '<!--',
+    '## [DEV-999] 骨架示例任务',
+    '| 状态 | 完成 |',
+    '| 归档日期 | 2026-11-03 |',
+    '-->',
+    '| DEV-100 | P1 | 真实任务 | 2026-11-02 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 10)
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rows[0], { id: 'DEV-100', prio: 'P1', desc: '真实任务', date: '2026-11-02' })
+})
+
+test('行 + 块去重：同 ID 块式优先（desc/date/prio 取块）', () => {
+  const md = [
+    '| DEV-100 | P1 | 行式描述 | 2026-08-10 |',
+    '## [DEV-100] 块式标题',
+    '| Field | Value |',
+    '|-------|-------|',
+    '| 状态 | 完成 |',
+    '| 优先级 | P0 |',
+    '| 归档日期 | 2026-11-03 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 10)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].desc, '块式标题')
+  assert.equal(rows[0].prio, 'P0')
+  assert.equal(rows[0].date, '2026-11-03')
+})
+
+test('行 + 块混合：倒序取前 n（块的新近日期排前）', () => {
+  const md = [
+    '| DOCS-010 | P1 | 老归档 | 2026-09-10 |',
+    '## [DEBUG-014] 新块归档',
+    '| 状态 | 完成 |',
+    '| 归档日期 | 2026-11-03 |',
+    '| DEV-020 | P2 | 中间行 | 2026-10-05 |',
+  ].join('\n')
+  const rows = parseDoneRows(md, 2)
+  assert.deepEqual(rows.map((r) => r.id), ['DEBUG-014', 'DEV-020'])
+})
+
+test('ledgerOf recent 全局按日期倒序、跨类型混合（修复 dev 独占槽位缺陷）', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const root = await mkdtemp(join(tmpdir(), 'awf-recent-'))
+  const { ledgerOf } = await import('../src/ledger.js')
+  try {
+    const mk = async (type, doneMd) => {
+      const dir = join(root, 'agent-workflow', 'tasks', type)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'done.md'), doneMd + '\n')
+    }
+    // dev 2 条（较早）、debug 1 条（中间）、docs 1 条（最新）→ 全局应为 docs > debug > dev
+    await mk('dev', '| DEV-001 | P1 | 较早 | 2026-09-01 |\n| DEV-002 | P2 | 更早 | 2026-08-01 |')
+    await mk('debug', '| DEBUG-001 | P0 | 中间 | 2026-10-01 |')
+    await mk('docs', '## [DOCS-001] 最新块\n| 状态 | 完成 |\n| 归档日期 | 2026-11-02 |')
+    const ledger = await ledgerOf(root)
+    // dev 2 条 + debug 1 条 + docs 1 条 = 4 条，全局倒序
+    assert.deepEqual(ledger.recent.map((r) => r.id), ['DOCS-001', 'DEBUG-001', 'DEV-001', 'DEV-002'])
+    assert.deepEqual(ledger.recent.map((r) => r.type), ['docs', 'debug', 'dev', 'dev'])
+    assert.equal(ledger.recent.length, 4)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
