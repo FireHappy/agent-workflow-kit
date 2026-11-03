@@ -541,7 +541,8 @@ window.__ModuleLoader__.load({
             position: 'absolute',
             left: pos ? pos.x : '50%',
             top: pos ? pos.y : '50%',
-            transform: pos ? undefined : 'translate(-50%, -50%)',
+            // 居中偏移用独立 translate 属性（不占用 transform，避免被入场动画 awf-pop 的 transform 覆盖导致先出现在右下角再跳中）
+            translate: pos ? undefined : '-50% -50%',
             display: 'flex', flexDirection: 'column',
             background: 'var(--dsw-alias-bg-layer-3, #ffffff)',
             border: '1px solid ' + C.border, borderRadius: C.radius,
@@ -579,11 +580,6 @@ window.__ModuleLoader__.load({
             onMouseDown: (e) => onResizeStart(e, 'right'),
             title: '拖动调整弹框宽度',
             style: { position: 'absolute', top: 0, right: 0, bottom: 0, width: 8, cursor: 'ew-resize', zIndex: 2 },
-          }),
-          h('div', { // 上边缘热区
-            onMouseDown: (e) => onResizeStart(e, 'top'),
-            title: '拖动调整弹框高度',
-            style: { position: 'absolute', left: 0, right: 0, top: 0, height: 8, cursor: 'ns-resize', zIndex: 2 },
           }),
           h('div', { // 下边缘热区
             onMouseDown: (e) => onResizeStart(e, 'bottom'),
