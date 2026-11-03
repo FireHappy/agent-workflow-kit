@@ -1240,13 +1240,11 @@ window.__ModuleLoader__.load({
               ? h('div', { style: { padding: '12px', color: C.error, fontSize: 12, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
               : data
                 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                    // 顶部徽章行（对齐归档查看）：类型 / 优先级 / 日期 / 文件名
+                    // 顶部徽章行（对齐归档查看）：类型 / 优先级 / 文件名
+                    // （不再显示超长「更新于…」备注，避免挤占；任务信息以内容区为准）
                     h('div', { style: row({ gap: 8, flexWrap: 'wrap' }) },
                       h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(s.type)),
                       meta.prio ? h(Pill, { color: prioStyle.color, variant: 'soft', dataPrio: meta.prio }, meta.prio) : null,
-                      meta.updated
-                        ? h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, '更新于 ' + meta.updated)
-                        : null,
                       h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, s.file + '.md')),
                     // 任务描述（粗体，对齐归档查看）
                     h('div', { style: { fontSize: 13, fontWeight: 700, color: C.text, lineHeight: 1.5 } },
@@ -1266,7 +1264,7 @@ window.__ModuleLoader__.load({
                               fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              maxHeight: 320, minHeight: 160, overflowY: 'auto',
+                              maxHeight: 460, minHeight: 280, overflowY: 'auto',
                               resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             },
                           }),
@@ -1283,7 +1281,7 @@ window.__ModuleLoader__.load({
                       : h('div', {},
                           h('pre', {
                             style: {
-                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 320,
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 460,
                               background: C.raised, border: '1px solid ' + C.hairline,
                               fontFamily: C.mono, fontSize: 12, lineHeight: 1.55,
                               color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
