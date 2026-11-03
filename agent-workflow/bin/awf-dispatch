@@ -32,6 +32,11 @@
   ./agent-workflow/bin/awf-dispatch --prune --apply
   ./agent-workflow/bin/awf-dispatch --prune --json
 
+票据来源（激活式 router）：派发前校验任务文件头部的「来源：用户 | 工作流」标记。
+缺省视为用户来源（旧票据无该字段仍可用，向后兼容）；头部标记「来源：工作流」的
+票据本身是被派发的任务，接收者保持 worker、禁止转派（派发深度 = 1），再次作为
+target 派发直接 FAIL（退出码 2，见 --help 的 epilog）。
+
 设计约束：只依赖 Python 3 标准库；不打印、不落盘 GUI 认证 cookie。
 """
 
@@ -207,6 +212,24 @@ def resolve_module(text: str, override: str = "") -> str:
     if (override or "").strip():
         return clean_title(override, limit=SESSION_TITLE_LIMIT)
     return ticket_module(text) or MODULE_DEFAULT
+
+
+def ticket_source(text: str) -> str:
+    """读取票据头部「来源：用户 | 工作流」标记；缺失或缺省值按用户处理（向后兼容）。
+
+    激活式 router 协议（DEV-115）：只有直接面对**用户原始请求**的节点才临时激活为
+    router、拥有路由/派发权（来源=用户）；来源=工作流的票据本身是被派发的任务，
+    接收者保持 worker、**禁止转派**（派发深度 = 1）。返回 "user" / "workflow"。
+    非头部位置的文字（如任务标题里的「来源」字样）不会被误判。
+    """
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*]\s*)?来源\s*[：:]\s*(.+?)\s*$", line)
+        if match:
+            value = match.group(1).strip()
+            if "工作流" in value or value.lower() in ("workflow", "wf"):
+                return "workflow"
+            return "user"
+    return "user"
 
 
 # ---------------------------------------------------------------- 前置检查
@@ -1868,6 +1891,10 @@ def main(argv=None) -> int:
             "        默认 dry-run 只打印计划，--apply 才移动；git 索引里的票据用 git mv，其余 os.rename；\n"
             "        目标已存在则跳过并报冲突（不覆盖）。无票据或全部 pending 时退出码 0。\n"
             "        --prune 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。\n"
+            "\n激活式路由（票据来源，DEV-115）：派发前校验任务文件头部的「来源：用户 | 工作流」；\n"
+            "        缺省视为用户来源（旧票据兼容）；「来源：工作流」的票据是被派发的任务，\n"
+            "        接收者保持 worker、禁止转派（派发深度 = 1），再次作为 target 派发\n"
+            "        直接 FAIL（退出码 2，输出禁止转派错误；需转包时由用户创建「来源：用户」新票据）。\n"
             "\n会话复用（默认）：派发前先 session/list，按「项目 + 模块」复用目标工作区会话：\n"
             "        复用键 = 同 cwd + 标题等于「[awf] <项目名> · <模块名>」；\n"
             "        模块来源：--module > 票据「模块：」行 > 默认「通用」；\n"
@@ -2010,6 +2037,18 @@ def main(argv=None) -> int:
     try:
         target = resolve_target(args.target)
         task, text = read_task(args.task)
+
+        # 激活式 router（DEV-115）：来源=工作流的票据本身是被派发的任务，接收者保持
+        # worker、禁止转派（派发深度 = 1）；把它再次作为 target 派发直接 FAIL。
+        # 缺省（无「来源」字段）视为用户来源，旧票据不受影响（向后兼容）。
+        if ticket_source(text) == "workflow":
+            raise DispatchError(
+                f"禁止转派：任务文件 {task.name} 头部标记「来源：工作流」，"
+                "它是工作流派发的任务（激活式 router：派发深度 = 1），接收者保持 "
+                "worker 只执行，不得再作为 target 转派给其他节点；"
+                "如需转包，请由用户创建「来源：用户」的新任务票据"
+            )
+
         kind = task_type(text)
         title = args.title or f"{target.name} · {task_title(task, text)}"
 

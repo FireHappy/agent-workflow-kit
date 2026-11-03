@@ -509,3 +509,46 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 ### 备注
 - 版本位 minor；v0.7.0 已被旧误发版（506c834，指向 dev 分支外）占用并推送，不可复用，故升 v0.8.0
 - 本批含 DEV-106（0.8.0 未含于 0.7.0）与 DEV-107~113 UI 批次
+
+
+## [DEV-115] 激活式 Router 协议
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | templates/AGENTS.md.tmpl（任务路由段）、agent-workflow/bin/awf-dispatch（票据来源校验）、agent-workflow/workflows/cross-project.md（协议规则）、docs/design.md + docs/dispatch.md、README.md、test/smoke.sh（含双副本同步） |
+| 依赖 | 无 |
+| 最近更新 | 2026-11-04 |
+
+### 目标
+把「激活式 router」协议落进工作流框架：路由能力只在节点直面用户时激活，派发深度 = 1，接收者禁止转派。
+
+### 实现方案
+1. 票据头部新增「来源：用户 | 工作流」标记（缺省=用户，向后兼容）；来源=工作流的票据声明接收者保持 worker、禁止转派。
+2. AGENTS.md.tmpl 任务路由段加入激活式规则（激活条件唯一 / 派发深度=1 / router 决策三件套并落盘）。
+3. awf-dispatch 对来源=工作流的票据二次派发 FAIL（退出码 2，中文禁止转派错误）；旧票据无来源不受影响。
+4. docs/design.md 画「激活派发 / 转派被拒」两段示意；README.md、docs/dispatch.md 同步。
+5. smoke.sh 新增来源校验断言（解析 + 主流程拒绝 + 旧票据兼容）。
+
+### 验收标准
+- [x] 票据规范含「来源：用户|工作流」字段定义与"来源=工作流禁止转派"声明（cross-project.md / docs/dispatch.md）
+- [x] templates/AGENTS.md.tmpl 任务路由段含激活式规则（激活条件、深度=1、决策三件套）
+- [x] awf-dispatch 对来源=工作流的二次派发 FAIL 并输出禁止转派错误；旧票据（无来源）不受影响
+- [x] 文档含两段示意（激活派发 / 转派被拒）
+- [x] DEV-115 已归档，check_workflow.sh 全过，status.md 已刷新
+- [x] 只本地 commit，未 push
+
+### 验证
+- check_workflow.sh 全绿（含 6 对生成副本漂移校验）。
+- python3 -m py_compile bin/awf-dispatch、bash -n test/smoke.sh 通过；task 清单里的 `bash -n agent-workflow/bin/awf-dispatch` 对 python 文件不适用（对 HEAD 原版同样报错），改用仓库约定的 py_compile。
+- bash test/smoke.sh：124 项通过、0 失败（含 DEV-115 新增 5 项断言）。
+
+### 下一步
+无（协议已落盘；各项目已生成的 agent-workflow/ 副本由 awf upgrade 拉取，不在本任务范围）。
+| 完成日期 | 2026-11-04 |
+| DEV-115 | P1 | 激活式 Router 协议：任务票据「来源：用户|工作流」标记 + 激活条件唯一 / 派发深度=1 / router 决策三件套；awf-dispatch 拒绝工作流来源二次派发（禁止转派）；模板/流程/文档/smoke 同步 | 2026-11-04 |

@@ -1848,5 +1848,93 @@ else
   bad "RT-3 docs/dispatch.md 未写明 commit 归因"
 fi
 
+# 21. DEV-115 激活式路由：票据来源校验（ticket_source 解析 + 禁止转派 + 旧票据兼容）
+if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+import contextlib
+import importlib.machinery
+import importlib.util
+import io
+import pathlib
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_source_under_test", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+# ticket_source：缺失 / 用户 → user（向后兼容）；工作流 → workflow
+missing = "任务：TEST-1\n\n- 目标项目：proj（/tmp/proj）\n"
+assert module.ticket_source(missing) == "user", "缺省来源必须视为用户（向后兼容）"
+assert module.ticket_source("- 来源：用户\n任务：TEST-1\n") == "user"
+assert module.ticket_source("任务：TEST-1\n\n- 来源：工作流\n- 模块：工作流\n") == "workflow"
+assert module.ticket_source("任务：TEST-1\n\n- 来源：Workflow\n") == "workflow"
+assert module.ticket_source("任务：TEST-1\n\n- 来源: wf\n") == "workflow"
+assert module.ticket_source("任务：TEST-1（来源：用户确认）\n") == "user", "非头部行不得误判"
+
+original_resolve = module.resolve_target
+try:
+    def run_main(ticket, label):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = module.main(["proj", str(ticket), "--dry-run"])
+        return code, err.getvalue()
+
+    with tempfile.TemporaryDirectory(suffix="-d115") as tmp:
+        tmpdir = pathlib.Path(tmp)
+        module.resolve_target = lambda value: tmpdir
+
+        # 来源=工作流 的票据作为 target 再次派发 → FAIL（禁止转派），退出码 2
+        wf_ticket = pathlib.Path("/tmp/awf-d115-source-workflow.md")
+        wf_ticket.write_text("任务：DEV-115 转派\n\n- 目标项目：proj（/tmp/proj）\n- 来源：工作流\n",
+                             encoding="utf-8")
+        code, err = run_main(wf_ticket, "workflow")
+        assert code == module.EXIT_FAIL, f"来源=工作流的二次派发必须 FAIL（exit 2），实际 {code}"
+        assert "禁止转派" in err and "来源：工作流" in err, err
+
+        # 无来源旧票据不受来源校验影响：走正常前置检查（G1 门失败，非来源拦截）
+        old_ticket = pathlib.Path("/tmp/awf-d115-source-old.md")
+        old_ticket.write_text("任务：DEV-115 旧票据\n\n- 目标项目：proj（/tmp/proj）\n",
+                              encoding="utf-8")
+        code2, err2 = run_main(old_ticket, "old")
+        assert code2 == module.EXIT_FAIL, code2
+        assert "禁止转派" not in err2, "旧票据不得被来源校验拦截"
+        assert "G1 工作流失败" in err2, err2
+finally:
+    module.resolve_target = original_resolve
+PY
+then
+  ok "DEV-115 票据来源校验：解析正确 / 工作流来源二次派发被拒 / 旧票据兼容"
+else
+  bad "DEV-115 票据来源校验失败（见上方 Traceback）"
+fi
+
+# 21.2 DEV-115：协议规则同步（模板任务路由段 / 流程与派发文档 / 两段示意）
+if grep -q '激活式路由' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '来源：工作流' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
+  ok "DEV-115 模板任务路由段含激活式规则（激活条件 / 深度=1 / 来源标记）"
+else
+  bad "DEV-115 模板任务路由段缺少激活式规则"
+fi
+if grep -q '来源：工作流' "$KIT_DIR/agent-workflow/workflows/cross-project.md" \
+   && grep -q '禁止转派' "$KIT_DIR/agent-workflow/workflows/cross-project.md"; then
+  ok "DEV-115 cross-project.md 含票据来源字段与禁止转派声明"
+else
+  bad "DEV-115 cross-project.md 缺少票据来源字段/禁止转派声明"
+fi
+if grep -q '来源：工作流' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'ticket_source' "$KIT_DIR/docs/dispatch.md"; then
+  ok "DEV-115 docs/dispatch.md 含票据来源字段与派发器校验说明"
+else
+  bad "DEV-115 docs/dispatch.md 缺少票据来源/校验说明"
+fi
+if grep -q '激活派发' "$KIT_DIR/docs/design.md" \
+   && grep -q '转派被拒' "$KIT_DIR/docs/design.md"; then
+  ok "DEV-115 docs/design.md 含两段示意（激活派发 / 转派被拒）"
+else
+  bad "DEV-115 docs/design.md 缺少两段示意"
+fi
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -20,7 +20,7 @@ agent-workflow-kit/
 ├── test/smoke.sh            # 冒烟测试
 ├── test/upgrade.sh          # 升级回归测试（awf upgrade 全流程）
 ├── test/registry-concurrency.sh  # 全局索引并发回归测试
-├── docs/design.md           # 设计取舍
+├── docs/design.md           # 设计取舍（含激活式 Router 协议）
 ├── docs/dispatch.md         # 跨项目派发（会话优先 / 无人值守 / handoff）
 ├── docs/team-flow.md        # 团队执行流程（三轨 + 派发模式）
 ├── docs/upgrade.md          # 升级已有项目的工作流（awf upgrade 规范）
@@ -78,6 +78,8 @@ cd ~/Documents/GitHub/agent-workflow-kit
 ## 跨项目派发
 
 当任务目标在另一个仓库时，先检查目标是否有工作流、是否已登记为当前 harness 的工作区；都满足后，优先在**目标工作区的会话**中执行，而不是默认 headless。
+
+派发遵循**激活式 router** 协议：路由能力只在直接面对**用户原始请求**的节点临时激活（任务票据头部带「来源：用户 | 工作流」标记，缺省=用户，向后兼容）；派发深度 = 1——收到「来源：工作流」任务的节点保持 worker、**禁止转派**，`awf-dispatch` 对工作流来源票据的二次派发直接拒绝（退出码 2）。设计权衡与「激活派发 / 转派被拒」两段示意见 [docs/design.md](docs/design.md)「激活式 Router」，票据来源字段与派发器校验见 [docs/dispatch.md](docs/dispatch.md)「任务票据来源」。`templates/AGENTS.md.tmpl` 任务路由段与生成的 `agent-workflow/workflows/cross-project.md` 已内置同一规则。
 
 ```bash
 ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
