@@ -1267,11 +1267,19 @@ window.__ModuleLoader__.load({
       let tableBuf = []
       const flushTable = () => {
         if (tableBuf.length === 0) return
-        const rows = tableBuf.map((r) => {
-          const cells = r.split('|').filter((_, i, a) => !(i === 0 || i === a.length - 1 || (i === 1 && a.length === 2)))
-          return '<tr>' + cells.map((c) => '<td style="padding:3px 8px;border:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));font-size:11px">' + inline(c.trim()) + '</td>').join('') + '</tr>'
-        })
-        html.push('<table style="border-collapse:collapse;margin:6px 0;max-width:100%">' + rows.join('') + '</table>')
+        const cellText = (r) => r.split('|').filter((_, i, a) => !(i === 0 || i === a.length - 1 || (i === 1 && a.length === 2))).map((c) => c.trim())
+        // 第一行=表头（th），第二行=分隔行（|----|）跳过，其余=数据行
+        const first = cellText(tableBuf[0])
+        const isSep = (r) => /^[\s|:-]+$/.test(r.replace(/\|/g, '')) && r.includes('-')
+        const bodyRows = tableBuf.slice(1).filter((r) => !isSep(r)).map((r) => cellText(r))
+        const maxCols = Math.max(first.length, ...bodyRows.map((r) => r.length))
+        const tdStyle = 'padding:3px 8px;border:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));font-size:11px;vertical-align:top'
+        const head = '<tr>' + first.map((c, i) => '<th style="' + tdStyle + ';font-weight:700;text-align:left;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.06))">' + inline(c) + '</th>').join('') + '</tr>'
+        const rows = bodyRows.map((r) => '<tr>' + Array.from({ length: maxCols }, (_, i) => '<td style="' + tdStyle + (i === 2 ? ';word-break:break-word' : ';white-space:nowrap') + '">' + inline(r[i] || '') + '</td>').join('') + '</tr>').join('')
+        // 列宽比例：描述（第3列）最宽，其余按内容自适应（fixed 布局下显式分配）
+        const colWidths = [18, 12, 52, 18]
+        const colgroup = '<colgroup>' + Array.from({ length: maxCols }, (_, i) => '<col style="width:' + (colWidths[i] || Math.floor(100 / maxCols)) + '%">').join('') + '</colgroup>'
+        html.push('<table style="border-collapse:collapse;margin:6px 0;max-width:100%;table-layout:fixed;width:100%">' + colgroup + head + rows + '</table>')
         tableBuf = []
         inTable = false
       }
