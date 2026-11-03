@@ -1434,19 +1434,15 @@ window.__ModuleLoader__.load({
                     // 任务描述（粗体，对齐归档查看）
                     h('div', { style: { fontSize: F(14), fontWeight: 700, color: C.text, lineHeight: 1.5 } },
                       metaTitle || '（无描述）'),
-                    // 小节标题：任务块原文（markdown）+ 右侧拷贝按钮（DEV-109）
+                    // 小节标题：任务块原文（markdown）+ 右侧拷贝按钮（DEV-109，样式对齐标题路径 awf-icon-btn）
                     h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '2px 0 6px' } },
                       h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.sub, letterSpacing: '.03em' } },
                         '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
                       h('button', {
+                        className: 'awf-icon-btn' + (s.copied ? ' awf-icon-btn-ok' : ''),
                         onClick: () => onCopy && onCopy(data && data.content ? data.content : ''),
                         title: '复制任务内容到剪贴板',
-                        style: {
-                          fontSize: F(12), padding: '2px 10px', borderRadius: 999, cursor: 'pointer',
-                          border: '1px solid ' + C.hairline, background: C.raised, color: C.sub,
-                          fontFamily: 'inherit',
-                        },
-                      }, s.copied ? '已拷贝 ✓' : '拷贝')),
+                      }, s.copied ? '✓' : '⧉')),
                     // DEV-106：预览/编辑 tab（不铺满；选中项 accent 实心底+白字，未选透明灰字）
                     h('div', {
                       style: { display: 'flex', gap: 6, marginBottom: 2, alignSelf: 'flex-start' },
