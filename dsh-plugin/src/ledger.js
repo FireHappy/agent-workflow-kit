@@ -292,17 +292,34 @@ export function isWhitelistedPath(target, indexPaths, workspaceRoot) {
 }
 
 /**
- * 解析 todo.md 的表格行：`| ID | 优先级 | 描述 | 登记日期 |`
- * （表头各类型略有差异：任务ID/问题描述/文档主题；锚定规则同 parseDoneRows）。
+ * 解析 todo.md 的表格行，兼容两种列数（表头各类型略有差异：
+ * 任务ID/问题描述/文档主题；锚定规则同 parseDoneRows）：
+ * - 4 列：`| ID | 优先级 | 描述 | 登记日期 |`（回归，结果与旧实现一致）
+ * - 5 列：`| ID | Priority | Title | Dependencies | Date |`（DEV-100）
+ *   `desc = title`；deps 非空时并入 desc，形如 `title（依赖 deps）`，
+ *   保证列表展示与「开始任务」生成的块里依赖信息可见。
+ * 实现取舍：先试 5 列正则、失败再回退 4 列正则——两条正则互斥
+ * （4 列行的日期在第 4 格，5 列正则的 deps 组吞掉日期后无剩余 `| date |`；
+ * 5 列行的日期在第 5 格，4 列正则的 desc 组 `[^|]*?` 无法跨管道吃掉日期），
+ * 各自独立可读、回归面最小；若改用「单正则带可选组」则两个分支共享
+ * 捕获组下标、5 列空 deps 与 4 列 desc 易混淆，故不取。
  * @param {string} md
  * @returns {Array<{id: string, prio: string, desc: string, date: string}>}
  */
 export function parseTodoRows(md) {
   const rows = []
   for (const line of String(md).split('\n')) {
-    const m = /^\|\s*([A-Z]+-[0-9]+)\s*\|\s*([^|]*)\s*\|\s*([^|]*?)\s*\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2})\s*\|/.exec(line)
-    if (!m) continue
-    rows.push({ id: m[1], prio: trim(m[2]), desc: trim(m[3]), date: m[4] })
+    // 5 列：| ID | prio | title | deps | date |
+    let m = /^\|\s*([A-Z]+-[0-9]+)\s*\|\s*([^|]*)\s*\|\s*([^|]*)\s*\|\s*([^|]*)\s*\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2})\s*\|/.exec(line)
+    if (m) {
+      const title = trim(m[3])
+      const deps = trim(m[4])
+      rows.push({ id: m[1], prio: trim(m[2]), desc: deps ? `${title}（依赖 ${deps}）` : title, date: m[5] })
+      continue
+    }
+    // 4 列：| ID | prio | desc | date |
+    m = /^\|\s*([A-Z]+-[0-9]+)\s*\|\s*([^|]*)\s*\|\s*([^|]*?)\s*\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2})\s*\|/.exec(line)
+    if (m) rows.push({ id: m[1], prio: trim(m[2]), desc: trim(m[3]), date: m[4] })
   }
   return rows
 }
