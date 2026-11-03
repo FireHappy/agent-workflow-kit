@@ -440,14 +440,27 @@ async function isDirectory(p) {
 // 详细执行规则由 agent 读 AGENTS.md 与 docs/team-flow.md 自行展开——程序不重复业务细节。
 // DEV-039：engine 区分执行框架——'subagent'=服务端子代理通道（指令即子代理任务书，
 // 由宿主 ctx.agents.create() 拉起，全程不经主会话）；'inject'=注入主对话降级路径（旧路径保留）。
+
+// DEV-103：init 动作的完整初始化指令（subagent 与 inject 共用）。
+// agent 感知项目上下文生成完整框架，替代仅空模板的最小骨架（缺 workflows/README/bin 等运行时文件）。
+const INIT_AGENT_GUIDE = [
+  '初始化 agent-workflow 工作流框架（完整版，不要只生成空模板）：',
+  '1. 先读项目上下文：README.md / package.json / 目录结构 / 语言与技术栈 / 现有约定，据此填写 project.yaml 的 id / name / purpose / aliases / stack（stack 影响默认校验命令，如 node、python、unity 等）；',
+  '2. 生成文件（参照全局技能 agent-workflow-scaffold 的初始化产物）：agent-workflow/project.yaml（项目事实，唯一输入）；agent-workflow/README.md、agent-workflow/workflows/{dev,debug,docs,review,cross-project,release}.md（可参照 kit 模板）；agent-workflow/templates/AGENTS.md.tmpl；agent-workflow/bin/awf（+awf-dispatch 若有）；check_workflow.sh 兼容入口；tasks/{dev,debug,docs}/{todo,current,done}.md 骨架（todo.md 表格行=标准 4 列 `| 任务ID | 优先级 | 描述 | 登记日期 |`）；根目录 AGENTS.md 受控区块（由 bootstrap 生成）；CLAUDE.md 指针；',
+  '3. 尽量从项目实际填充初始信息：todo.md 可写 1-3 条真实可行的初始任务（如「梳理项目现状并登记待办」），current.md 留空待认领，done.md 空表；project.yaml 填写真实 stack 与 purpose，不要默认 generic；',
+  '4. 完成后运行 agent-workflow/bin/awf check 验证通过（或等价 bootstrap），再运行 awf status 刷新 status.md；',
+  '5. 用简洁文本回报：生成了哪些文件、project.yaml 的关键字段、check/status 结果；失败时说明原因与已写文件。',
+].join('\n')
 export function buildActPrompt({ action, id, type, projectPath, reason, engine = 'inject' }) {
   const actionLine = {
+    init: `在项目 ${projectPath} 初始化（生成）完整的 agent-workflow 工作流框架`,
     start: `在项目 ${projectPath} 的任务账本中，为任务 ${id}（类型 ${type}）创建 AgentTeams 团队并执行`,
     'return-todo': `在项目 ${projectPath} 的任务账本中，处理任务 ${id}（类型 ${type}）的「返回待办」操作`,
     delete: `在项目 ${projectPath} 的任务账本中，处理任务 ${id}（类型 ${type}）的「删除」操作`,
     'progress-backfill': `在项目 ${projectPath} 的任务账本中，回填任务 ${id}（类型 ${type}）的进度`,
   }[action]
   const constraint = {
+    init: INIT_AGENT_GUIDE,
     start: `按阶段代理模型（DEV-038）：动作先派独立子代理分析（任务路由/可否执行）再处理，不占用主会话。该任务已登记在 agent-workflow/tasks/${type}/current.md（状态 active）。按 AGENTS.md 任务路由决定是否建队：可并行拆分才建队，小任务单会话直接完成并说明原因；approval=automatic（本仓库已授权）；完成后按团队流程回填账本（验证→review→归档）。`,
     'return-todo': `按阶段代理模型（DEV-038）：先派独立子代理分析（未提交改动/团队是否仍在执行/todo.md 是否有可恢复行），确认可放回才从 current.md 移除块并恢复 todo.md 行；不可则说明原因不改账本。`,
     delete: `按阶段代理模型（DEV-038）：先派独立子代理分析（修改范围/依赖/验收进度/git 未提交改动），可删除则移除块并在 done.md 追加[已撤销]行（需回退 git 修改时分析后执行）；不可则说明原因不改账本。`,
@@ -458,6 +471,7 @@ export function buildActPrompt({ action, id, type, projectPath, reason, engine =
   }[action]
   // DEV-039：服务端子代理通道——本指令即子代理自己的任务书，措辞从「派子代理」改为「由你执行」
   const constraintSubagent = {
+    init: INIT_AGENT_GUIDE,
     start: `该任务已登记在 agent-workflow/tasks/${type}/current.md（状态 active）。由你作为本面板动作的阶段执行子代理推进：按 AGENTS.md 任务路由决定执行方式——可并行拆分才建队，小任务单会话直接完成并说明原因；approval=automatic（本仓库已授权）；完成后按团队流程回填账本（验证→review→归档）。`,
     'return-todo': `先由你分析（未提交改动/团队是否仍在执行/todo.md 是否有可恢复行），确认可放回才从 current.md 移除块并恢复 todo.md 行；不可则说明原因不改账本。`,
     delete: `先由你分析（修改范围/依赖/验收进度/git 未提交改动），可删除则移除块并在 done.md 追加[已撤销]行（需回退 git 修改时分析后执行）；不可则说明原因不改账本。`,
@@ -485,7 +499,7 @@ export function buildActPrompt({ action, id, type, projectPath, reason, engine =
 }
 
 // DEV-039：面板判断型动作白名单（服务端子代理通道与 /awf/agent/act 注入通道共用；不删旧白名单）。
-export const AGENT_ACTIONS = ['return-todo', 'delete', 'progress-backfill']
+export const AGENT_ACTIONS = ['init', 'return-todo', 'delete', 'progress-backfill']
 
 /**
  * 面板动作执行入口（DEV-039）：优先走宿主 agents 服务创建动作子代理（不经主会话），
@@ -772,6 +786,63 @@ export function apply(ctx) {
       }
     },
   }), 'dsh-awf-dashboard: /awf/init route')
+
+  // DEV-103：看板「初始化工作流」改为 agent 完整配置（用户决策：面板 init 只生成空模板，信息不完整）。
+  //   agent 读项目上下文生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin + 初始账本），
+  //   完成后改动账本触发面板自动刷新；受管理子代理不可用时失败关闭（不创建裸会话、不注入主会话）。
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/awf/init/agent',
+    handler: async (req, res) => {
+      try {
+        if (!fence(req)) {
+          forbidden(res)
+          return
+        }
+        if (req.method !== 'POST') {
+          writeError(res, 405, 'method-error', 'method not allowed')
+          return
+        }
+        const body = await readBody(req)
+        if (!body || typeof body.path !== 'string' || !body.path.trim() || !isAbsolute(body.path)) {
+          writeError(res, 400, 'bad-request', 'body.path 必须是绝对路径字符串')
+          return
+        }
+        const path = resolve(body.path)
+        if (!(await isDirectory(path))) {
+          writeError(res, 400, 'bad-request', `目标目录不存在或不是目录：${path}`)
+          return
+        }
+        if (!(await isAllowedPath(path, body.workspaceRoot))) {
+          writeError(res, 403, 'path-not-allowed', 'path 不在白名单：必须位于全局项目索引或当前工作区根')
+          return
+        }
+        // 已初始化则拒绝（agent 不覆盖既有工作流；升级走 /awf/upgrade）
+        if (await isDirectory(join(path, 'agent-workflow'))) {
+          writeError(res, 409, 'already-initialized', '目录已初始化 agent-workflow，请走升级/整理流程（/awf/upgrade）')
+          return
+        }
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined
+        const result = await runManagedActionAgent(ctx, {
+          prompt: buildActPrompt({ action: 'init', id: 'INIT', type: 'dev', projectPath: path, reason: '', engine: 'subagent' }),
+          cwd: path,
+          parentSessionId: sessionId,
+          label: '工作流初始化（agent 完整配置）',
+          timeoutMs: 180_000,
+        })
+        if (result.ok) {
+          writeJson(res, 200, { ok: true, channel: 'agent', agent: { id: result.agentId, text: result.text } })
+        } else {
+          writeJson(res, 200, {
+            ok: true, channel: 'agent', failed: true,
+            agent: { id: result.agentId || null, code: result.code || 'agent-run-failed', error: result.error || '子代理初始化失败', phases: result.phases || [] },
+          })
+        }
+      } catch (error) {
+        writeError(res, 500, 'internal', error instanceof Error ? error.message : String(error))
+      }
+    },
+  }), 'dsh-awf-dashboard: /awf/init/agent route')
 
   // DEV-035：面板「登记当前项目」。
   //   已有 agent-workflow/project.yaml → 直接登记全局索引；没有 → 先初始化骨架再登记。

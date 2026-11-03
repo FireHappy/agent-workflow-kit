@@ -1546,10 +1546,33 @@ window.__ModuleLoader__.load({
             : null,
         })
       }
+      if (busy) {
+        const spin = h('span', {
+          className: 'awf-spin',
+          style: {
+            display: 'inline-block', width: 12, height: 12, marginRight: 6,
+            border: '2px solid ' + C.surface,
+            borderTopColor: C.text,
+            borderRadius: '50%',
+            animation: 'awf-rot 0.9s linear infinite',
+            verticalAlign: '-1px',
+          },
+        })
+        // DEV-103：初始化由 agent 完整配置（读项目上下文生成骨架），子代理运行中
+        return h(EmptyState, {
+          icon: '🚀', tone: 'accent',
+          title: '初始化中…',
+          desc: '已派发 agent 子代理为项目生成完整工作流框架（读取项目上下文后配置 project.yaml、工作流文件与初始账本），完成后面板自动刷新。',
+          extra: error
+            ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
+                '⚠️ ' + error)
+            : null,
+        })
+      }
       return h(EmptyState, {
         icon: '🚀', tone: 'accent',
         title: '工作流未初始化',
-        desc: '该项目尚未初始化 agent-workflow。点击下方按钮生成骨架：project.yaml + tasks/{dev,debug,docs}/{todo,current,done}.md + status.md。',
+        desc: '该项目尚未初始化 agent-workflow。点击下方按钮，由 agent 读取项目上下文生成完整框架：project.yaml（项目事实）+ AGENTS.md 入口 + 工作流规范 + 任务账本骨架。',
         action: typeof onInit === 'function'
           ? h('button', {
               onClick: busy ? undefined : onInit,
@@ -1558,7 +1581,7 @@ window.__ModuleLoader__.load({
                 marginTop: 12, padding: '5px 16px', fontSize: 12,
                 opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
               }),
-            }, '初始化工作流')
+            }, '初始化工作流（agent 配置）')
           : null,
         extra: error
           ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
@@ -1717,14 +1740,16 @@ window.__ModuleLoader__.load({
         if (!selected || initBusy) return
         setInitBusy(true)
         setInitError(null)
-        const row = (projects || []).find((pr) => pr && pr.path === selected)
         try {
-          await postJson('/awf/init', {
+          // DEV-103：初始化改为 agent 完整配置（读项目上下文生成完整骨架），不再用空模板
+          const out = await postJson('/awf/init/agent', {
             path: selected,
             workspaceRoot: anchorRoot || undefined,
-            name: (row && row.id) || undefined,
-            purpose: (row && row.aliases) || undefined,
+            sessionId: props.sessionId || (props.scope && props.scope.sessionId) || undefined,
           })
+          if (out && out.channel === 'agent' && out.failed) {
+            setInitError('初始化子代理未完成：' + String((out.agent && (out.agent.error || out.agent.code)) || '未知原因'))
+          }
           loadLedger() // 成功后重新加载账本，显示正常看板
         } catch (e) {
           if (e.code === 'already-initialized') {
@@ -1741,7 +1766,7 @@ window.__ModuleLoader__.load({
         } finally {
           setInitBusy(false)
         }
-      }, [selected, initBusy, anchorRoot, projects, loadLedger])
+      }, [selected, initBusy, anchorRoot, loadLedger])
 
       // DEV-035：重取项目索引（登记成功后 / 手动刷新时，修复索引只在挂载时取一次的陈旧问题）
       const reloadProjects = useCallback(async () => {
