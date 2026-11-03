@@ -915,7 +915,7 @@ window.__ModuleLoader__.load({
       return h('div', {
         className: 'awf-row' + (clickable ? ' awf-row-clickable' : ''),
         title: clickable ? '点击查看/编辑源文件（' + t.id + ' → ' + (t.type || 'dev') + '/current.md）' : undefined,
-        onClick: clickable ? () => onOpenSource(t.type || 'dev', 'current') : undefined,
+        onClick: clickable ? () => onOpenSource(t.type || 'dev', 'current', t) : undefined,
         style: {
           display: 'flex', flexDirection: 'column', gap: 0,
           padding: '7px 2px', borderBottom: '1px solid ' + C.hairline, fontSize: 12,
@@ -1217,16 +1217,21 @@ window.__ModuleLoader__.load({
      * 展示本地绝对路径（可复制）+ macOS「在访达显示」提示 + .md 原文（等宽、可滚动）。
      * src: {type, file, busy, data:{absPath,content}, error}
      */
-    // DEV-043：源文件面板——查看/编辑一体（视觉对齐「归档查看」弹层：
-      //   标题带任务 ID + 顶部徽章行 + raised 内容区 + 底部操作；编辑态 textarea 保存写回）。
+    // DEV-043：源文件面板——查看/编辑一体，信息与样式对齐「归档查看」弹层：
+      //   标题带任务 ID、顶部徽章行（类型/优先级/日期）、描述粗体、
+      //   「任务块原文（markdown）」小节标题、raised 内容区（编辑态 textarea 保存写回）。
       function SourcePanel({ src, onClose, onCopy, onSave, onEditStart, onEditCancel, onDraftChange }) {
         const s = src || {}
         const data = s.data || null
         const editing = !!s.editing
         const saving = !!s.saving
+        // DEV-043：dirty = 草稿与原文不一致（保存按钮默认禁用，修改后激活）
+        const dirty = !!data && (s.draft != null ? s.draft !== data.content : false)
+        const meta = s.meta || {} // 任务对象（id/prio/date/title），来自 TaskCard 点击
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
+        const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
         return h(ModalShell, {
-          title: '源文件 · ' + (s.type || '') + '/' + (s.file || '') + '.md',
+          title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
           onClose, width: 560,
         },
           s.busy
@@ -1235,20 +1240,20 @@ window.__ModuleLoader__.load({
               ? h('div', { style: { padding: '12px', color: C.error, fontSize: 12, wordBreak: 'break-all' } }, '⚠️ ' + s.error)
               : data
                 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                    // 顶部徽章行（对齐归档查看）：类型 / 优先级 / 可编辑标记
+                    // 顶部徽章行（对齐归档查看）：类型 / 优先级 / 日期 / 文件名
                     h('div', { style: row({ gap: 8, flexWrap: 'wrap' }) },
                       h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(s.type)),
-                      h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, s.file + '.md'),
-                      h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, data.absPath || '')),
-                    // 提示行
-                    h('div', {
-                      style: {
-                        fontSize: 11, color: C.faint, lineHeight: 1.5,
-                        padding: '0 2px',
-                      },
-                    }, editing
-                      ? '编辑模式：修改后点「保存写回」落到文件（tasks/' + (s.type || '') + '/' + (s.file || '') + '.md）；「取消」丢弃改动。'
-                      : '提示：复制路径后在访达（Finder）按 ⌘⇧G 粘贴直达，或粘贴到任意编辑器打开查看。'),
+                      meta.prio ? h(Pill, { color: prioStyle.color, variant: 'soft', dataPrio: meta.prio }, meta.prio) : null,
+                      meta.updated
+                        ? h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, '更新于 ' + meta.updated)
+                        : null,
+                      h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, s.file + '.md')),
+                    // 任务描述（粗体，对齐归档查看）
+                    h('div', { style: { fontSize: 13, fontWeight: 700, color: C.text, lineHeight: 1.5 } },
+                      meta.title || '（无描述）'),
+                    // 小节标题：任务块原文（markdown）
+                    h('div', { style: { fontSize: 12, fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
+                      '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
                     // 内容区（编辑 ↔ 只读，同一面板切换）
                     editing
                       ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
@@ -1270,15 +1275,11 @@ window.__ModuleLoader__.load({
                               ? h('span', { style: { fontSize: 11, color: C.error, marginRight: 'auto' } }, '⚠️ ' + s.saveError)
                               : null,
                             h('button', {
-                              onClick: saving ? undefined : () => onEditCancel && onEditCancel(),
-                              disabled: saving,
-                              style: Object.assign(tinyBtn(false), { opacity: saving ? 0.6 : 1, cursor: saving ? 'default' : 'pointer' }),
-                            }, '取消'),
-                            h('button', {
                               onClick: saving ? undefined : () => onSave && onSave(s.draft != null ? s.draft : data.content),
-                              disabled: saving,
-                              style: Object.assign(buttonStyle({ color: C.accent }), { opacity: saving ? 0.6 : 1, cursor: saving ? 'default' : 'pointer' }),
-                            }, saving ? '保存中…' : '保存写回')))
+                              disabled: saving || !dirty,
+                              title: dirty ? '保存修改到 ' + s.file + '.md' : '未修改',
+                              style: Object.assign(buttonStyle({ color: C.accent }), { opacity: saving || !dirty ? 0.5 : 1, cursor: saving || !dirty ? 'default' : 'pointer' }),
+                            }, saving ? '保存中…' : '保存')))
                       : h('div', {},
                           h('pre', {
                             style: {
@@ -2132,30 +2133,31 @@ window.__ModuleLoader__.load({
       }, [])
 
       // 打开源文件面板：GET /awf/source（只读）；404 → 「源文件接口未就绪」
-      const openSource = useCallback(async (type, file) => {
+      const openSource = useCallback(async (type, file, task) => {
         const t = type === 'debug' || type === 'docs' ? type : 'dev'
         const f = (file === 'current' || file === 'done') ? file : 'todo'
+        const meta = task || null // DEV-043：携带任务对象（id/prio/date/title），面板徽章行与归档查看一致
         if (!selected) {
-          setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '未选择项目，无法读取源文件。' })
+          setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '未选择项目，无法读取源文件。', meta })
           return
         }
-        setSource({ type: t, file: f, busy: true, data: null, copied: false, error: null })
+        setSource({ type: t, file: f, busy: true, data: null, copied: false, error: null, meta })
         try {
           const res = await fetchSource({ path: selected, type: t, file: f })
           const src = (res && res.source) || null
           if (!src || !src.content) {
-            setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '源文件为空或返回异常。' })
+            setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '源文件为空或返回异常。', meta })
             return
           }
           setSource({
-            type: t, file: f, busy: false, data: src, copied: false, error: null,
+            type: t, file: f, busy: false, data: src, copied: false, error: null, meta,
             // DEV-043：打开即进入编辑态（查看/编辑一体，省去先看再点「编辑」的一步）
             editing: true, draft: src.content, saveError: null,
           })
         } catch (e) {
           const code = e && e.code
           setSource({
-            type: t, file: f, busy: false, data: null, copied: false,
+            type: t, file: f, busy: false, data: null, copied: false, error: null, meta,
             error: code === 'not-found'
               ? '源文件接口未就绪（GET /awf/source 不存在或文件缺失）。'
               : apiErrorText(e, '读取源文件失败'),
