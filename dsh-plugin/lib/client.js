@@ -1391,7 +1391,9 @@ window.__ModuleLoader__.load({
         const metaTitle = meta.title || meta.desc || ''
         const metaUpdated = meta.updated || meta.date || ''
         // DEV-109：预览/编辑内容区固定高度（避免两态切换时弹框高度跳动）
+        //   编辑态比预览态多一行「取消/保存」按钮（约 34 + gap 6），textare 高度=BODY_H-40 补偿
         const BODY_H = 560
+        const EDIT_BTN_ROW = 40
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
         // DEV-106：预览/编辑分段控件（参照目标样式：同一胶囊容器内两个选项，选中项高亮）
@@ -1469,7 +1471,7 @@ window.__ModuleLoader__.load({
                               fontFamily: C.mono, fontSize: F(13), lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              height: BODY_H, overflowY: 'auto',
+                              height: BODY_H - EDIT_BTN_ROW, overflowY: 'auto',
                               resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             },
                           }),
