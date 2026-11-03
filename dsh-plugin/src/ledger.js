@@ -79,7 +79,13 @@ export async function readIndex(agentsHome) {
 export function parseBlocks(md) {
   const blocks = []
   let cur = null
+  let inComment = false // HTML 注释（<!-- ... -->）内的行不是字段：骨架示例块不污染解析
   for (const line of String(md).split('\n')) {
+    if (!inComment && /<!--/.test(line) && !/-->/.test(line)) { inComment = true; continue }
+    if (inComment) {
+      if (/-->/.test(line)) inComment = false
+      continue
+    }
     const head = /^## \[([A-Z]+-[0-9]+)\] (.+)$/.exec(line)
     if (head) {
       cur = { id: head[1], title: trim(head[2]), prio: '', status: '', owner: '', mode: '', updated: '' }

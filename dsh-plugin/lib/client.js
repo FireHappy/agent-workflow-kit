@@ -38,10 +38,13 @@ window.__ModuleLoader__.load({
 
     // ---- 常量与 DSH 主题令牌 ----------------------------------------------
 
-    const POLL_MS = 15000
+    const POLL_MS = 5000
     const LS_KEY = 'dsh-awf-dashboard.project'
-    // DEV-036 L2：自动回填注入的客户端节流（模块级单例，跨渲染保持）
+    // DEV-042：自动回填已停用——面板不再在账本刷新后自动派发回填子代理写开发进度
+    //      （用户：开发中的任务无需反复填写进度，完成后归档即可）。保留节流变量仅为
+    //      兼容旧客户端代码引用，不再有自动调用。
     let autoBackfillThrottle = { project: null, last: 0 }
+    const AUTO_BACKFILL_ENABLED = false
 
     // DSH 主题令牌：宿主 Web 均定义。带回退值（缺令牌时仍可用），白天/暗色自动跟随。
     // DEV-024 扩展：idle=流转中状态（handoff）、bgMask=模态遮罩、radiusSm=小控件圆角、
@@ -608,7 +611,8 @@ window.__ModuleLoader__.load({
       if (err) {
         const code = err.code || ''
         const msg = String(err.message || '')
-        if (code === 'not-initialized' || code === 'uninitialized') return true
+        // DEV-041：needs-upgrade（有 agent-workflow/ 文件夹但项目事实不完整）= 半初始化，也走引导卡（升级整理）
+        if (code === 'not-initialized' || code === 'uninitialized' || code === 'needs-upgrade') return true
         if (msg.indexOf('project.yaml') !== -1 || msg.indexOf('未初始化') !== -1) return true
       }
       return false
@@ -1470,7 +1474,29 @@ window.__ModuleLoader__.load({
     }
 
     /** 未初始化引导卡：图标 + 文案 + 「初始化工作流」按钮（EmptyState accent 形态）。 */
-    function renderInitCard({ busy, error, onInit }) {
+    /** 未初始化/半初始化引导卡：区分「从未初始化」（初始化骨架）与「已有工作流文件夹但项目事实不完整」（引导升级整理）。 */
+    function renderInitCard({ busy, error, onInit, needsUpgrade, onUpgrade }) {
+      if (needsUpgrade) {
+        return h(EmptyState, {
+          icon: '🔄', tone: 'accent',
+          title: '工作流需要更新整理',
+          desc: '检测到该项目已有 agent-workflow/ 文件夹但工作流不完整或版本不可读。点击下方按钮进入升级/整理流程：由 agent 合并保留自定义内容并更新框架文件。',
+          action: typeof onUpgrade === 'function'
+            ? h('button', {
+                onClick: busy ? undefined : onUpgrade,
+                disabled: busy,
+                style: Object.assign(buttonStyle(true), {
+                  marginTop: 12, padding: '5px 16px', fontSize: 12,
+                  opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
+                }),
+              }, busy ? '升级整理中…' : '更新/整理工作流')
+            : null,
+          extra: error
+            ? h('div', { style: { marginTop: 10, fontSize: 12, color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
+                '⚠️ ' + error)
+            : null,
+        })
+      }
       return h(EmptyState, {
         icon: '🚀', tone: 'accent',
         title: '工作流未初始化',
@@ -1504,6 +1530,7 @@ window.__ModuleLoader__.load({
       const [auto, setAuto] = useState(false) // 当前选中是否来自自动锚定
       const [ledger, setLedger] = useState(null)
       const [notInit, setNotInit] = useState(false) // 选中项目未初始化 → 引导卡
+      const [needsUpgrade, setNeedsUpgrade] = useState(false) // DEV-041：有工作流文件夹但项目事实不完整 → 引导升级
       const [error, setError] = useState(null)
       const [loading, setLoading] = useState(false)
       const [initBusy, setInitBusy] = useState(false)
@@ -1573,9 +1600,11 @@ window.__ModuleLoader__.load({
             if (!alive) return
             if (detectNotInitialized(data, null)) {
               setNotInit(true)
+              setNeedsUpgrade(false)
               setLedger(null)
             } else {
               setNotInit(false)
+              setNeedsUpgrade(false)
               setLedger(data.ledger || null)
             }
             // DEV-035：版本状态随账本一起刷新；升级完成后自动结束「升级中」态
@@ -1588,8 +1617,10 @@ window.__ModuleLoader__.load({
           .catch((e) => {
             if (!alive) return
             if (detectNotInitialized(null, e)) {
-              // 缺省回退：400 bad-request（缺 project.yaml）= 未初始化
+              // 缺省回退：400 bad-request（缺 project.yaml）= 未初始化；
+              // DEV-041：needs-upgrade（有 agent-workflow/ 文件夹但项目事实不完整）= 半初始化 → 引导升级
               setNotInit(true)
+              setNeedsUpgrade(!!(e && e.code === 'needs-upgrade'))
               setLedger(null)
               setError(null)
             } else {
@@ -1613,8 +1644,13 @@ window.__ModuleLoader__.load({
           es.onmessage = (ev) => {
             try {
               const msg = JSON.parse(ev.data || '{}')
-              if (msg && msg.type === 'ledger-changed' && msg.projectPath === selected) {
-                loadLedger()
+              if (msg && msg.projectPath === selected) {
+                if (msg.type === 'ledger-changed' || msg.type === 'upgrade-complete') {
+                  loadLedger()
+                  // DEV-041：完成回调（无论成功/失败）都结束「升级整理中」态，
+                  //   失败时 loadLedger 刷新后版本仍 outdated，用户可再次发起升级
+                  if (msg.type === 'upgrade-complete') setUpgrading(false)
+                }
               }
             } catch (e) { /* 忽略畸形事件 */ }
           }
@@ -1853,8 +1889,10 @@ window.__ModuleLoader__.load({
         }
       }, [selected, anchorRoot, loadLedger])
 
-      // L2：自动回填（账本刷新后触发一次；客户端 60s 节流 + 服务端每天每任务 ≤1 次限频）。
+      // DEV-042：L2 自动回填已停用（AUTO_BACKFILL_ENABLED=false），不再在账本刷新后
+      //   自动派发回填子代理写开发进度；函数保留供手动触发路径引用（如需恢复置 true）。
       const maybeAutoBackfill = useCallback(() => {
+        if (!AUTO_BACKFILL_ENABLED) return
         if (!selected) return
         const sid = props.sessionId || (props.scope && props.scope.sessionId)
         if (!sid) return
@@ -2174,7 +2212,7 @@ window.__ModuleLoader__.load({
       const versionBar = null
 
       const body = notInit
-        ? renderInitCard({ busy: initBusy, error: initError, onInit: handleInit })
+        ? renderInitCard({ busy: initBusy, error: initError, onInit: handleInit, needsUpgrade, onUpgrade: needsUpgrade ? handleUpgrade : undefined })
         : error
           ? renderErrorBody(error, loadLedger)
           : ledger

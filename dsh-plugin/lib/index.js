@@ -701,6 +701,12 @@ export function apply(ctx) {
         }
         const path = queryOf(req).path
         if (!(await isProjectRoot(path))) {
+          // DEV-041：区分「从未初始化」与「已有工作流文件夹但缺少/不完整 project.yaml」（半初始化）。
+          //   后者引导升级/整理而非初始化（面板 detectNotInitialized 识别 needs-upgrade）。
+          if (path && (await isDirectory(join(path, 'agent-workflow')))) {
+            writeError(res, 400, 'needs-upgrade', '已检测到 agent-workflow/ 文件夹（工作流可能不完整或版本落后）：请走升级/整理流程，而非初始化')
+            return
+          }
           writeError(res, 400, 'bad-request', 'path 必须是含 agent-workflow/project.yaml 的绝对项目根目录')
           return
         }
@@ -865,15 +871,22 @@ export function apply(ctx) {
         }
         const vs = await versionStatus(project.path)
         if (vs.status !== 'outdated') {
-          writeError(res, 409, 'up-to-date', '工作流已是最新版本，无需升级')
-          return
+          // DEV-041：已存在工作流文件夹但版本不可读（unknown，如半初始化）也允许进入升级流程，
+          //   由 agent 整理合并补全；只有确认为最新才拒绝。
+          const present = await isDirectory(join(project.path, 'agent-workflow'))
+          if (vs.status === 'latest' || !present) {
+            writeError(res, 409, 'up-to-date', '工作流已是最新版本，无需升级')
+            return
+          }
         }
         const text = [
           '【Agent Workflow 动作指令】',
           `请升级项目 ${project.path} 的 agent-workflow 框架版本（当前 ${vs.installed || vs.scaffold || '未知'} → 目标 ${vs.upgradeTo || '最新'}）。`,
-          `1. 参照 kit（${vs.kitPath || 'agent-workflow-kit'}）的升级方式执行：同步 agent-workflow/ 下的工作流文件（bin/awf、bin/awf-dispatch、workflows/、templates/、README.md 等），保持 agent-workflow/tasks/ 任务账本与 project.yaml 项目事实不变，避免覆盖账本；`,
-          `2. 完成后更新 project.yaml 的 scaffold_version 并运行 agent-workflow/bin/awf check 验证通过；`,
-          '3. 回报升级结果（成功/失败原因）；Agent Workflow 面板会因版本文件与账本变化自动刷新。',
+          `1. 整理合并（不是整体覆盖）：参照 kit（${vs.kitPath || 'agent-workflow-kit'}）的升级方式，把 agent-workflow/ 下的框架文件（bin/awf、bin/awf-dispatch、workflows/、templates/、README.md、check_workflow.sh 兼容入口等）合并为当前 kit 版本；`,
+          '2. 保留清单（不得覆盖/删除）：agent-workflow/tasks/ 任务账本（含 done.md 历史）、project.yaml 项目事实（若 kit 模板有新增字段则补全而非重写）、AGENTS.md 受控区块外的自定义内容；',
+          '3. 完成后更新 project.yaml 的 scaffold_version，运行 agent-workflow/bin/awf check 验证通过；',
+          '4. 合并完成后调用插件完成接口：POST /awf/upgrade/complete，body {"path":"<项目绝对路径>","ok":true,"version":"v<目标版本>","note":"升级摘要"}，让面板立即刷新；失败时也调用（ok:false + note 说明原因）。',
+          '5. 回报升级结果（成功/失败原因）；若面板未自动刷新，提示用户刷新。',
         ].join('\n')
         const team = await promptSession(ctx, body.sessionId, text, 'awf-upgrade')
         writeJson(res, 200, { ok: true, versions: vs, team })
@@ -882,6 +895,71 @@ export function apply(ctx) {
       }
     },
   }), 'dsh-awf-dashboard: /awf/upgrade route')
+
+  // DEV-041：agent 完成「整理合并」升级后调用此接口，通知面板立即刷新。
+  //   校验：路径白名单（同 /awf/upgrade）+ 仅接受 ok/version/note 三字段文本（无 shell 执行）。
+  //   行为：记录完成通知 + 广播 ledger-changed 事件（面板 SSE 消费 → reload 账本与版本状态，upgrading 态结束）。
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/awf/upgrade/complete',
+    handler: async (req, res) => {
+      try {
+        if (!fence(req)) {
+          forbidden(res)
+          return
+        }
+        if (req.method !== 'POST') {
+          writeError(res, 405, 'method-error', 'method not allowed')
+          return
+        }
+        const body = await readBody(req)
+        const project = await whitelistedProjectPath(body)
+        if (!project.ok) {
+          writeError(res, project.status, project.code, project.message)
+          return
+        }
+        if (body && typeof body.ok !== 'boolean') {
+          writeError(res, 400, 'bad-request', 'body.ok 必须是布尔值（成功 true / 失败 false）')
+          return
+        }
+        if (body && body.version != null && typeof body.version !== 'string') {
+          writeError(res, 400, 'bad-request', 'body.version 必须是字符串')
+          return
+        }
+        if (body && body.note != null && typeof body.note !== 'string') {
+          writeError(res, 400, 'bad-request', 'body.note 必须是字符串')
+          return
+        }
+        const vs = await versionStatus(project.path)
+        const notice = {
+          type: 'upgrade-complete',
+          projectPath: project.path,
+          ok: !body || body.ok !== false,
+          version: (body && body.version) || (vs && vs.upgradeTo) || null,
+          note: (body && body.note) || null,
+          at: new Date().toISOString(),
+        }
+        // 持久记录（审计用，不影响账本格式）：追加到 agent-workflow/.upgrade-log.jsonl
+        try {
+          const logDir = join(project.path, 'agent-workflow')
+          await mkdir(logDir, { recursive: true })
+          const prev = await readFile(join(logDir, '.upgrade-log.jsonl'), 'utf8').catch(() => '')
+          await writeFile(join(logDir, '.upgrade-log.jsonl'), prev + JSON.stringify(notice) + '\n')
+        } catch (logErr) {
+          // 记录失败不阻断通知（面板刷新仍生效）；错误仅随响应体带出
+          notice.logError = logErr instanceof Error ? logErr.message : String(logErr)
+        }
+        // 广播给所有挂起 SSE 客户端（含 ledger-changed 语义：面板收到后 reload）
+        broadcastLedgerChange(project.path)
+        for (const res2 of sseClients) {
+          try { res2.write(`data: ${JSON.stringify(notice)}\n\n`) } catch { /* 断开的连接由其 close 清理 */ }
+        }
+        writeJson(res, 200, { ok: true, notice })
+      } catch (error) {
+        writeError(res, 500, 'internal', error instanceof Error ? error.message : String(error))
+      }
+    },
+  }), 'dsh-awf-dashboard: /awf/upgrade/complete route')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
