@@ -481,9 +481,9 @@ window.__ModuleLoader__.load({
         h('div', {
           className: 'awf-modal-card',
           style: {
-            width: customSize ? customSize.w : (width || 560),
+            width: customSize ? customSize.w : (width || 640),
             height: customSize ? customSize.h : undefined,
-            maxWidth: 'calc(100vw - 40px)', maxHeight: '80vh',
+            maxWidth: 'calc(100vw - 40px)', maxHeight: '88vh',
             minWidth: 320, minHeight: 180,
             position: 'relative',
             display: 'flex', flexDirection: 'column',
@@ -1404,7 +1404,7 @@ window.__ModuleLoader__.load({
         }, label)
         return h(ModalShell, {
           title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
-          onClose, width: 640,
+          onClose, width: 720,
         },
           s.busy
             ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: F(12) } }, '加载中…')
@@ -1432,7 +1432,7 @@ window.__ModuleLoader__.load({
                     viewMode === 'read'
                       ? h('div', {
                             style: {
-                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 340,
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 640, minHeight: 340,
                               background: C.raised, border: '1px solid ' + C.hairline,
                               fontSize: F(14), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
@@ -1448,7 +1448,7 @@ window.__ModuleLoader__.load({
                               fontFamily: C.mono, fontSize: F(13), lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              maxHeight: 560, minHeight: 340, overflowY: 'auto',
+                              maxHeight: 640, minHeight: 340, overflowY: 'auto',
                               resize: 'vertical', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             },
                           }),
@@ -1614,7 +1614,7 @@ window.__ModuleLoader__.load({
       } else {
         body = h('div', { style: { textAlign: 'center', color: C.dim, padding: '14px 0' } }, '（无归档数据）')
       }
-      return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 560 }, body)
+      return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 640 }, body)
     }
 
     /**
