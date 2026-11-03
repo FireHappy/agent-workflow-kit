@@ -552,3 +552,48 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无（协议已落盘；各项目已生成的 agent-workflow/ 副本由 awf upgrade 拉取，不在本任务范围）。
 | 完成日期 | 2026-11-04 |
 | DEV-115 | P1 | 激活式 Router 协议：任务票据「来源：用户|工作流」标记 + 激活条件唯一 / 派发深度=1 / router 决策三件套；awf-dispatch 拒绝工作流来源二次派发（禁止转派）；模板/流程/文档/smoke 同步 | 2026-11-04 |
+
+
+## [DEV-116] 全局项目框架升级至 DEV-115 激活式 Router 版本
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | 7 目标项目 agent-workflow/ 框架文件与 AGENTS.md 受控区块；不碰业务代码/project.yaml/tasks**/memory**/tools**/全局索引 |
+| 依赖 | DEV-115（6752d63，激活式 Router 协议） |
+| 最近更新 | 2026-11-04 |
+
+### 目标与结果
+用 kit 当前版本（含 DEV-115）对 7 个已登记项目执行 awf upgrade，全网框架一致、各自本地提交。
+
+| 项目 | 结果 | commit | 备注 |
+|---|---|---|---|
+| 周报 | 完成 | 592f0a1 | check 全过；仅框架增量（其余文件与 kit 已一致） |
+| pluto | 升级落地（无 commit） | N/A | agent-workflow/ 与 AGENTS.md 被项目 .gitignore 排除（git ls-files=0）；升级+check+ticket_source 均已验证，无跟踪文件可提交 |
+| FinderPathBar | 完成 | 958a6a4 | 升级前 status.md 已过期（F2），awf status 修复后 check 全过 |
+| uxrsample | 跳过 | - | 有已跟踪改动（Assets/StreamingAssets/RKImage.db），非待提交收尾，不强推 |
+| openxr-uxr | 跳过 | - | current.md 有 in-flight DEBUG-001（状态 verify） |
+| dsh-settings | 跳过 | - | current.md 有 active DEV-013 + verify DEV-012 |
+| naboo | 跳过 | - | 多处已跟踪改动（Unity 资产）+ 旧版框架（无 bin/），需先收尾再升级 |
+
+### 验收标准
+- [x] 7 项目全部处理（3 升级完成 + 4 逐个注明跳过原因）
+- [x] 每个已升级项目 check_workflow.sh 全过、awf-dispatch 含 ticket_source（3 项目均确认）
+- [x] 已升级且可提交的项目有本地 commit（信息含 DEV-116），未 push；pluto 因框架被 gitignore 无 commit 材料（已注明）
+- [x] kit 账本 DEV-116 已归档，kit check 全过
+- [x] 未碰业务代码/账本历史：project.yaml、tasks/**、memory/**、tools/** 逐字节保留；全局索引内容零变化（仅 bootstrap 行序重排）
+
+### 验证
+- 各已升级项目 ./agent-workflow/check_workflow.sh 全绿；grep -c ticket_source agent-workflow/bin/awf-dispatch = 2（命中）
+- 全局索引快照对比：sorted diff 为空（内容不变）
+- kit：check_workflow.sh 全绿；awf status 已刷新
+
+### 下一步
+无。uxrsample / openxr-uxr / dsh-settings / naboo 待各自收尾（提交改动、归档在途任务）后，可再派一轮 upgrade。
+| 完成日期 | 2026-11-04 |
+| DEV-116 | P1 | 全局框架升级至 DEV-115 激活式 Router：周报/pluto/FinderPathBar 升级（2 提交，pluto 框架被 gitignore）；uxrsample/openxr-uxr/dsh-settings/naboo 按规则跳过（改动或在途任务） | 2026-11-04 |
