@@ -145,3 +145,31 @@ registry_lock 优先 flock（锁文件常驻不删除），无 flock 时退化 m
 无（闭环）。跨仓库升级/安装全部由目标自己的工作区会话执行；agent-demo01 与 rokid_system_components 回合超时后由 finalize 票据补 commit。
 
 | DEV-019 | P1 | 批量升级/安装 11 个项目 agent-workflow 框架至 kit v0.5.0（6 upgrade + 5 init）；团队 awf-upgrade-all × 5 dispatcher；G1 status.md 梗阻由 captain 刷新破除；2 个超时回合 finalize 补 commit | 2026-11-02 |
+
+## [DEV-020] 插件看板只跟随当前会话：去项目下拉、未初始化弹引导
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | captain（用户直接触发） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 修改范围 | dsh-plugin/（插件源）+ ~/.dsh/profiles/desktop/node_modules/dsh-awf-dashboard/（已安装包） |
+| 依赖 | 无 |
+| 最近更新 | 2026-11-03 |
+
+### 目标
+插件打开即自动显示**当前 DSH 会话所在项目**的工作流看板；该项目无工作流则弹初始化界面；去掉项目下拉框（不看/不选其他项目）。
+
+### 验收标准
+- [x] 锚定只跟随当前会话：解析会话 cwd（优先索引匹配，未命中直接以该根为目标），不再读 localStorage 手动选择
+- [x] header 去掉下拉 <select>，改为当前项目名（索引 id）+「已锚定当前会话」徽章 + 刷新
+- [x] 未初始化（无 project.yaml）→ 400 → 初始化引导卡；未定位到会话目录 → 空态登记引导（无项目列表）
+- [x] client chunk mock 加载无异常（无启动崩溃回归）；resolveDefaultProject 四场景（精确/子目录/未登记回退/索引未就绪回退）符合预期
+- [x] 改动已同步 kit 源 dsh-plugin/（含 README 描述更新）与已安装包一致
+
+### 下一步
+无（闭环）。已安装包与 kit 源均已更新；用户在 DSH GUI 刷新/重启后（页面刷新仅 HMR 生效时需 dev:web watcher，否则重启 DSH）查看右侧边栏 Agent Workflow 页签验证。
+
+| DEV-020 | P1 | 插件看板只跟随当前会话：去掉项目下拉与 localStorage 手动选择，未初始化弹引导卡（client.js 锚定/header/空态改造 + kit 源同步 + 冒烟验证） | 2026-11-03 |
