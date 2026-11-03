@@ -1369,7 +1369,7 @@ window.__ModuleLoader__.load({
                       ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
                           h('div', {
                             style: {
-                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 200,
+                              margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 340,
                               background: C.raised, border: '1px solid ' + C.hairline,
                               fontSize: 12, lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
@@ -2294,8 +2294,8 @@ window.__ModuleLoader__.load({
           }
           setSource({
             type: t, file: f, busy: false, data: src, copied: false, error: null, meta,
-            // DEV-043：打开即进入编辑态（查看/编辑一体，省去先看再点「编辑」的一步）
-            editing: true, draft: src.content, saveError: null,
+            // DEV-106：打开默认预览（阅读态），点「编辑」tab 才进入编辑
+            editing: false, draft: null, saveError: null,
           })
         } catch (e) {
           const code = e && e.code
