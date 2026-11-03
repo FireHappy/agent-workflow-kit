@@ -2167,33 +2167,8 @@ window.__ModuleLoader__.load({
         }
       }, [selected, source, loadLedger])
 
-      // DEV-044 头部工具条：只显示当前会话锚定的项目（无下拉选择器）：
-      // 项目名 + 刷新；刷新按钮文案恒定（busy 只做 disabled+降透明）。
-      // 显示当前锚定项目：优先索引 id（如 agent-demo-02），未登记项目显示路径。
-      const projRow = (projects || []).find((pr) => pr && pr.path === selected)
-      const projLabel = projRow ? projRow.id : (selected || '')
-      const header = h('div', {
-        className: 'awf-toolbar',
-        style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 },
-      },
-        h('div', {
-          style: { minWidth: 0, flex: '1 1 180px', maxWidth: 320 },
-          title: selected || '未定位到当前会话项目',
-        },
-          h('div', {
-            style: {
-              padding: '4px 8px', fontSize: 12, fontWeight: 600, color: C.text,
-              background: C.surface, border: '1px solid ' + C.border,
-              borderRadius: C.radiusSm, whiteSpace: 'nowrap',
-              overflow: 'hidden', textOverflow: 'ellipsis',
-            },
-          }, projLabel || '当前会话项目…')),
-        h('button', {
-          onClick: () => { reloadProjects(); loadLedger() },
-          disabled: loading,
-          title: '刷新账本与项目索引（每 15s 自动刷新账本）',
-          style: Object.assign(buttonStyle(), { opacity: loading ? 0.6 : 1, cursor: loading ? 'default' : 'pointer' }),
-        }, '刷新'))
+      // DEV-044 头部工具条已移除：项目名/路径/版本由项目卡集中展示，刷新由 SSE + 15s 轮询承担。
+      const header = null
 
       // DEV-044：版本状态条并入项目卡（见 renderLedgerBody 项目卡），此处不再单独渲染。
       const versionBar = null
