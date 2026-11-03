@@ -993,7 +993,8 @@ window.__ModuleLoader__.load({
         h('span', { style: { fontFamily: C.mono, fontWeight: 700, fontSize: 11, color: C.text, flexShrink: 0 } }, row.id),
         h('span', {
           style: {
-            color: C.dim, overflow: 'hidden', textOverflow: 'ellipsis',
+            // DEV-043：待办描述提亮（dim→sub），与最近完成一致更易读
+            color: C.sub, overflow: 'hidden', textOverflow: 'ellipsis',
             whiteSpace: 'nowrap', flex: 1, minWidth: 0,
           },
         }, row.desc || '—'),
