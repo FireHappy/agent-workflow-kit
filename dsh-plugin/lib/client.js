@@ -445,7 +445,8 @@ window.__ModuleLoader__.load({
     function ModalShell({ title, onClose, children, width }) {
       // DEV-108：弹框右下角拖拽调整大小（JS 实现；纯 CSS resize 对 auto 高度无效）
       const [customSize, setCustomSize] = useState(null) // {w, h} | null
-      const onResizeStart = (e) => {
+      // DEV-108/110：拖拽调整弹框大小——dir: 'right'(改宽) | 'bottom'(改高) | 'se'(宽+高)
+      const onResizeStart = (e, dir) => {
         e.preventDefault()
         e.stopPropagation()
         const card = e.currentTarget.parentElement
@@ -453,8 +454,9 @@ window.__ModuleLoader__.load({
         const startX = e.clientX, startY = e.clientY
         const startW = card.offsetWidth, startH = card.offsetHeight
         const move = (ev) => {
-          const w = Math.max(320, startW + ev.clientX - startX)
-          const h = Math.max(180, startH + ev.clientY - startY)
+          const dx = ev.clientX - startX, dy = ev.clientY - startY
+          const w = dir === 'right' || dir === 'se' ? Math.max(320, startW + dx) : startW
+          const h = dir === 'bottom' || dir === 'se' ? Math.max(180, startH + dy) : startH
           setCustomSize({ w, h })
         }
         const up = () => {
@@ -509,13 +511,23 @@ window.__ModuleLoader__.load({
           h('div', {
             style: { padding: '12px 14px', overflowY: 'auto', fontSize: F(12), color: C.text, flex: 1, minHeight: 0 },
           }, children),
-          // DEV-108：右下角拖拽手柄（nwse-resize 光标 + 斜纹三角）
-          h('div', {
-            onMouseDown: onResizeStart,
+          // DEV-108/110：拖拽调整弹框大小 —— 右边缘(改宽) / 下边缘(改高) / 右下角(宽高)
+          h('div', { // 右边缘热区
+            onMouseDown: (e) => onResizeStart(e, 'right'),
+            title: '拖动调整弹框宽度',
+            style: { position: 'absolute', top: 0, right: 0, bottom: 0, width: 8, cursor: 'ew-resize', zIndex: 2 },
+          }),
+          h('div', { // 下边缘热区
+            onMouseDown: (e) => onResizeStart(e, 'bottom'),
+            title: '拖动调整弹框高度',
+            style: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 8, cursor: 'ns-resize', zIndex: 2 },
+          }),
+          h('div', { // 右下角手柄（斜纹三角视觉）
+            onMouseDown: (e) => onResizeStart(e, 'se'),
             title: '拖动调整弹框大小',
             style: {
-              position: 'absolute', right: 0, bottom: 0, width: 14, height: 14,
-              cursor: 'nwse-resize', zIndex: 2,
+              position: 'absolute', right: 0, bottom: 0, width: 16, height: 16,
+              cursor: 'nwse-resize', zIndex: 3,
               background: 'linear-gradient(135deg, transparent 50%, ' + C.border + ' 50%, ' + C.border + ' 58%, transparent 58%)',
             },
           })))
