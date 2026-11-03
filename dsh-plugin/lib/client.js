@@ -1392,14 +1392,16 @@ window.__ModuleLoader__.load({
         const metaUpdated = meta.updated || meta.date || ''
         const typeStyle = TYPE_STYLE[s.type] || { color: C.faint }
         const prioStyle = PRIO_STYLE[meta.prio] || { color: C.faint }
-        const tabBtn = (label, active, onClick) => h('button', {
+        // DEV-106：预览/编辑分段控件（参照目标样式：同一胶囊容器内两个选项，选中项高亮）
+        const segBtn = (label, active, onClick) => h('button', {
           onClick: () => onClick && onClick(),
           style: {
-            fontSize: F(12), padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
-            border: '1px solid ' + (active ? C.accent : 'transparent'),
-            background: active ? C.hoverAccent : 'transparent',
-            color: active ? C.text : C.sub,
+            flex: 1, fontSize: F(12), padding: '4px 10px', cursor: 'pointer',
+            border: 'none', borderRadius: 5,
+            background: active ? C.accent : 'transparent',
+            color: active ? '#fff' : C.sub,
             fontWeight: active ? 700 : 500,
+            transition: 'background .12s ease, color .12s ease',
           },
         }, label)
         return h(ModalShell, {
@@ -1424,10 +1426,15 @@ window.__ModuleLoader__.load({
                     // 小节标题：任务块原文（markdown）
                     h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
                       '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
-                    // DEV-106：阅读/编辑 tab 条
-                    h('div', { style: { display: 'flex', gap: 4, marginBottom: 2 } },
-                      tabBtn('阅读', viewMode === 'read', () => { if (editing) onEditCancel && onEditCancel() }),
-                      tabBtn('编辑', viewMode === 'edit', () => { if (!editing) onEditStart && onEditStart() })),
+                    // DEV-106：预览/编辑分段控件（同一胶囊容器，选中项高亮底+白字）
+                    h('div', {
+                      style: {
+                        display: 'flex', padding: 2, borderRadius: 7, marginBottom: 2,
+                        background: C.raised, border: '1px solid ' + C.hairline, overflow: 'hidden',
+                      },
+                    },
+                      segBtn('预览', viewMode === 'read', () => { if (editing) onEditCancel && onEditCancel() }),
+                      segBtn('编辑', viewMode === 'edit', () => { if (!editing) onEditStart && onEditStart() })),
                     // 内容区（阅读=渲染 / 编辑=textarea，tab 由 viewMode 切换）
                     viewMode === 'read'
                       ? h('div', {
