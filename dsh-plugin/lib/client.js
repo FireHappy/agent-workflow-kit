@@ -1005,8 +1005,10 @@ window.__ModuleLoader__.load({
      * 待办类型三态切换器（dev/debug/docs）。todo.md 是表格行格式、无 checkbox，
      * 不再渲染进度条；各类型按 toggle 展示自己的未开始任务行。
      * DEV-024：24px 控件高度，选中态用 hoverAccent 底 + accent 描边（对齐宿主 kit chipActive）。
+     * DEV-100：counts = {dev,debug,docs} 各类型未开始任务数（取自 ledger.todoRows 过滤计数），
+     * 每个 tab 按钮右侧挂数量徽章（选中态 accent 底、未选中中性底；0 也显示，区块常驻）。
      */
-    function TypeToggle({ value, onChange }) {
+    function TypeToggle({ value, onChange, counts }) {
       const items = [['dev', '开发'], ['debug', '调试'], ['docs', '文档']]
       return h('div', {
         className: 'awf-toggle',
@@ -1021,13 +1023,15 @@ window.__ModuleLoader__.load({
           className: 'awf-toggle-btn' + (value === v ? ' awf-toggle-btn-active' : ''),
           onClick: () => onChange(v),
           style: {
-            fontSize: 11, padding: '3px 14px', borderRadius: 6, cursor: 'pointer',
+            fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 5,
             border: '1px solid ' + (value === v ? 'color-mix(in srgb, ' + C.accent + ' 45%, transparent)' : 'transparent'),
             background: value === v ? C.hoverAccent : 'transparent',
             color: value === v ? C.text : C.sub,
             fontWeight: value === v ? 700 : 500,
           },
-        }, label)))
+        },
+          label)))
     }
 
     /**
@@ -2528,45 +2532,46 @@ window.__ModuleLoader__.load({
       }
 
       // ---- 待办（类型 toggle + 该类型未开始任务行；todo.md 是表格行，无进度条）
-      if (ledger.todo.length > 0 || todoRows.length > 0) {
-        const selType = (U.todoType && (U.todoType === 'dev' || U.todoType === 'debug' || U.todoType === 'docs')) ? U.todoType : 'dev'
-        const typeRows = todoRows.filter((r) => r.type === selType)
-        items.push(h(SectionTitle, { key: 'todo-h', label: '待办' }))
-        const cardChildren = []
-        cardChildren.push(h('div', { key: 'toggle', style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
-          h(TypeToggle, { value: selType, onChange: U.onTodoTypeChange })))
+      // DEV-100：区块常驻渲染——某类型 todo/todoRows 全空也显示「未开始任务 · 类型 0」+ 空态；
+      // 各类型 tab 挂未开始任务数量徽章（数据只取自 ledger.todoRows 过滤计数）。
+      const selType = (U.todoType && (U.todoType === 'dev' || U.todoType === 'debug' || U.todoType === 'docs')) ? U.todoType : 'dev'
+      const typeRows = todoRows.filter((r) => r.type === selType)
+      // DEV-043：数量标记已移除——不再计算 todoCounts（TypeToggle 不挂数量徽章）
+      items.push(h(SectionTitle, { key: 'todo-h', label: '待办' }))
+      const cardChildren = []
+      cardChildren.push(h('div', { key: 'toggle', style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+        h(TypeToggle, { value: selType, onChange: U.onTodoTypeChange })))
+      cardChildren.push(h('div', {
+        key: 'rows-title',
+        style: {
+          display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8,
+          borderTop: '1px solid ' + C.hairline,
+        },
+      },
+        // DEV-043：移除数量标记——标题只保留「未开始任务 · 类型」
+        h('span', { style: { fontSize: 12, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType))))
+      if (typeRows.length > 0) {
         cardChildren.push(h('div', {
-          key: 'rows-title',
+          key: 'rows',
           style: {
-            display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8,
-            borderTop: '1px solid ' + C.hairline,
+            // DEV-043：待办长列表滚动容器（同当前任务）
+            maxHeight: 280, overflowY: 'auto', paddingRight: 4,
           },
         },
-          h('span', { style: { fontSize: 12, fontWeight: 700, color: C.sub } }, '未开始任务 · ' + TYPE_LABEL(selType)),
-          h('span', { style: { fontSize: 11, color: C.faint } }, String(typeRows.length))))
-        if (typeRows.length > 0) {
-          cardChildren.push(h('div', {
-            key: 'rows',
-            style: {
-              // DEV-043：待办长列表滚动容器（同当前任务）
-              maxHeight: 280, overflowY: 'auto', paddingRight: 4,
-            },
+          typeRows.map((r) => {
+            const key = r.type + ':' + r.id
+            return h(TodoRow, { key, row: r, onOpen: U.onOpenSource })
+          })))
+      } else {
+        cardChildren.push(h('div', {
+          key: 'rows-empty',
+          style: {
+            padding: '10px 0', textAlign: 'center',
+            color: C.faint, fontSize: 12,
           },
-            typeRows.map((r) => {
-              const key = r.type + ':' + r.id
-              return h(TodoRow, { key, row: r, onOpen: U.onOpenSource })
-            })))
-        } else {
-          cardChildren.push(h('div', {
-            key: 'rows-empty',
-            style: {
-              padding: '10px 0', textAlign: 'center',
-              color: C.faint, fontSize: 12,
-            },
-          }, '该类型暂无未开始任务'))
-        }
-        items.push(h('div', { key: 'todo' }, cardChildren))
+        }, '该类型暂无未开始任务'))
       }
+      items.push(h('div', { key: 'todo' }, cardChildren))
 
       // ---- 最近完成（仅 5 条，可点击查看归档）
       if (recent.length > 0) {
