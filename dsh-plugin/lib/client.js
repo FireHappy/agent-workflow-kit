@@ -422,6 +422,15 @@ window.__ModuleLoader__.load({
 
     /** 模态弹层外壳：遮罩 + 居中卡片 + 标题栏 + 关闭按钮。DEV-037：awf-modal-mask/card 入场动画。 */
     function ModalShell({ title, onClose, children, width }) {
+      // DEV-043：ESC 关闭弹框（源文件/删除确认/归档查看等全部弹框统一生效）
+      useEffect(() => {
+        if (typeof onClose !== 'function') return undefined
+        const onKey = (e) => {
+          if (e.key === 'Escape' || e.key === 'Esc') onClose()
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+      }, [onClose])
       return h('div', {
         className: 'awf-modal-mask',
         style: overlayStyle,
