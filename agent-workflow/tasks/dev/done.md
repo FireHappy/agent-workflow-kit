@@ -360,3 +360,31 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无（闭环）。面板生效：刷新 DSH GUI 页面；若服务端/宿主 bundle 未重读则重启 DSH（已安装副本已更新，重启后右侧边栏 Agent Workflow 页签生效）。
 | 完成日期 | 2026-11-03 |
 | DEV-100 | P1 | 待办区兼容 5 列表格（parseTodoRows 4/5 列、deps 并入 desc）+ 各类型 tab 数量徽章 + 0 条常驻渲染（标题不重复数量）；插件 0.2.1 | 2026-11-03 |
+
+## [DEV-101] 最近完成区兼容多列归档行（parseDoneRows 4/5/6 列）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | lead |
+| 协作模式 | single |
+| 来源任务 | 跨项目派发任务包（DEV-101） |
+| 修改范围 | dsh-plugin/src/ledger.js（parseDoneRows 4/5/6 列 + 同日稳定倒序）、dsh-plugin/test/ledger.test.js（追加用例）、dsh-plugin/package.json（0.2.1→0.2.2）、dsh-plugin/README.md（变更说明）；主线会话同 commit 另含 bin/awf status 排序与 docs/upgrade.md（非本票范围） |
+| 分支/工作区 | dev（agent-workflow-kit） |
+| 依赖 | DEV-100（已归档） |
+| 最近更新 | 2026-11-03 |
+
+### 目标
+「最近完成」数据源 parseDoneRows 原先只匹配 4 列行 `| ID | prio | desc | date |`，而项目 done.md 归档行是加宽格式（dev/debug 6 列 `| ID | P | 标题 | 摘要 | 完成日期 | 链接 |`、docs 5 列），全部漏掉 → recent 恒空。本次让 parseDoneRows 兼容 4/5/6 列：行首锚定 `| ID | prio |`（ID 形如 [A-Z]+-[0-9]+，优先级任意文本），desc = 第 3 列，完成日期 = 行内第一个 YYYY-MM-DD（兼容日期后链接列），无日期行跳过；排序日期倒序 + 同日按归档先后（文件靠后 = 越晚归档 = 越靠前）。
+
+### 验收标准
+- [x] 单测 18/18 全绿：parseTodoRows 11 + parseDoneRows 7（4 列回归、5 列 docs 型、6 列含链接列、表头/分隔/非任务行跳过、无日期/非法日期跳过、倒序+截断 n、混排表格）
+- [x] 真实数据实测：ledgerOf(uxrsample).recent 非空且按完成日期倒序；局限——聚合按 dev→debug→docs 各取 8 再拼接 slice(0,8)，dev/done.md 46 行占满 8 槽，debug/docs 更新鲜记录不展示，已列 DEV-102 修复
+- [x] 同步已安装副本（0.2.2，与 kit 源逐文件一致）；版本 0.2.1 → 0.2.2 + README 0.2.2 变更说明
+- [x] node --check ×3、check_workflow 全绿、awf status 刷新（status.md 最近完成已倒序）；commit 含 DEV-101（48e38a8，外部会话执行合并）；未 push
+
+### 下一步
+无（遗留缺陷移交 DEV-102：ledgerOf recent 全局按日期倒序 + 块式归档解析）。
+| 完成日期 | 2026-11-03 |
+| DEV-101 | P1 | 最近完成兼容 4/5/6 列归档行（parseDoneRows：desc=第3列、行内首日期、同日稳定倒序）；插件 0.2.2 | 2026-11-03 |
