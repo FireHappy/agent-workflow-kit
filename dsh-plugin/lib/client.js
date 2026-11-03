@@ -1396,12 +1396,13 @@ window.__ModuleLoader__.load({
         const segBtn = (label, active, onClick) => h('button', {
           onClick: () => onClick && onClick(),
           style: {
-            flex: 1, fontSize: F(12), padding: '4px 10px', cursor: 'pointer',
-            border: 'none', borderRadius: 5,
+            fontSize: F(12), padding: '4px 14px', cursor: 'pointer',
+            border: 'none', borderRadius: 6,
             background: active ? C.accent : 'transparent',
             color: active ? '#fff' : C.sub,
             fontWeight: active ? 700 : 500,
             transition: 'background .12s ease, color .12s ease',
+            whiteSpace: 'nowrap',
           },
         }, label)
         return h(ModalShell, {
@@ -1423,15 +1424,22 @@ window.__ModuleLoader__.load({
                     // 任务描述（粗体，对齐归档查看）
                     h('div', { style: { fontSize: F(14), fontWeight: 700, color: C.text, lineHeight: 1.5 } },
                       metaTitle || '（无描述）'),
-                    // 小节标题：任务块原文（markdown）
-                    h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
-                      '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
-                    // DEV-106：预览/编辑分段控件（同一胶囊容器，选中项高亮底+白字）
+                    // 小节标题：任务块原文（markdown）+ 右侧拷贝按钮（DEV-109）
+                    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '2px 0 6px' } },
+                      h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.sub, letterSpacing: '.03em' } },
+                        '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
+                      h('button', {
+                        onClick: () => onCopy && onCopy(data && data.content ? data.content : ''),
+                        title: '复制任务内容到剪贴板',
+                        style: {
+                          fontSize: F(12), padding: '2px 10px', borderRadius: 999, cursor: 'pointer',
+                          border: '1px solid ' + C.hairline, background: C.raised, color: C.sub,
+                          fontFamily: 'inherit',
+                        },
+                      }, s.copied ? '已拷贝 ✓' : '拷贝')),
+                    // DEV-106：预览/编辑 tab（不铺满；选中项 accent 实心底+白字，未选透明灰字）
                     h('div', {
-                      style: {
-                        display: 'flex', padding: 2, borderRadius: 7, marginBottom: 2,
-                        background: C.raised, border: '1px solid ' + C.hairline, overflow: 'hidden',
-                      },
+                      style: { display: 'flex', gap: 6, marginBottom: 2, alignSelf: 'flex-start' },
                     },
                       segBtn('预览', viewMode === 'read', () => { if (editing) onEditCancel && onEditCancel() }),
                       segBtn('编辑', viewMode === 'edit', () => { if (!editing) onEditStart && onEditStart() })),
