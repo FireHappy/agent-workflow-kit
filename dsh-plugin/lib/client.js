@@ -1406,16 +1406,13 @@ window.__ModuleLoader__.load({
             transition: 'color .12s ease',
             whiteSpace: 'nowrap',
           },
-          // 底部指示条（选中态）
-          ...(active
-            ? {
-                children: [
-                  label,
-                  h('span', { key: 'bar', style: { position: 'absolute', left: 8, right: 8, bottom: 1, height: 2, borderRadius: 1, background: C.accent } }),
-                ],
-              }
-            : { children: label }),
-        }, null)
+          // 底部指示条走标准 children 第三参数（勿再传 null 覆盖）
+        }, active
+          ? [
+              label,
+              h('span', { key: 'bar', style: { position: 'absolute', left: 8, right: 8, bottom: 1, height: 2, borderRadius: 1, background: C.accent } }),
+            ]
+          : label)
         return h(ModalShell, {
           title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
           onClose, width: 720,
