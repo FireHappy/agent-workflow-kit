@@ -442,7 +442,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 模态弹层外壳：遮罩 + 居中卡片 + 标题栏 + 关闭按钮。DEV-037：awf-modal-mask/card 入场动画。 */
-    function ModalShell({ title, onClose, children, width }) {
+    function ModalShell({ title, onClose, children, width, height }) {
       // DEV-108：弹框右下角拖拽调整大小（JS 实现；纯 CSS resize 对 auto 高度无效）
       const [customSize, setCustomSize] = useState(null) // {w, h} | null
       // DEV-111：弹框位置（默认居中；拖标题栏移动）
@@ -534,7 +534,8 @@ window.__ModuleLoader__.load({
           style: {
             // DEV-111：absolute 定位（默认居中，拖动标题栏移动）；高度 auto（children 内 minHeight 兜底）
             width: customSize ? customSize.w : (width || 720),
-            height: customSize ? customSize.h : undefined,
+            // 默认高度：传入 height 则固定（如源文件弹框预览/编辑两态一致）；否则内容撑起（小弹框）
+            height: customSize ? customSize.h : height,
             maxWidth: 'calc(100vw - 40px)', maxHeight: '88vh',
             minWidth: 320, minHeight: 180,
             // DEV-111：absolute 定位（默认居中，拖动标题栏移动）
@@ -1507,6 +1508,8 @@ window.__ModuleLoader__.load({
         return h(ModalShell, {
           title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
           onClose, width: 800,
+          // DEV-113：源文件弹框默认固定高度（预览/编辑两态内容区 flex 才能撑满一致；auto 时 flex 无参照高度）
+          height: 640,
         },
           s.busy
             ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: F(12) } }, '加载中…')
