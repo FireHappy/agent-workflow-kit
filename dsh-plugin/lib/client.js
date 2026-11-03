@@ -1395,7 +1395,7 @@ window.__ModuleLoader__.load({
         const tabBtn = (label, active, onClick) => h('button', {
           onClick: () => onClick && onClick(),
           style: {
-            fontSize: F(11), padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+            fontSize: F(12), padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
             border: '1px solid ' + (active ? C.accent : 'transparent'),
             background: active ? C.hoverAccent : 'transparent',
             color: active ? C.text : C.sub,
@@ -1419,10 +1419,10 @@ window.__ModuleLoader__.load({
                       meta.prio ? h(Pill, { color: prioStyle.color, variant: 'soft', dataPrio: meta.prio }, meta.prio) : null,
                       h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, s.file + '.md')),
                     // 任务描述（粗体，对齐归档查看）
-                    h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.text, lineHeight: 1.5 } },
+                    h('div', { style: { fontSize: F(14), fontWeight: 700, color: C.text, lineHeight: 1.5 } },
                       metaTitle || '（无描述）'),
                     // 小节标题：任务块原文（markdown）
-                    h('div', { style: { fontSize: F(12), fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
+                    h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.sub, margin: '2px 0 6px', letterSpacing: '.03em' } },
                       '任务块原文（markdown）' + (editing ? ' · 可编辑' : '')),
                     // DEV-106：阅读/编辑 tab 条
                     h('div', { style: { display: 'flex', gap: 4, marginBottom: 2 } },
@@ -1434,7 +1434,7 @@ window.__ModuleLoader__.load({
                             style: {
                               margin: 0, padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 560, minHeight: 340,
                               background: C.raised, border: '1px solid ' + C.hairline,
-                              fontSize: F(12), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
+                              fontSize: F(13), lineHeight: 1.6, color: C.text, wordBreak: 'break-word',
                             },
                             // 渲染结果以 HTML 注入（mdToHtml 已转义，安全）
                           }, h('span', { dangerouslySetInnerHTML: { __html: mdToHtml(data.content || '') } }))
@@ -1445,7 +1445,7 @@ window.__ModuleLoader__.load({
                             spellCheck: false,
                             style: {
                               margin: 0, padding: '10px 12px', borderRadius: 8,
-                              fontFamily: C.mono, fontSize: F(12), lineHeight: 1.55,
+                              fontFamily: C.mono, fontSize: F(13), lineHeight: 1.55,
                               color: 'var(--dsw-alias-label-primary, #2c3138)',
                               background: C.raised, border: '1px solid ' + C.hairline,
                               maxHeight: 560, minHeight: 340, overflowY: 'auto',
@@ -1597,11 +1597,9 @@ window.__ModuleLoader__.load({
             h(Pill, { color: typeStyle.color, variant: 'chip' }, TYPE_LABEL(s.data.type)),
             doneRow.prio ? h(Pill, { color: (PRIO_STYLE[doneRow.prio] || { color: C.faint }).color, variant: 'soft', dataPrio: doneRow.prio }, doneRow.prio) : null,
             doneRow.date ? h('span', { style: Object.assign({ fontFamily: C.mono }, muted({})) }, '完成于 ' + doneRow.date) : null),
-          h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.text, marginTop: 8, lineHeight: 1.5 } },
+          h('div', { style: { fontSize: F(14), fontWeight: 700, color: C.text, marginTop: 8, lineHeight: 1.5 } },
             doneRow.desc || '（无描述）'),
-          h('div', { style: { fontSize: F(12), fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
-            '任务块原文（markdown）'),
-          h('div', { style: { fontSize: F(12), fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
+          h('div', { style: { fontSize: F(13), fontWeight: 700, color: C.sub, margin: '12px 0 6px', letterSpacing: '.03em' } },
             '任务块原文（markdown）'),
           // DEV-106：归档查看同样走 md 渲染（与源文件面板阅读态一致）
           h('div', {
