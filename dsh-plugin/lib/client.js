@@ -422,6 +422,27 @@ window.__ModuleLoader__.load({
 
     /** 模态弹层外壳：遮罩 + 居中卡片 + 标题栏 + 关闭按钮。DEV-037：awf-modal-mask/card 入场动画。 */
     function ModalShell({ title, onClose, children, width }) {
+      // DEV-108：弹框右下角拖拽调整大小（JS 实现；纯 CSS resize 对 auto 高度无效）
+      const [customSize, setCustomSize] = useState(null) // {w, h} | null
+      const onResizeStart = (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const card = e.currentTarget.parentElement
+        if (!card) return
+        const startX = e.clientX, startY = e.clientY
+        const startW = card.offsetWidth, startH = card.offsetHeight
+        const move = (ev) => {
+          const w = Math.max(320, startW + ev.clientX - startX)
+          const h = Math.max(180, startH + ev.clientY - startY)
+          setCustomSize({ w, h })
+        }
+        const up = () => {
+          window.removeEventListener('mousemove', move)
+          window.removeEventListener('mouseup', up)
+        }
+        window.addEventListener('mousemove', move)
+        window.addEventListener('mouseup', up)
+      }
       // DEV-043：ESC 关闭弹框（源文件/删除确认/归档查看等全部弹框统一生效）
       useEffect(() => {
         if (typeof onClose !== 'function') return undefined
@@ -439,7 +460,11 @@ window.__ModuleLoader__.load({
         h('div', {
           className: 'awf-modal-card',
           style: {
-            width: width || 560, maxWidth: 'calc(100vw - 40px)', maxHeight: '80vh',
+            width: customSize ? customSize.w : (width || 560),
+            height: customSize ? customSize.h : undefined,
+            maxWidth: 'calc(100vw - 40px)', maxHeight: '80vh',
+            minWidth: 320, minHeight: 180,
+            position: 'relative',
             display: 'flex', flexDirection: 'column',
             background: 'var(--dsw-alias-bg-layer-3, #ffffff)',
             border: '1px solid ' + C.border, borderRadius: C.radius,
@@ -461,8 +486,18 @@ window.__ModuleLoader__.load({
               }),
             }, '✕')),
           h('div', {
-            style: { padding: '12px 14px', overflowY: 'auto', fontSize: 12, color: C.text },
-          }, children)))
+            style: { padding: '12px 14px', overflowY: 'auto', fontSize: 12, color: C.text, flex: 1, minHeight: 0 },
+          }, children),
+          // DEV-108：右下角拖拽手柄（nwse-resize 光标 + 斜纹三角）
+          h('div', {
+            onMouseDown: onResizeStart,
+            title: '拖动调整弹框大小',
+            style: {
+              position: 'absolute', right: 0, bottom: 0, width: 14, height: 14,
+              cursor: 'nwse-resize', zIndex: 2,
+              background: 'linear-gradient(135deg, transparent 50%, ' + C.border + ' 50%, ' + C.border + ' 58%, transparent 58%)',
+            },
+          })))
     }
 
     function fmtTime(iso) {
