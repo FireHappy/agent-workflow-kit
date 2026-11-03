@@ -439,7 +439,7 @@ window.__ModuleLoader__.load({
         h('div', {
           className: 'awf-modal-card',
           style: {
-            width: width || 460, maxWidth: 'calc(100vw - 40px)', maxHeight: '80vh',
+            width: width || 560, maxWidth: 'calc(100vw - 40px)', maxHeight: '80vh',
             display: 'flex', flexDirection: 'column',
             background: 'var(--dsw-alias-bg-layer-3, #ffffff)',
             border: '1px solid ' + C.border, borderRadius: C.radius,
@@ -1348,7 +1348,7 @@ window.__ModuleLoader__.load({
         }, label)
         return h(ModalShell, {
           title: '源文件 · ' + (meta.id || (s.type || '') + '/' + (s.file || '') + '.md'),
-          onClose, width: 560,
+          onClose, width: 640,
         },
           s.busy
             ? h('div', { style: { padding: '16px 0', textAlign: 'center', color: C.dim, fontSize: 12 } }, '加载中…')
@@ -1560,7 +1560,7 @@ window.__ModuleLoader__.load({
       } else {
         body = h('div', { style: { textAlign: 'center', color: C.dim, padding: '14px 0' } }, '（无归档数据）')
       }
-      return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 520 }, body)
+      return h(ModalShell, { title: '归档查看' + (s.id ? ' · ' + s.id : ''), onClose, width: 560 }, body)
     }
 
     /**
