@@ -2208,5 +2208,45 @@ else
   bad "DEV-122 --check-role 无 role 场景退出码非 0"
 fi
 
+# 25. DEV-123：--check-role 过度匹配修复（泛词停用 + 2/3/4-gram 混合）
+ROLE_KIT="擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版"
+"$KIT_DIR/bin/awf" init "$TMP/proj6" --name "误判回归" --role "$ROLE_KIT" >/dev/null 2>&1
+printf '# 任务：生成本周周报并总结 git 提交\n- 类型：dev\n- 来源：用户\n正文：收集本周会话与提交，生成周报。\n' > "$ROLE_TASK_DIR/zhoubao.md"
+if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj6" "$ROLE_TASK_DIR/zhoubao.md" \
+     --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-kit.log" 2>&1 ); then
+  if grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-kit.log"; then
+    ok "DEV-123 kit role ↔ 周报任务：不匹配（泛词「生成」不再单独构成依据）"
+  else
+    bad "DEV-123 kit role ↔ 周报任务仍误判匹配"
+  fi
+else
+  bad "DEV-123 kit 回归场景退出码非 0"
+fi
+ROLE_ZB="擅长收集 DSH 会话历史与 git 提交，归纳生成日报/周报"
+"$KIT_DIR/bin/awf" init "$TMP/proj7" --name "周报匹配" --role "$ROLE_ZB" >/dev/null 2>&1
+if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj7" "$ROLE_TASK_DIR/zhoubao.md" \
+     --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-zb.log" 2>&1 ); then
+  if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-zb.log"; then
+    ok "DEV-123 周报 role ↔ 周报任务：匹配保持（领域词「周报」单命中）"
+  else
+    bad "DEV-123 周报 role ↔ 周报任务未匹配"
+  fi
+else
+  bad "DEV-123 周报匹配场景退出码非 0"
+fi
+ROLE_UXR="擅长 Rokid UXR SDK 的 Unity 示例开发与真机联调测试"
+"$KIT_DIR/bin/awf" init "$TMP/proj8" --name "领域词命中" --role "$ROLE_UXR" >/dev/null 2>&1
+printf '# 任务：Unity 真机联调\n- 类型：dev\n- 来源：用户\n正文：在真机联调 Unity 示例。\n' > "$ROLE_TASK_DIR/unity.md"
+if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj8" "$ROLE_TASK_DIR/unity.md" \
+     --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-uxr.log" 2>&1 ); then
+  if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-uxr.log"; then
+    ok "DEV-123 领域词（Unity/联调）无泛词交集仍命中匹配"
+  else
+    bad "DEV-123 领域词场景未匹配"
+  fi
+else
+  bad "DEV-123 领域词场景退出码非 0"
+fi
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

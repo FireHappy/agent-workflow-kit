@@ -322,18 +322,44 @@ def target_role(target: Path):
     return None
 
 
+# 中文泛词停用表（DEV-123）：这些词不构成领域特征，从 n-gram 中剔除后再比较，
+# 避免「脚手架生成」与「生成周报」共现二元组「生成」导致的跨领域误判。
+ZH_STOPWORDS = {
+    "生成", "校验", "开发", "管理", "维护", "支持", "负责", "擅长", "进行",
+    "相关", "项目", "工作", "使用", "提供", "完成", "实现", "服务", "平台",
+    "功能", "优化", "处理", "以及", "包括", "一个", "一些", "我们", "这个",
+    "要求", "需要", "任务", "目标",
+}
+
+
+def _zh_ngrams(s: str, n: int) -> list:
+    """取中文连续串的 n-gram（n 个字）。"""
+    joined = "".join(c for c in s if "\u4e00" <= c <= "\u9fff")
+    return [joined[i : i + n] for i in range(len(joined) - n + 1)]
+
+
+def _significant(gram: str) -> bool:
+    """gram 不含任何泛词（整体含停用词子串即视为泛词片段，剔除）。"""
+    return not any(w in gram for w in ZH_STOPWORDS)
+
+
 def _role_tokens(s: str) -> set:
-    """把字符串切成关键词集合：英文词（≥3 字母） + 中文二元组（n-gram=2）。"""
-    toks = set(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", s))
-    for i in range(len(s) - 1):
-        pair = s[i : i + 2]
-        if all("\u4e00" <= c <= "\u9fff" for c in pair):
-            toks.add(pair)
+    """关键词集合：英文词（≥3 字母，小写归一）+ 中文 2/3/4-gram（剔除泛词停用表）。
+
+    DEV-123：2-gram 单独不足以作领域证据（高频泛词「生成」可被 role 与任务共现），
+    故混入 3/4-gram 并过滤泛词；停用后领域 2 字词（周报/联调/镜像）仍可单命中，
+    即算匹配——不引入最小命中数，避免「周报生成」这类短任务被误判。
+    """
+    toks = set(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", s.lower()))
+    for n in (2, 3, 4):
+        for g in _zh_ngrams(s, n):
+            if _significant(g):
+                toks.add(g)
     return toks
 
 
 def role_matches(role: str, task_text: str) -> bool:
-    """role 与任务文本是否有关键词交集（中英文词交集，简单做法，勿当硬语义）。"""
+    """role 与任务文本是否有关键词交集（泛词剔除后，领域词命中即算匹配）。"""
     if not role or not task_text:
         return False
     return bool(_role_tokens(role) & _role_tokens(task_text))

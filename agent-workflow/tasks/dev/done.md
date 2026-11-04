@@ -876,3 +876,47 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无。
 | 完成日期 | 2026-11-04 |
 | DEV-122 | P2 | 派发规则同步 role：三件套读 role 匹配候选 + 裁决理由必备项 + --check-role 软校验（警告不硬拒）；三场景实测 rc=0；三 locale smoke 157/0 | 2026-11-04 |
+
+
+## [DEV-123] 修复 --check-role 过度匹配（n-gram=2 误判）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | agent-workflow/bin/awf-dispatch + bin/awf-dispatch（_role_tokens / role_matches）、test/smoke.sh（25 节）、docs/design.md（匹配算法说明） |
+| 依赖 | DEV-122 |
+| 最近更新 | 2026-11-04 |
+
+### 目标与结果
+修复 DEV-122 引入的 --check-role 过度匹配：中文二元组 n-gram=2 + 无停用词过滤导致泛词（生成/校验）误判为匹配；改为泛词停用表（31 词）+ 中文 2/3/4-gram 混合，领域词单命中即匹配，保持软校验不硬拒。
+
+### 实现方案
+- ZH_STOPWORDS 泛词停用表（生成/校验/开发/管理/维护/支持/负责/擅长/进行/相关/项目/工作/使用/提供/完成/实现/服务/平台/功能/优化/处理/以及/包括/任务/目标等 31 词），gram 含停用词子串即剔除（_significant）。
+- _role_tokens：英文词（≥3 字母，小写归一）+ 中文 2/3/4-gram；不引入最小命中数（避免「周报生成」类短任务误判），停用过滤后的领域词单命中即匹配。
+- 脚本 5 场景自验通过；smoke 25 节 3 条断言（kit 回归不匹配 / 周报匹配保持 / 领域词命中）+ 24 节既有断言保持；docs/design.md 补匹配算法说明。
+
+### 验收标准
+- [x] kit role ↔ 周报任务 → 不匹配（警告不硬拒）；周报 role ↔ 周报任务 → 匹配；无 role → 提示不阻塞
+- [x] 泛词不再单独构成匹配依据；领域词（Unity/联调/镜像）仍可命中
+- [x] smoke 断言通过；默认 locale 与 LC_ALL=C 双路径全绿（另验 en_US）
+- [x] 行为仍为软校验（实测三场景退出码均 0；--allow-role-mismatch 静默 24.5 保持）
+- [x] DEV-123 已归档，check_workflow.sh 全过，status.md 已刷新
+- [x] 只本地 commit，未 push
+
+### 验证
+- 缺陷复现：kit role ↔ 周报任务 旧算法交集 {生成} → 误判匹配；新算法交集 ∅ → 不匹配
+- 脚本 5 场景：kit↔周报 False / 周报↔周报生成 True / uxrsample↔Unity联调 True / kit↔例行检查 False / pluto↔镜像定制 True
+- 手工实测：kit 自身 ↔ 周报任务 → 「警告：目标 role……无明显匹配」；周报 ↔ 周报任务 → 「role 校验：匹配」；无 role 项目 → 「目标未填 role 字段（不阻塞）」
+- smoke：默认 C.UTF-8 / LC_ALL=C / en_US.UTF-8 三路径 160/0（DEV-123 断言 3/3；DEV-122 24 节断言保持）
+- python3 -m py_compile 两副本；bin/awf-dispatch 与 agent-workflow/bin/awf-dispatch diff 为空（drift）
+- kit check cr=0 全部通过
+
+### 下一步
+无。
+| 完成日期 | 2026-11-04 |
+| DEV-123 | P1 | 修复 --check-role 过度匹配：泛词停用表（31 词）+ 中文 2/3/4-gram 混合，领域词单命中即匹配；kit↔周报回归不匹配；三 locale smoke 160/0 | 2026-11-04 |
