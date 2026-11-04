@@ -24,3 +24,4 @@ scopes: 生成器与模板(bin/ templates/), 工作流规范(agent-workflow/READ
 
 # 并行时任何单元都不许同时修改的文件或目录
 serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, agent-workflow/workflows/cross-project.md
+role: 擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版
