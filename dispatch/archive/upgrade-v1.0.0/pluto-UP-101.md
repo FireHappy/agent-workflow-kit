@@ -20,3 +20,7 @@
 - [ ] 旧大文件已移除（done.md/todo.md/current.md），git 中可见删除
 - [ ] check_workflow.sh 全绿
 - [ ] 本地 commit 落盘（禁止 push）
+
+## 补充：commit 范围（重复派发时适用）
+
+- 升级与迁移已完成（bin/awf=AWF_VERSION 1、tasks/<type>/{todo,current,done}/ 目录式 README 在）——只需：awf status 刷新（若账本有改动）→ check → 只提交升级相关文件（agent-workflow/、AGENTS.md；.gitignore 若与升级无关可不 add）→ 本地 commit（禁 push）

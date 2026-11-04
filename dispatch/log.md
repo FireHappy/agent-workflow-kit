@@ -364,3 +364,27 @@
 - 状态：超时（>480s，会话仍在运行）
 - 目标 HEAD：440cfc9dd [update] 升级sdk1.7.2
 
+## 2026-11-04 12:40 → naboo
+
+- 目标：/Users/chenlin/projects/UnityProjects/naboo
+- 任务：naboo · naboo 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/naboo-UP-101.md）
+- 模块：通用
+- 工作区：naboo（1c1f6c3a-523c-454c-8257-243e520735c4）
+- 会话：session-888941de-4d22-4fe0-8cb0-9b64bc69f2a7（[awf] naboo）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：01cb3b19b upgrade(naboo): v1.0.0 目录式账本迁移 UP-101
+- 回报节选：UP-101 已完成，账本已归档并落盘 commit。汇报如下： ## 任务回报（upgrade(naboo): v1.0.0 目录式账本迁移 UP-101） - **commit**：`01cb3b19b8f0077efbe3ab67630a622c483daf2f`（短 `01cb3b19b`，分支 `station3_component_empty`，27 文件 +5518，**未 push**，`ahead 1`） - **check 结果**：[agent-workflow/check_workflow.sh](agent-workflow/check_workflow.sh) 全绿…（已截断，完整回报见会话）
+
+## 2026-11-04 12:41 → pluto
+
+- 目标：/Users/chenlin/projects/Rokid-System/pluto
+- 任务：pluto · pluto 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/pluto-UP-101.md）
+- 模块：通用
+- 工作区：pluto（dc20d453-a176-4406-834f-0d5d04269864）
+- 会话：session-4724583b-4fef-4796-8f15-7801854b92f2（[awf] pluto）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：4b29052 upgrade(pluto): v1.0.0 目录式账本迁移 UP-101
+- 回报节选：✅ **UP-101 已完成并本地提交（未 push）**。本次为重复派发：上一会话（12:23 超时）已完成升级+迁移+归档但未落 commit；本会话补齐了 kit HEAD（含 v1.0.0 补丁 47949d7：check F3 目录式按桶传 mode + 迁移归一补「取消」）、重跑迁移与校验，并完成提交。 ```dsh-ui {"title":"UP-101 升级回报","gap":14,"items":[{"type":"row","items":[{"type":"stat","label":"commit","value":"4b29052"},{"type":"stat","…（已截断，完整回报见会话）
+

@@ -20,3 +20,9 @@
 - [ ] 旧大文件已移除（done.md/todo.md/current.md），git 中可见删除
 - [ ] check_workflow.sh 全绿
 - [ ] 本地 commit 落盘（禁止 push）
+
+## 补充：commit 范围（重复派发时适用）
+
+- 只提交升级相关：agent-workflow/（含 tasks/ 迁移）、AGENTS.md、.gitignore（如属框架相关）
+- 不要纳入：UnityProject/ 下自动或无关改动（link.xml、New Material.mat、UserSettings/Layouts、ProjectSettings 等）——保持 worktree 原样即可（不 add 这些路径）
+- 若 upgrade 已完成的迁移在上一轮会话已落盘（dirty=0），直接 status + check + 只 add 升级路径 commit
