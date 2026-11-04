@@ -1,3 +1,8 @@
+## [Unreleased]
+
+### Changed
+- **需用户确认时决策回派发端（DISPATCH-141）**：目标 worker 不得在目标会话内向用户提问（ask_user_question 等），按回报格式写「阻塞：需用户确认 X（问题 + 选项 + 建议 + 解除条件）」并保持会话等待、**不擅自行事**；派发方（router）转述用户决策后用 `awf-dispatch --session <会话ID>` 续发，worker 继续。awf-dispatch 注入文本、docs/dispatch.md、docs/design.md 与跨项目模板（AGENTS.md.tmpl / cross-project.md 双副本）同步，替换「用户在目标会话内回复即可继续」旧表述
+
 ## [1.1.1] - 2026-11-04
 
 ### Changed

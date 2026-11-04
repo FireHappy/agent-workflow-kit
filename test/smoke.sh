@@ -2697,6 +2697,35 @@ if diff -q "$KIT_DIR/templates/AGENTS.md.tmpl" \
 else
   bad "DISPATCH-134 模板副本漂移"
 fi
+# 30.7 DISPATCH-141：需用户确认时决策回派发端（不在目标会话内提问/不擅自行事/--session 续发）
+if grep -q '不得在本会话内向用户提问' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '需用户确认' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q 'awf-dispatch --session' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '不得擅自执行推荐方案' "$KIT_DIR/bin/awf-dispatch"; then
+  ok "DISPATCH-141 awf-dispatch 注入文本含决策回派发端约定（不提问/不擅自行事/--session 续发）"
+else
+  bad "DISPATCH-141 awf-dispatch 注入文本缺决策回派发端约定"
+fi
+if grep -q '决策回派发端' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'awf-dispatch --session' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'DISPATCH-141' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '不得擅自执行推荐方案' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'DISPATCH-141' "$KIT_DIR/templates/workflows/cross-project.md"; then
+  ok "DISPATCH-141 docs/dispatch.md 决策回派发端流程（转述→决策→--session 续发）与模板同步"
+else
+  bad "DISPATCH-141 决策回派发端流程缺失或模板未同步"
+fi
+# 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
+if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
+   || grep -q '用户在目标会话内直接回复' "$KIT_DIR/docs/dispatch.md" \
+   || grep -q '用户在目标会话内回复继续' "$KIT_DIR/templates/workflows/cross-project.md" \
+   || grep -q '目标会话多轮对话续聊' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   || grep -q '目标会话多轮对话续聊' "$KIT_DIR/docs/dispatch.md" \
+   || grep -q '目标会话多轮对话续聊' "$KIT_DIR/AGENTS.md"; then
+  bad "DISPATCH-141 旧表述残留（用户在目标会话内回复即可继续）"
+else
+  ok "DISPATCH-141 旧表述已清除（用户回复位置=派发端）"
+fi
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

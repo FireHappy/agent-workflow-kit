@@ -51,4 +51,4 @@
 | DEV-141 | P1 | release-prep 1.1.1 | 2026-11-04 |
 | DEV-142 | P1 | 发版 v1.1.1 + 批量升级 8 项目（DISPATCH-135） | 2026-11-04 |
 | DEV-143 | P2 | 补充升级未登记项目 rokid_system_components 至 v1.1.1（DISPATCH-135 扫尾） | 2026-11-04 |
-| DEV-144 | P1 | 修复 awf-dispatch 审查发现（S1/S2 严重 + M1/M2 中等），完成后独立 review | 2026-11-04 |
+| DEV-144 | P1 | 派发契约修复：worker 需用户决策时返回派发端会话（DISPATCH-141） | 2026-11-04 |
