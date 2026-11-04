@@ -686,3 +686,49 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无。各项目自行在 project.yaml 填 role 即完成名牌登记（改后无需 re-register）。
 | 完成日期 | 2026-11-04 |
 | DEV-118 | P2 | worker 名牌：project.yaml 可选 role 字段，find/projects/register 寻址带出（缺省回退 name，yaml 单一事实源）；三 locale smoke 140/0 | 2026-11-04 |
+
+
+## [DEV-119] 修复 role 名牌不生效（空 role 行吞值）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | templates/project.yaml.tmpl + agent-workflow/templates/project.yaml.tmpl（移除空 role: 键，改注释示例）、agent-workflow/bin/awf + bin/awf（yaml_get 跳过空值键行 + project_role trim）、test/smoke.sh（第 23.1/23.2 节）、docs/design.md（补充说明） |
+| 依赖 | DEV-118（94ea0d3） |
+| 最近更新 | 2026-11-04 |
+
+### 目标与结果
+修复 DEV-118 缺陷：模板预置空 `role:` 行被 yaml_get 的 head -n 1 吞掉（读到空行），用户后填 role 不生效、find 永远 fallback name。实测根因链与任务描述一致。
+
+### 实现方案（A+B 双保险）
+- 方案 A（模板侧）：templates/project.yaml.tmpl 移除空 `role:` 键，改为注释示例（「取消注释并改写下面一行」），init 生成项目不再自带空键；同步副本 agent-workflow/templates/project.yaml.tmpl 一致。
+- 方案 B（解析侧）：yaml_get 管道加 `grep -v ^[[:space:]]*$`，只取第一个**非空值**匹配行——旧项目遗留空 role: 行或双 role 键自动跳过/取第一个有值项，向前兼容。
+- project_role() 判空前置 trim（双保险）。
+- smoke 第 23.1/23.2 节断言（5 条新增）：模板无空键 / 后填 role 立即带出 / 无数值 role fallback name / 仅空 role 仍 fallback / 双 role 键取有值项。
+
+### 验收标准
+- [x] 模板不再生成空 role: 键行，且 yaml_get 跳过空值（A+B 都做）
+- [x] 手动追加第二行 role 后 find 立即输出该 role（kit 版 awf 对旧模板项目实测：后填的有值角色 带出）
+- [x] 仅空 role / 无数值 role 时 find fallback 到 name（不回归，PROJ3 实测）
+- [x] 双 role 键 yaml 取到有值项（PROJ3 实测 + smoke 断言）
+- [x] smoke 断言通过；默认 locale / LC_ALL=C / en_US.UTF-8 三路径全绿（144/0）
+- [x] DEV-119 已归档，check_workflow.sh 全过，status.md 已刷新
+- [x] 只本地 commit，未 push
+
+### 验证
+- bash test/smoke.sh（默认 C.UTF-8）= 144/0；LC_ALL=C = 144/0；LC_ALL=en_US.UTF-8 = 144/0
+- bash -n agent-workflow/bin/awf、bin/awf、test/smoke.sh 全过
+- 实测（旧模板项目 /tmp/d119proj，含空 role: 行 + 追加有值行）：kit 版 awf find → 带出「后填的有值角色」（修复前为 name fallback）
+- 实测（新模板重建 /tmp/d119proj2）：yaml 无 role 键（grep rc=1）→ find fallback name → 追加 role 后 find 立即带出
+- 双键管道实测：sed|grep -v|head 对「空行+有值」取到有值项
+- drift：bin/awf 与 agent-workflow/bin/awf、templates/project.yaml.tmpl 与 agent-workflow/templates/project.yaml.tmpl diff 为空
+
+### 下一步
+无。各项目已生成的旧 project.yaml（含空 role: 行）由方案 B 自动兼容，无需改动。
+| 完成日期 | 2026-11-04 |
+| DEV-119 | P1 | 修复 role 名牌不生效：模板移除空 role 键（方案 A）+ yaml_get 跳过空值键行（方案 B）；旧模板项目实测后填 role 立即带出；三 locale smoke 144/0 | 2026-11-04 |

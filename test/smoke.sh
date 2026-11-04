@@ -2041,7 +2041,7 @@ else
 fi
 
 # 23. DEV-118：worker 名牌（role 自述 + find/projects/register 带出）
-# init 项目 yaml 有空的 role: 行（模板默认）→ find 回退 name，不报错，输出三列
+# init 项目 yaml 无 role 键（DEV-119 后模板不再预置空 role: 行）→ find 回退 name，输出三列
 if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 ) 2>&1 \
    | grep -Eq '^[^	]+	[^	]+	[^	]+$'; then
   ok "DEV-118 find 输出三列（id/路径/role），role 缺省不报错"
@@ -2053,26 +2053,53 @@ if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 2>&1 | grep -q '冒烟�
 else
   bad "DEV-118 find 缺省 role 未回退到 name"
 fi
-# 手动填 role（替换模板空 role 行，不 re-register）→ find 立即带出
-sed -i '' 's|^role: *$|role: 生成脚手架与校验工作流|' "$PROJ/agent-workflow/project.yaml" 2>/dev/null \
-  || sed -i 's|^role: *$|role: 生成脚手架与校验工作流|' "$PROJ/agent-workflow/project.yaml"
-if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 | grep -q '生成脚手架与校验工作流' ); then
-  ok "DEV-118 手动加 role 后 find 立即带出（无需 re-register）"
+
+# 23.1 DEV-119：模板不再生成空 role: 键（避免 head -n 1 吞掉后填值）
+if grep -q '^role: *$' "$PROJ/agent-workflow/project.yaml"; then
+  bad "DEV-119 模板仍生成了空 role: 键（会吞用户后填值）"
 else
-  bad "DEV-118 find 未带出手动加的 role"
+  ok "DEV-119 模板不再生成空 role: 键"
 fi
-# projects 表格含角色列并带出 role
+# 追加第二行 role（模拟用户后填）→ find 立即输出该 role，不再回退 name
+printf '\nrole: 生成脚手架并维护任务账本\n' >> "$PROJ/agent-workflow/project.yaml"
+if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 | grep -q '生成脚手架并维护任务账本' ); then
+  ok "DEV-119 后填 role（追加行）find 立即带出，不被空行吞掉"
+else
+  bad "DEV-119 后填 role 未生效（空行吞值回归）"
+fi
+# projects 表格含角色列并带出 role；register 报已登记名牌
 if ( cd "$PROJ" && ./agent-workflow/bin/awf projects | grep -q '角色' ) \
-   && ( cd "$PROJ" && ./agent-workflow/bin/awf projects | grep -q '生成脚手架与校验工作流' ); then
+   && ( cd "$PROJ" && ./agent-workflow/bin/awf projects | grep -q '生成脚手架并维护任务账本' ); then
   ok "DEV-118 projects 表格含「角色」列并带出 role"
 else
   bad "DEV-118 projects 表格缺角色列/role"
 fi
-# register：有 role → 已登记 worker 名牌提示
 if ( cd "$PROJ" && ./agent-workflow/bin/awf register 2>&1 | grep -q '已登记 worker 名牌' ); then
   ok "DEV-118 register 对已有 role 项目提示已登记名牌"
 else
   bad "DEV-118 register 名牌提示缺失"
+fi
+
+# 23.2 DEV-119：仅空 role / 无数值 role → find 仍回退 name（不回归）
+PROJ3="$TMP/proj3"
+"$KIT_DIR/bin/awf" init "$PROJ3" --name "空角色项目" >/dev/null 2>&1 || true
+if ( cd "$PROJ3" && ./agent-workflow/bin/awf find 空角色 2>&1 | grep -q '空角色项目' ); then
+  ok "DEV-119 无数值 role 时 find 回退 name（不回归）"
+else
+  bad "DEV-119 无数值 role 未回退 name"
+fi
+printf 'role: \n' >> "$PROJ3/agent-workflow/project.yaml"   # 模拟旧模板遗留空键
+if ( cd "$PROJ3" && ./agent-workflow/bin/awf find 空角色 2>&1 | grep -q '空角色项目' ); then
+  ok "DEV-119 仅空 role 键时 find 仍回退 name（解析跳过空值）"
+else
+  bad "DEV-119 仅空 role 键未回退 name"
+fi
+# 双 role 键（旧项目：空行在前、有值在后）→ 取第一个有值项
+printf 'role: 双键兜底取值\n' >> "$PROJ3/agent-workflow/project.yaml"
+if ( cd "$PROJ3" && ./agent-workflow/bin/awf find 空角色 | grep -q '双键兜底取值' ); then
+  ok "DEV-119 双 role 键 yaml 取到有值项（旧项目兼容）"
+else
+  bad "DEV-119 双 role 键未取到有值项"
 fi
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"

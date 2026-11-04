@@ -46,10 +46,15 @@ slug() {
 
 yaml_get() {
   local key="$1" file="$2"
-  sed -n "s/^${key}:[[:space:]]*//p" "$file" | head -n 1 | sed 's/[[:space:]]*$//'
+  # 只取「有值」的匹配行：跳过空值键行（如模板曾预置的空 `role: ` 行），
+  # 保证重复键时取第一个有值项（DEV-119，旧项目双 role 键兼容）。
+  sed -n "s/^${key}:[[:space:]]*//p" "$file" \
+    | grep -v '^[[:space:]]*$' \
+    | head -n 1 \
+    | sed 's/[[:space:]]*$//'
 }
 
-# worker 名牌（DEV-118）：读项目 project.yaml 的 role 字段（一句话自述）；
+# worker 名牌（DEV-118/119）：读项目 project.yaml 的 role 字段（一句话自述）；
 # 缺省回退到 name，再缺省输出 `-`。只读，不改索引（yaml 为单一事实源）。
 project_role() {
   local y="$1/agent-workflow/project.yaml" r n
@@ -57,6 +62,7 @@ project_role() {
     r="$(yaml_get role "$y")"
     n="$(yaml_get name "$y")"
   fi
+  r="$(printf '%s' "$r" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"   # 判空前置 trim
   if [ -n "$r" ]; then printf '%s\n' "$r"
   elif [ -n "$n" ]; then printf '%s\n' "$n"
   else printf '%s\n' '-'

@@ -122,7 +122,7 @@ FAIL「禁止转派：……派发深度 = 1，接收者保持 worker 只执行�
 
 worker/router 对偶模型下，每个已登记项目是网络中的一个 worker；寻址（id / aliases / 路径）已通，但 router 检索工作群时看不到「这个 worker 是干嘛的」。DEV-118 引入可选的 **role** 字段作为 worker 名牌（一句话自述）：
 
-- **怎么填**：在项目 `agent-workflow/project.yaml` 加一行 `role: <一句话：这个 worker 主要承担什么>`；由各项目自己注册（`awf register` 即完成名牌登记，无需改索引）。
+- **怎么填**：在项目 `agent-workflow/project.yaml` 加一行 `role: <一句话：这个 worker 主要承担什么>`；由各项目自己注册（`awf register` 即完成名牌登记，无需改索引）。模板不预置空 `role:` 键（避免空键行被解析器当成「有值前的占位」吞掉后填值，DEV-119）；`yaml_get` 只取**非空值**的匹配行，旧项目遗留的空 `role:` 行或双 role 键自动跳过/取第一个有值项，向前兼容。
 - **单一事实源**：role 只存在 yaml，不改 `~/.agents/projects.tsv` 列结构——索引只放指针，避免索引漂移（role 改了不用 re-register，寻址时实时读 yaml）。
 - **怎么带出**：`awf find <别名|ID>` 输出 `id\t路径\t角色`；`awf projects` 表格含「角色」列；两者 role 缺省回退到 `name`，再缺省输出 `-`，向后兼容。
 - **register 提示**：登记时无 role 输出填写提示，有 role 输出「已登记 worker 名牌」。
