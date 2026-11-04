@@ -967,3 +967,31 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无。
 | 完成日期 | 2026-11-04 |
 | DEV-124 | P2 | worker 经验/工具积累闭环：开工读 history + 收尾沉淀 memory/tools + check 软提示（不 FAIL）；三 locale smoke 166/0 | 2026-11-04 |
+| DEV-125 | P0 | 发版 v0.9.0（DEV-115~124 批次）：VERSION 0.8.0→0.9.0、CHANGELOG [0.9.0] 段、本地 tag v0.9.0、release-prep 装配；check 全过 + smoke 双 locale 全绿 | 2026-11-04 |
+| DEV-126 | P1 | release-prep 0.9.0：一键发版装配 | 2026-11-04 |
+
+## [DEV-125] 发版 v0.9.0（DEV-115~124 批次）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P0 |
+| 状态 | active |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 修改范围 | VERSION（0.8.0→0.9.0）、CHANGELOG.md（新增 [0.9.0] 段）、agent-workflow/tasks/release/ 账本（发版记录）、生成副本（release-prep 刷新）、AGENTS.md（bootstrap 重建） |
+| 依赖 | DEV-115~DEV-124（11 提交） |
+| 最近更新 | 2026-11-04 |
+
+### 目标
+把 v0.8.0 之后累计的 11 个提交（DEV-115 激活式路由 / DEV-116 全局升级 / DEV-117 locale 修复+门禁 / DEV-118~119 worker 名牌 / DEV-120 全局升级+role / DEV-121 init --role / DEV-122 派发规则同步 role / DEV-123 check-role 修复 / DEV-124 经验沉淀闭环）落成正式版本 v0.9.0：装配 CHANGELOG、写 VERSION、打本地 tag、跑全量校验。无破坏性变更（role/票据来源字段均向后兼容）→ minor。
+
+### 验收标准
+- [ ] VERSION=0.9.0，CHANGELOG 有 [0.9.0] 段（11 提交全覆盖）
+- [ ] 本地 tag v0.9.0 存在（git tag 可见）；无 remote 操作
+- [ ] smoke 双 locale 全绿、check 全过、py_compile/bash -n 无错、生成副本无漂移
+- [ ] 发版记录已归档（done.md 含 v0.9.0 行），status.md 已刷新
+- [ ] 只本地 commit + 本地 tag，未 push
+
+### 下一步
+release-prep 0.9.0（dry-run 已确认，无 Unreleased 需手工补 [0.9.0] 段）→ 全量校验 → 归档 → commit + tag。

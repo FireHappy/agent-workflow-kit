@@ -1,3 +1,22 @@
+## [0.9.0] - 2026-11-04
+
+### Added
+- 激活式 Router 协议（DEV-115）：任务票据「来源：用户 | 工作流」标记、派发深度 = 1、来源=工作流禁转派（`awf-dispatch` 直接 FAIL，退出码 2）；全局升级至该协议版本（DEV-116）
+- worker 名牌 role（DEV-118）：`awf find` 输出 `id	路径	角色`、`awf projects` 增「角色」列、`awf register` 登记/提示回显；role 单一事实源在 yaml，不改索引（DEV-120 全网填写）
+- init --role 初始化即登记能力名牌（DEV-121）：{{ROLE}} 模板占位、空键兜底解析、缺省填写提示
+- 经验/工具积累闭环（DEV-124）：开工读 memory/history 同类经验、收尾沉淀可复用结论到 history/脚本按 tools 晋升三要素收录、`awf check` 软提示兜底（只提示不 FAIL）
+- awf-dispatch --check-role 软校验（DEV-122）：目标 role 与任务关键词交集匹配通过/不匹配警告/无 role 提示，均不硬拒（退出码不变）；--allow-role-mismatch 可静默警告
+
+### Changed
+- router 决策三件套含「读各 worker 的 role（特长），按任务意图筛选候选」（DEV-122：AGENTS.md.tmpl 与 cross-project.md 同步）
+- 路由裁决理由必备项（DEV-122）：理由须含目标 role 与任务意图的匹配说明（cross-project.md 第 4 条）；匹配不到写「无匹配，建议用户确认」不得硬凑
+- 开工顺序加「先读 history 同类经验」、收尾加沉淀动作（DEV-124）
+
+### Fixed
+- macOS awk 中文比较 locale 错乱（DEV-117）：awfk LC_ALL=C 包装统一 awk 调用 + smoke 并入日常门禁（--with-smoke + pre-commit 钩子模板 + install-hooks）
+- role 空行吞值（DEV-119）：模板去字面空 role 键（{{ROLE}} 占位）+ yaml_get 跳过空值行，双键取有值项
+- --check-role 过度匹配（DEV-123）：泛词停用表（31 词）+ 中文 2/3/4-gram 混合，领域词单命中即匹配；kit↔周报泛词误判回归修复
+
 ## [0.8.0] - 2026-11-03
 
 ### Added
