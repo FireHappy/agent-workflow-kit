@@ -1369,8 +1369,8 @@ fi
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F2 刷新 status 后 check 通过" || bad "F2 刷新后 check 未通过"
 
 # 15. F3：任务文件校验（DEV-127 目录式；非法状态/缺字段被点名）
-mkdir -p "$PROJ/agent-workflow/tasks/dev/done"
-cat > "$PROJ/agent-workflow/tasks/dev/done/DEV-200.md" <<'EOF'
+mkdir -p "$PROJ/agent-workflow/tasks/dev/current"
+cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-200.md" <<'EOF'
 ## [DEV-200] 非法状态
 
 | 字段 | 内容 |
@@ -1388,7 +1388,7 @@ else
   printf '%s\n' "$out" | grep -q 'DEV-200' && ok "F3 非法状态任务文件被 check 拒绝" || bad "F3 未点名：$out"
   printf '%s\n' "$out" | grep -q '状态非法' && ok "F3 指明状态非法" || bad "F3 未指明状态非法：$out"
 fi
-rm -f "$PROJ/agent-workflow/tasks/dev/done/DEV-200.md"
+rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-200.md"
 ( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3 移除非法文件后 check 通过" || bad "F3 修复后 check 未通过"
 mv "$PROJ/agent-workflow/tasks/debug/done/README.md" "$PROJ/agent-workflow/tasks/debug/done/README.md.hid"

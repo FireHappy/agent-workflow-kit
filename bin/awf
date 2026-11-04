@@ -492,6 +492,8 @@ migrate_ledger_files() {
               if (ln[k] ~ /^\| *状态 *\| *archived *\|$/) ln[k] = "| 状态 | done |"
               else if (ln[k] ~ /^\| *状态 *\| *完成 *\|$/) ln[k] = "| 状态 | done |"
               else if (ln[k] ~ /^\| *Status *\| *archived *\|$/) ln[k] = "| 状态 | done |"
+              # v1.0.0 补丁：取消（历史撤销任务归档语义=关闭）同样归一为 done
+              else if (ln[k] ~ /^\| *状态 *\| *取消 *\|$/) ln[k] = "| 状态 | done |"
               out = out ln[k] "\n"
             }
             print out > p
@@ -850,7 +852,7 @@ check_current_file() {
         # FAIL 自解释：迁移类（旧英文表头 / 归档块）给出可直接执行的修复指引
         printf "FAIL  %s [%s] 缺少字段:%s\n", wf, id, miss
         if (!st) {
-          if (st_en) printf "      → 修复：旧英文表头 `| Status |` 改为 `| 状态 |`，且历史值统一为 `| 状态 | done |`（archived/完成/Archive 均已归一为 done），再跑 awf check\n"
+          if (st_en) printf "      → 修复：旧英文表头 `| Status |` 改为 `| 状态 |`，且历史值统一为 `| 状态 | done |`（archived/完成/Archive/取消 均已归一为 done），再跑 awf check\n"
           else if (m == "done") printf "      → 修复：归档块字段表补一行 `| 状态 | <归档时状态> |`（历史归档可写 `完成`），再跑 awf check\n"
           else printf "      → 修复：字段表补一行 `| 状态 | active`（DEV-127 后可为 todo/done）\n"
         }
@@ -1131,7 +1133,13 @@ agent-workflow/tasks/docs/done/README.md
     for b2 in todo current done; do
       while IFS= read -r f2; do
         [ -f "$f2" ] || continue
-        out="$(check_current_file "$f2" "$t2" "current")" || true
+        # v1.0.0 补丁：目录式按桶传 mode——done/ 归档文件不强制工作态枚举/下一步
+        # （done 分支只校验归档表行；历史状态值如 完成/取消 在迁移归一后即为 done）
+        case "$b2" in
+          done)  m2="done" ;;
+          *)     m2="current" ;;
+        esac
+        out="$(check_current_file "$f2" "$t2" "$m2")" || true
         if printf '%s' "$out" | grep -q 'FAIL'; then
           fails=$((fails + 1))
         fi

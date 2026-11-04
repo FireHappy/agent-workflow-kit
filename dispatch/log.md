@@ -274,3 +274,93 @@
 - 目标 HEAD：dd35d38a chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）
 - 回报节选：任务已完成。以下是回报： ```dsh-ui {"title":"awf-upgrade-20261102 收尾回报","gap":12,"items":[{"type":"keyvalue","pairs":[{"key":"状态","value":"成功"},{"key":"commit","value":"dd35d38a — chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）"},{"key":"check 复跑","value":"rc=0，全部检查通过（16 项 ok）"},{"key":"push","val…（已截断，完整回报见会话）
 
+## 2026-11-04 12:15 → 周报
+
+- 目标：/Users/chenlin/Documents/周报
+- 任务：周报 · weekly-report 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/weekly-report-UP-101.md）
+- 模块：通用
+- 工作区：weekly report（cdfef88e-807f-4ef2-8556-de9cca1507e7）
+- 会话：session-0e9e7d7a-143e-4372-94a4-bacfd8951d23（[awf] 周报）
+- 会话来源：新建
+- 状态：超时（>300s，会话仍在运行）
+- 目标 HEAD：d03e640 upgrade(weekly-report): v1.0.0 目录式账本迁移 UP-101
+
+## 2026-11-04 12:21 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · finderpathbar 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/finderpathbar-UP-101.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-f5fc8193-5b9e-424b-a3f2-a2d4b6509b52（[awf] FinderPathBar）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：4de12d2 upgrade(finderpathbar): v1.0.0 目录式账本迁移 UP-101
+- 回报节选：任务完成。最终回报如下： ## UP-101 升级回报 **执行摘要**：FinderPathBar 的 agent-workflow 已升级至 kit **v1.0.0（release 6fc2f5f）**，账本完成目录式迁移，门禁全绿，已本地提交、未 push。 - **commit**：`4de12d20d4a2a7fefbe4e18676d86c88d1209bbd`（`upgrade(finderpathbar): v1.0.0 目录式账本迁移 UP-101`，36 files，+645/−356） - **check_workflow.sh**：**29 ok / 0 fail**…（已截断，完整回报见会话）
+
+## 2026-11-04 12:22 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · openxr-uxr 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/openxr-uxr-UP-101.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-db34b441-cf44-47b3-a7b9-89f0c6a3247e（[awf] OpenXR-UXR）
+- 会话来源：新建
+- 状态：完成（已落地：commit）
+- 目标 HEAD：b9c68f6 upgrade(openxr-uxr): v1.0.0 目录式账本迁移 UP-101
+- 回报节选：任务完成。以下是 **UP-101** 回报： ```dsh-ui {"title":"UP-101 升级回报","gap":12,"items":[{"type":"row","items":[{"type":"stat","label":"commit","value":"b9c68f6"},{"type":"stat","label":"check","value":"65 ok / 0 fail"},{"type":"stat","label":"旧大文件移除","value":"8 个"}]},{"type":"keyvalue","pairs":[{"key":"框架版本","va…（已截断，完整回报见会话）
+
+## 2026-11-04 12:22 → im
+
+- 目标：/Users/chenlin/.dsh/im
+- 任务：im · dsh-im 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/dsh-im-UP-101.md）
+- 模块：通用
+- 工作区：im（31ca7718-0b39-4f07-9f6a-ec6ebd100193）
+- 会话：session-d58aaa2e-082f-4d6d-9cde-82c5e93a38db（[awf] im）
+- 会话来源：新建
+- 状态：超时（>300s，会话仍在运行）
+- 目标 HEAD：ba4b29d chore(workflow): DEV-126 升级 agent-workflow 至 v0.9.0（kit v0.9.0 批次：激活式路由/名牌/check-role/经验沉淀）
+
+## 2026-11-04 12:23 → pluto
+
+- 目标：/Users/chenlin/projects/Rokid-System/pluto
+- 任务：pluto · pluto 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/pluto-UP-101.md）
+- 模块：通用
+- 工作区：pluto（dc20d453-a176-4406-834f-0d5d04269864）
+- 会话：session-1208bb02-a709-4019-ab1f-64811c2f5465（[awf] pluto）
+- 会话来源：新建
+- 状态：超时（>420s，会话仍在运行）
+- 目标 HEAD：256dce8 system components 1.29 naboo apk
+
+## 2026-11-04 12:23 → uxrsample
+
+- 目标：/Users/chenlin/projects/UnityProjects/uxrsample
+- 任务：uxrsample · uxrsample 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/uxrsample-UP-101.md）
+- 模块：通用
+- 工作区：uxrsample（646d3ae9-385f-4bcf-8592-60ad4cdbddad）
+- 会话：session-a46b5d65-5879-4169-a548-ae007330f9e0（[awf] uxrsample）
+- 会话来源：新建
+- 状态：超时（>420s，会话仍在运行）
+- 目标 HEAD：f61fb5b1 chore(workflow): DEV-126 升级 agent-workflow 至 v0.9.0（激活式路由/名牌/check-role/经验沉淀）
+
+## 2026-11-04 12:25 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · dsh-settings 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/dsh-settings-UP-101.md）
+- 模块：通用
+- 工作区：dsh-settings（d6ddf210-7583-4013-bdad-3d3f07897034）
+- 会话：session-5a4d10dc-4919-4218-aa1a-1691007c7ab2（[awf] dsh-settings）
+- 会话来源：新建
+- 状态：超时（>480s，会话仍在运行）
+- 目标 HEAD：0d939e9 chore: DEV-012 ledger → v0.2.2 + 405 诊断结论
+
+## 2026-11-04 12:25 → naboo
+
+- 目标：/Users/chenlin/projects/UnityProjects/naboo
+- 任务：naboo · naboo 框架升级 v1.0.0 + 目录式账本迁移目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.0.0/naboo-UP-101.md）
+- 模块：通用
+- 工作区：naboo（1c1f6c3a-523c-454c-8257-243e520735c4）
+- 会话：session-3bb18b69-f148-4a4a-b06f-9b0b005a8ac9（[awf] naboo）
+- 会话来源：新建
+- 状态：超时（>480s，会话仍在运行）
+- 目标 HEAD：440cfc9dd [update] 升级sdk1.7.2
+
