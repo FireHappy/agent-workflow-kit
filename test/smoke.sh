@@ -1111,6 +1111,13 @@ probe_json = subprocess.run([sys.argv[1], "--screen-state", "--json"], capture_o
 assert probe_json.returncode == 0
 assert json.loads(probe_json.stdout)["screen_state"] in ("on", "off", "locked", "unknown"), probe_json.stdout
 
+# S6（DISPATCH-144）：注入文本含状态透明化条款（中间状态转换主动回报，不因还在修复而沉默）
+agreed = module.build_prompt("demo", "S6", "dev", "任务：S6-144 冒烟\n")
+assert "状态透明化（DISPATCH-144）" in agreed, "注入文本缺状态透明化条款"
+assert "一回合内" in agreed and "修复开始" in agreed and "归档完成" in agreed, agreed
+assert "不因「还在修复 / 还没最终成功」而沉默" in agreed or "还在修复" in agreed, agreed
+assert "mid-status 只覆盖 `--wait` 等待超时前，本条款覆盖异步派发全程" in agreed, "衔接 mid-status 说明缺失"
+
 # M1：read_task 票据必备字段校验（目标项目/任务编号/来源/路由裁决），缺失拒发并明示缺项
 with tempfile.TemporaryDirectory() as tmp:
     good = pathlib.Path(tmp) / "good.md"
@@ -2880,6 +2887,28 @@ if grep -rn '用户暂离\|away' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/tem
   bad "DISPATCH-143 术语残留：发现「用户暂离/away」，应统一为「远程办公状态（remote）」"
 else
   ok "DISPATCH-143 术语统一：无「用户暂离/away」残留，统一为「远程办公状态（remote）」"
+fi
+# 30.10 DISPATCH-144：状态透明化条款（dev.md/review.md/注入文本/文档/模板同步 + 无旧表述残留）
+if grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/agent-workflow/workflows/dev.md" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/agent-workflow/workflows/review.md" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/templates/workflows/dev.md" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/templates/workflows/review.md" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q 'DISPATCH-144' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q 'DISPATCH-144' "$KIT_DIR/AGENTS.md" \
+   && grep -q '回报时机不得晚于状态转换后一回合' "$KIT_DIR/bin/awf-dispatch"; then
+  ok "DISPATCH-144 状态透明化条款（中间状态转换主动回报）注入文本与文档/模板同步"
+else
+  bad "DISPATCH-144 状态透明化条款缺失或未同步"
+fi
+if grep -rn '等待最终成功才回报\|闷头执行到最终成功' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/templates" \
+   "$KIT_DIR/bin/awf-dispatch" "$KIT_DIR/agent-workflow/workflows" 2>/dev/null | grep -v '^Binary'; then
+  bad "DISPATCH-144 旧表述残留（等待最终成功才回报/闷头执行），应改为状态转换即回报"
+else
+  ok "DISPATCH-144 无「等待最终成功才回报/闷头执行」旧表述（状态转换即回报）"
 fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
