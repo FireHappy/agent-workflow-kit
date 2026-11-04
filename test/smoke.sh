@@ -1886,29 +1886,33 @@ original_resolve = module.resolve_target
 try:
     def run_main(ticket, label):
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        out = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
             code = module.main(["proj", str(ticket), "--dry-run"])
-        return code, err.getvalue()
+        return code, err.getvalue(), out.getvalue()
 
     with tempfile.TemporaryDirectory(suffix="-d115") as tmp:
         tmpdir = pathlib.Path(tmp)
         module.resolve_target = lambda value: tmpdir
 
-        # 来源=工作流 的票据作为 target 再次派发 → FAIL（禁止转派），退出码 2
+        # DEV-128：来源=工作流 的票据允许继续转派（去掉禁转派硬 FAIL）；派发时
+        # 提示核对转派理由与路由裁决（非阻塞），流程继续走 dry-run 到 G1 预检门
         wf_ticket = pathlib.Path("/tmp/awf-d115-source-workflow.md")
         wf_ticket.write_text("任务：DEV-115 转派\n\n- 目标项目：proj（/tmp/proj）\n- 来源：工作流\n",
                              encoding="utf-8")
-        code, err = run_main(wf_ticket, "workflow")
-        assert code == module.EXIT_FAIL, f"来源=工作流的二次派发必须 FAIL（exit 2），实际 {code}"
-        assert "禁止转派" in err and "来源：工作流" in err, err
+        code, err, out = run_main(wf_ticket, "workflow")
+        assert "禁止转派" not in err, "DEV-128 已移除禁转派 FAIL（不得再出现禁止转派错误）"
+        assert "深层转派" in out, f"DEV-128 应提示深层转派（非阻塞），实际 out={out!r}"
+        assert code == module.EXIT_FAIL, code  # dry-run 走到 G1 预检失败（非来源拦截）
+        assert "G1 工作流失败" in err, err
 
         # 无来源旧票据不受来源校验影响：走正常前置检查（G1 门失败，非来源拦截）
         old_ticket = pathlib.Path("/tmp/awf-d115-source-old.md")
         old_ticket.write_text("任务：DEV-115 旧票据\n\n- 目标项目：proj（/tmp/proj）\n",
                               encoding="utf-8")
-        code2, err2 = run_main(old_ticket, "old")
+        code2, err2, out2 = run_main(old_ticket, "old")
         assert code2 == module.EXIT_FAIL, code2
-        assert "禁止转派" not in err2, "旧票据不得被来源校验拦截"
+        assert "禁止转派" not in err2 and "深层转派" not in out2, "旧票据（来源=用户）不得有深层转派提示"
         assert "G1 工作流失败" in err2, err2
 finally:
     module.resolve_target = original_resolve
@@ -1919,24 +1923,30 @@ else
   bad "DEV-115 票据来源校验失败（见上方 Traceback）"
 fi
 
-# 21.2 DEV-115：协议规则同步（模板任务路由段 / 流程与派发文档 / 两段示意）
+# 21.2 DEV-115 + DEV-128：协议规则同步（模板路由段 / 流程与派发文档 / 设计文档）
 if grep -q '激活式路由' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   && grep -q '来源：工作流' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
-  ok "DEV-115 模板任务路由段含激活式规则（激活条件 / 深度=1 / 来源标记）"
+   && grep -q '允许继续转派' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
+  ok "DEV-128 模板路由段含激活式规则与允许继续转派（深度不限，替代深度=1）"
 else
-  bad "DEV-115 模板任务路由段缺少激活式规则"
+  bad "DEV-128 模板路由段缺少允许继续转派"
 fi
 if grep -q '来源：工作流' "$KIT_DIR/agent-workflow/workflows/cross-project.md" \
-   && grep -q '禁止转派' "$KIT_DIR/agent-workflow/workflows/cross-project.md"; then
-  ok "DEV-115 cross-project.md 含票据来源字段与禁止转派声明"
+   && grep -q '允许按需继续' "$KIT_DIR/agent-workflow/workflows/cross-project.md"; then
+  ok "DEV-128 cross-project.md 含来源字段与允许继续转派（替代禁止转派声明）"
 else
-  bad "DEV-115 cross-project.md 缺少票据来源字段/禁止转派声明"
+  bad "DEV-128 cross-project.md 缺少来源字段/允许转派说明"
 fi
 if grep -q '来源：工作流' "$KIT_DIR/docs/dispatch.md" \
-   && grep -q 'ticket_source' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DEV-115 docs/dispatch.md 含票据来源字段与派发器校验说明"
+   && grep -q '不再 FAIL 拦截' "$KIT_DIR/docs/dispatch.md"; then
+  ok "DEV-128 docs/dispatch.md 含来源字段与放开转派说明（不再 FAIL）"
 else
-  bad "DEV-115 docs/dispatch.md 缺少票据来源/校验说明"
+  bad "DEV-128 docs/dispatch.md 缺少来源字段/放开转派说明"
+fi
+if grep -q '按需继续向下一层' "$KIT_DIR/docs/design.md" \
+   && grep -q '深度不限' "$KIT_DIR/docs/design.md"; then
+  ok "DEV-128 docs/design.md 拓扑/示意同步深度放开"
+else
+  bad "DEV-128 docs/design.md 未同步深度放开"
 fi
 if grep -q '激活派发' "$KIT_DIR/docs/design.md" \
    && grep -q '转派被拒' "$KIT_DIR/docs/design.md"; then
