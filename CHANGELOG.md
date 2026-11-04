@@ -1,3 +1,15 @@
+## [1.1.3] - 2026-11-05
+
+### Added
+- **熄屏判定 + 远程办公状态（DEV-150，DISPATCH-143 定义升级）**：`awf-dispatch --screen-state` 判定本机 macOS 显示器状态（on/off/locked/unknown，CoreGraphics 锁屏子进程隔离探针 + `pmset -g log` 最近 Display 转事件，失败保守 unknown 不误报亮屏）；需用户确认/决策前先判定——`off`/`locked`＝**远程办公状态（remote）**（用户不在电脑前、但经 IM 在线随时可决策，不是「暂离/离线」）→ **照常回报**「阻塞：需用户确认 X（远程办公状态，请经 IM 通知用户决策）」并保持会话等待；派发端**主动、立即**经 IM（飞书小迪司）通知用户决策或置待决队列（防遗忘锚点），决策后 `--session` 续发——远程办公路径是正常就绪流程的一部分，不存在「等待用户回来」；`on`（亮屏，用户在电脑前）→ 原 DISPATCH-141 路径；`unknown` → 注明由派发端酌情。注入文本、docs/dispatch.md、docs/design.md、SKILL.md 与跨项目模板（cross-project.md / AGENTS.md.tmpl 双副本）同步，术语统一「远程办公状态（remote）」，smoke 新增 §S5 / §30.9 / §30.9b
+
+### Changed
+- **门禁严格度优化（DEV-148，DISPATCH-139）**：P0 等待放宽（queue 默认 180s + 超时前中途状态回报）、P1 `--allow-dirty=tasks` 粒度豁免 + G3 三选项、P2 G1 status.md 瞬态豁免；对应 docs 与 SKILL 同步
+- **git worktree 派发隔离评估（DEV-149，DISPATCH-140，docs）**：评估结论 design-ready 但缓做——3 触发信号 + 6 设计要点 + G3 移除/出口 merge 校验替换方案；与 DISPATCH-139 P1/P2 为补充非替代；不改变当前派发行为，仅沉淀评估文档
+
+### Fixed
+- 更正 1.1.2 条目中「派发协议」段重复的 Changed 块（非行为变更，仅为清单去重说明）
+
 ## [1.1.2] - 2026-11-04
 
 ### Fixed
