@@ -1481,14 +1481,34 @@ export const SOURCE_FILES = ['todo', 'current', 'done']
  *   code: bad-type / bad-file / not-found
  */
 export async function readSource(o) {
-  const { projectPath, type, file } = o
+  const { projectPath, type, file, id } = o
   if (!TASK_TYPES.includes(type)) return { ok: false, code: 'bad-type' }
   if (!SOURCE_FILES.includes(file)) return { ok: false, code: 'bad-file' }
   const lay = await layoutOf(projectPath, type)
-  // DEV-127 目录式：桶的"源文件"视图 = 目录 README 检索索引（由 awf status 生成）
-  const absPath = lay.mode === 'dir'
-    ? join(lay[`${file}Dir`], 'README.md')
-    : join(projectPath, 'agent-workflow', 'tasks', type, `${file}.md`)
+  if (lay.mode === 'dir') {
+    // DEV-132：带任务 id 时读该任务单文件（点击已完成/当前任务 → 详情而不是整桶索引）；
+    // 不带 id 仍读桶 README 检索索引（查看整桶视图）
+    if (id != null && id !== '') {
+      if (!ID_RE.test(id)) return { ok: false, code: 'bad-id' }
+      const absPath = join(lay[`${file}Dir`], `${id}.md`)
+      let content
+      try {
+        content = await readFile(absPath, 'utf8')
+      } catch {
+        return { ok: false, code: 'not-found' }
+      }
+      return { ok: true, source: { type, file, id, absPath, content } }
+    }
+    const absPath = join(lay[`${file}Dir`], 'README.md')
+    let content
+    try {
+      content = await readFile(absPath, 'utf8')
+    } catch {
+      return { ok: false, code: 'not-found' }
+    }
+    return { ok: true, source: { type, file, absPath, content } }
+  }
+  const absPath = join(projectPath, 'agent-workflow', 'tasks', type, `${file}.md`)
   let content
   try {
     content = await readFile(absPath, 'utf8')

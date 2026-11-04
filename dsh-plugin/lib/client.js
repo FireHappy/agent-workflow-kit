@@ -973,9 +973,10 @@ window.__ModuleLoader__.load({
      * code='not-found'，由调用方映射「源文件接口未就绪」。
      */
     async function fetchSource(o) {
-      const { path, type, file, fetchImpl } = o || {}
-      const q = new URLSearchParams({ path: path || '', type: type || '', file: file || '' }).toString()
-      return getJson('/awf/source?' + q, fetchImpl)
+      const { path, type, file, id, fetchImpl } = o || {}
+      const q = new URLSearchParams({ path: path || '', type: type || '', file: file || '' })
+      if (id) q.set('id', id)
+      return getJson('/awf/source?' + q.toString(), fetchImpl)
     }
 
     /** 复制文本：优先 clipboard API，缺省（测试/非安全上下文）回退无操作并置 copied。 */
@@ -2481,7 +2482,7 @@ window.__ModuleLoader__.load({
         }
         setSource({ type: t, file: f, busy: true, data: null, copied: false, error: null, meta })
         try {
-          const res = await fetchSource({ path: selected, type: t, file: f })
+          const res = await fetchSource({ path: selected, type: t, file: f, id: (task && task.id) || undefined })
           const src = (res && res.source) || null
           if (!src || !src.content) {
             setSource({ type: t, file: f, busy: false, data: null, copied: false, error: '源文件为空或返回异常。', meta })

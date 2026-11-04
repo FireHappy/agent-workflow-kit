@@ -104,6 +104,12 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.3.1（DEV-132）**：点击任务图标改读「该任务单文件详情」，不再打开整桶 README 索引
+  - `GET /awf/source` 新增可选 `id` 查询参数：目录式账本下带 id 读 `tasks/<type>/<桶>/<ID>.md`（仅该任务内容，预览/编辑/拷贝路径均指向单文件），不带 id 仍返回桶 README 检索索引（查看整桶视图保留）
+  - 前端「最近完成 / 当前任务 / 待办」行点击源文件时自动携带任务 id（`fetchSource`/`openSource` 透传）；id 非法返回 400 bad-id，目录式 404 文案带 `tasks/<type>/<桶>/<ID>` 路径提示
+  - 旧形态（大文件）项目不受影响（id 忽略，语义保持）；测试 33/33 全绿（新增 2 个 DEV-132 用例）
+  - 读修复保持只读：目录式 writeSource 仍拒绝直写（编辑保存由账本状态机/awf 负责）
+
 - **0.3.0（DEV-127）**：看板账本目录式适配（tasks/<type>/{todo,current,done}/<ID>.md + README 检索索引）
   - 读路径 `ledgerOf` 目录式优先：current 桶任务文件 → 逐个块；todo 桶文件 → 验收 checkbox 进度 + ID/优先级/标题/登记日期；done 桶文件 → 块式归档（`parseDoneRows` 归档白名单加入 `done`——目录式归档任务文件的状态字段）；status.md 新鲜度按目录文件集 mtime 比较；旧形态大文件（todo.md/current.md/done.md）兼容回退，过渡期不坏
   - 写路径目录式：`startTask` 认领= todo/<ID>.md 状态改 active 后移入 current/；`returnTaskToTodo` 反向移回；`todoEdit` add/update/delete = 建/改/删任务文件；`deleteTask` 删除 = 移除 current/<ID>.md，撤销记录写 done/<ID>.md（任务文件形态）；`taskEdit` 编辑 current/<ID>.md

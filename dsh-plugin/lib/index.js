@@ -1566,6 +1566,7 @@ export function apply(ctx) {
         const path = queryOf(req).path
         const type = queryOf(req).type
         const file = queryOf(req).file
+        const id = (queryOf(req).id || '').trim()
         if (!(await isProjectRoot(path))) {
           writeError(res, 400, 'bad-request', 'path 必须是含 agent-workflow/project.yaml 的绝对项目根目录')
           return
@@ -1578,10 +1579,14 @@ export function apply(ctx) {
           writeError(res, 400, 'bad-request', `file 必须是 ${SOURCE_FILES.join('|')} 之一`)
           return
         }
-        const result = await readSource({ projectPath: path, type, file })
+        if (id !== '' && !/^[A-Z]+-[0-9]+$/.test(id)) {
+          writeError(res, 400, 'bad-id', `任务 id 应为 类型-数字，如 DEV-001：${id}`)
+          return
+        }
+        const result = await readSource({ projectPath: path, type, file, id: id || undefined })
         if (!result.ok) {
           if (result.code === 'not-found') {
-            writeError(res, 404, 'not-found', `账本文件不存在：tasks/${type}/${file}.md`)
+            writeError(res, 404, 'not-found', `账本文件不存在：tasks/${type}/${file}/${id || '<ID>'}（目录式）或 ${file}.md（旧形态）`)
           } else {
             writeError(res, 400, result.code || 'bad-request', '源文件参数非法')
           }

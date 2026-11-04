@@ -1,4 +1,47 @@
 
+// ---- DEV-132：readSource 带任务 id → 单任务文件详情（点已完成/当前任务不再开整桶索引） ----
+test('DEV-132 readSource dir：带 id 读单任务文件；不带 id 读桶 README', async () => {
+  const { mkdtemp } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { readSource } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-srcid-'))
+  try {
+    await dirFixture(root).write()
+    // 1) 带 id → 单任务文件详情
+    const one = await readSource({ projectPath: root, type: 'dev', file: 'done', id: 'DEV-302' })
+    assert.equal(one.ok, true)
+    assert.ok(one.source.absPath.endsWith('/tasks/dev/done/DEV-302.md'))
+    assert.equal(one.source.id, 'DEV-302')
+    assert.match(one.source.content, /## \[DEV-302\] 目录式已完成/)
+    assert.equal(one.source.content.includes('README'), false)
+    // 2) 不带 id → 桶 README 检索索引（保留整桶视图能力）
+    const idx = await readSource({ projectPath: root, type: 'dev', file: 'done' })
+    assert.ok(idx.source.absPath.endsWith('/tasks/dev/done/README.md'))
+    assert.match(idx.source.content, /^# done 索引/)
+    // 3) 缺文件 → not-found；非法 id → bad-id
+    const miss = await readSource({ projectPath: root, type: 'dev', file: 'done', id: 'DEV-999' })
+    assert.equal(miss.ok, false); assert.equal(miss.code, 'not-found')
+    const bad = await readSource({ projectPath: root, type: 'dev', file: 'done', id: 'x' })
+    assert.equal(bad.ok, false); assert.equal(bad.code, 'bad-id')
+    // 4) current 桶同样按 id 读单文件；todo 桶同理
+    const cur = await readSource({ projectPath: root, type: 'dev', file: 'current', id: 'DEV-301' })
+    assert.ok(cur.source.absPath.endsWith('/tasks/dev/current/DEV-301.md'))
+    const td = await readSource({ projectPath: root, type: 'dev', file: 'todo', id: 'DEV-300' })
+    assert.ok(td.source.absPath.endsWith('/tasks/dev/todo/DEV-300.md'))
+  } finally {
+    await (await import('node:fs/promises')).rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEV-132 readSource legacy：id 被忽略（旧大文件语义保持）', async () => {
+  const { readSource } = await import('../src/ledger.js')
+  const root = '/no/such/legacy/project-' + Date.now()
+  const r = await readSource({ projectPath: root, type: 'dev', file: 'done', id: 'DEV-999' })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'not-found')
+})
+
 // ---- DEV-127：目录式账本（tasks/<type>/{todo,current,done}/<ID>.md + README 索引） ----
 
 const DIR_FIXTURE = {
