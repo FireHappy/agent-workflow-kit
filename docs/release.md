@@ -2,7 +2,7 @@
 
 > 本文是**本仓库的具体发版方案**，不是通用模板。
 > 通用流程见 `templates/workflows/release.md`；各项目按自身版本管理方案落地。
-> 版本号：`VERSION`（单行 SemVer）· 变更记录：`CHANGELOG.md` · tag 前缀：`v`。
+> 版本号锚点：`project.yaml` 的 `version_file`（本仓库默认 `VERSION` 单行 SemVer）· 变更记录：`CHANGELOG.md` · tag 前缀：`v`。
 
 ## 0. 发版前先确认：本项目用哪套版本管理
 
@@ -49,7 +49,7 @@ git tag --list 'v*' --sort=-v:refname | head # 上一个版本
 同时确认：
 
 - [ ] `CHANGELOG.md` 已写本次版本条目（`[Unreleased]` 移到 `[X.Y.Z] - YYYY-MM-DD`）
-- [ ] `VERSION` 与 CHANGELOG 标题版本一致
+- [ ] 版本锚点（`version_file`，默认 `VERSION`）与 CHANGELOG 标题版本一致
 - [ ] 入口 `AGENTS.md` digest 与 `project.yaml` 一致
 - [ ] 生成副本无漂移（`bin/awf`、`bin/awf-dispatch`、`templates/` ↔ `agent-workflow/`；`check` 兜底，有漂移先同步或 `init . --force` 有意刷新）
 - [ ] demo01 / demo02 等下游项目是否需要同步升级（见 §5）
@@ -97,7 +97,7 @@ printf '0.2.2\n' > VERSION
 0. **先检测生成副本漂移**（`bin/awf`、`bin/awf-dispatch`、`templates/` ↔ `agent-workflow/`）：有漂移立即拒绝，不做任何覆盖——防止 `init . --force` 静默回滚 agent-workflow 侧的工作流改动（本地对 agent-workflow 侧改过内容时，先手工决定同步或有意刷新）；
 1. `./bin/awf init . --force --no-register` 刷新生成副本（无漂移时才执行），再 `bootstrap` 刷新 `AGENTS.md` digest；
 2. 在 `agent-workflow/tasks/dev/current.md` 写入 `[DEV-XXX] release-prep <版本>` 块（自动取下一个可用 ID），校验通过后归档到 `done.md`；
-3. 把 `VERSION` 改为 `<X.Y.Z>`；把 `CHANGELOG.md` 顶部的 `## [Unreleased]` 改为 `## [<X.Y.Z>] - 今天`（没有 Unreleased 时提示手动处理）；
+3. 把**版本锚点**（`agent-workflow/project.yaml` 的 `version_file`，本仓库默认根 `VERSION`）改为 `<X.Y.Z>`；把 `CHANGELOG.md` 顶部的 `## [Unreleased]` 改为 `## [<X.Y.Z>] - 今天`（没有 Unreleased 时提示手动处理）；
 4. 跑 `./agent-workflow/check_workflow.sh` 与 `bash test/smoke.sh`，任一失败即停（账本留在 `current.md`）；
 5. 跑 `./agent-workflow/bin/awf status` 刷新 `status.md`；
 6. 打印下一步的 `git add -A && git commit … && git tag -a v<X.Y.Z> … && git push …` 命令与建议 commit 消息。
@@ -109,6 +109,8 @@ printf '0.2.2\n' > VERSION
 - 不替代 §2 的人工确认（下游项目、tag 风格、发布范围等）。
 
 建议流程：先补好 `CHANGELOG.md` 的 `[Unreleased]` 内容 → 运行 `release-prep` → 检查 `git diff` 与账本 → 按输出命令由人执行 commit/tag/push。
+
+> **锚点位置（DEV-145）**：版本锚点文件由 `agent-workflow/project.yaml` 的 `version_file` 决定（默认根 `VERSION`），release-prep / upgrade 都读它。锚点**不得放进 clang 头文件搜索路径**（如 `-I"."`、Unity IL2CPP 的 Bee）：macOS 大小写不敏感 FS 上根 `VERSION` 与 C++ 标准库头 `<version>` 撞名，`#include <version>` 会解析到该文本文件报 `expected unqualified-id` 并级联误报（Linux/CI 不触发）。Unity / C++ 项目把 `version_file` 指向 `agent-workflow/VERSION` 等安全路径。
 
 ## 4. 提交与打 tag
 

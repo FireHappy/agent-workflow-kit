@@ -113,6 +113,7 @@ git tag --list --sort=-v:refname
   - `patch`：向后兼容的缺陷修复
 - 版本号只有一个落点（monorepo 例外：每个受影响包的落点都要改齐，版本保持一致）
 - 若语言生态有原生版本字段（`package.json` / `Cargo.toml` / `pom.xml` / `gradle.properties`），把 `version_file` 指向它，**只改一处**，避免多处手改漂移
+- **锚点位置（重要，DEV-145）**：`version_file` 指向的文件**不得放进 C/C++ 编译器的头文件搜索路径**（如 `-I"."`、Unity IL2CPP 的 Bee clang）。macOS 大小写不敏感文件系统上，仓库根 `VERSION` 文本文件会与 C++ 标准库头 `<version>` 撞名，`#include <version>` 被解析成该文本文件，报 `expected unqualified-id` 并级联大量误报（Linux/CI 大小写敏感不触发）。Unity / C++ 项目应把 `version_file` 指向 `agent-workflow/VERSION` 之类不在头文件搜索路径内的位置
 - 版本号变更要能单独审阅，不要夹带无关改动
 - 计划 tag 名与版本号一致；重名处理见 Step 5（同版本内、本地未推送才允许移动；否则升版本）
 

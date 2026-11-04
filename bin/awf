@@ -69,6 +69,21 @@ project_role() {
   fi
 }
 
+# 版本锚点路径（DEV-076 方案 B / DEV-145）：读目标 project.yaml 的 version_file，
+# 默认仓库根 VERSION（未配置的项目行为不变，向后兼容）。
+# 锚点必须放在 clang 头文件搜索路径（如 Bee 的 -I"."）之外；否则在 macOS 大小写
+# 不敏感 FS 上会与 C++ 标准库头 <version> 撞名，导致 Unity IL2CPP 全量编译失败
+# （#include <version> 被解析成该文本文件，报 expected unqualified-id）。
+project_version_file() {
+  local y="$1/agent-workflow/project.yaml" vf
+  if [ -f "$y" ]; then
+    vf="$(yaml_get version_file "$y")"
+  fi
+  if [ -n "$vf" ]; then printf '%s\n' "$1/$vf"
+  else printf '%s\n' "$1/VERSION"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 awf — agent workflow framework
@@ -116,7 +131,8 @@ awf — agent workflow framework
   awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
       一键发版装配：先检测生成副本漂移（bin/awf / bin/awf-dispatch /
       templates/ ↔ agent-workflow/），有漂移即拒绝覆盖；无漂移才刷新生成副本
-      与 AGENTS 入口、写账本、改 VERSION/CHANGELOG、跑校验并归档；
+      与 AGENTS 入口、写账本、改版本锚点（project.yaml 的 version_file，默认根 VERSION）/
+      CHANGELOG、跑校验并归档；
       只打印下一步 git 命令，不自动 commit/tag/push。
 
   awf upgrade [目录] [--dry-run] [--force]
@@ -1265,7 +1281,7 @@ release_usage() {
   0. 检查生成副本漂移（bin/awf / bin/awf-dispatch / templates/ ↔ agent-workflow/），有漂移即拒绝
   1. ./bin/awf init . --force --no-register + bootstrap 刷新生成副本与 AGENTS 入口
   2. 在 agent-workflow/tasks/dev/current/ 写入 release-prep 任务文件（release_write_current）
-  3. 改 VERSION；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
+  3. 改版本锚点（project.yaml 的 version_file 指向的文件，默认根 VERSION）；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
   4. 跑 ./agent-workflow/check_workflow.sh 与 bash test/smoke.sh
   5. ./agent-workflow/bin/awf status 刷新 status.md，并把任务文件归档到 dev/done/（状态 done + 完成日期）
   6. 打印下一步 git add/commit/tag/push 命令与建议 commit 消息
@@ -1332,7 +1348,7 @@ release_write_current() {
     printf '| Owner | agent |\n'
     printf '| 协作模式 | single |\n'
     printf '| 来源任务 | 用户直接触发 |\n'
-    printf '| 修改范围 | VERSION / CHANGELOG.md / 生成副本 / 账本 |\n'
+    printf '| 修改范围 | 版本锚点（project.yaml 的 version_file，默认根 VERSION）/ CHANGELOG.md / 生成副本 / 账本 |\n'
     printf '| 分支/工作区 | N/A |\n'
     printf '| 依赖 | 无 |\n'
     printf '| 最近更新 | %s |\n\n' "$(today)"
@@ -1423,6 +1439,11 @@ cmd_release_prep() {
     TASK_ID="$(release_next_dev_id)"
   fi
 
+  # 版本锚点路径在 dry-run 与执行两处共用（DEV-145）：读 project.yaml 的 version_file，
+  # 默认仓库根 VERSION；锚点不得放进 clang 头文件搜索路径（macOS IL2CPP 撞名，见 project_version_file）
+  local VF
+  VF="$(project_version_file "$ROOT")"
+
   if [ "$dry_run" -eq 1 ]; then
     say "[dry-run] cd $ROOT"
     say "[dry-run] 检查生成副本漂移（bin/awf / bin/awf-dispatch / templates/ ↔ agent-workflow/，有漂移即拒绝）"
@@ -1433,7 +1454,7 @@ cmd_release_prep() {
     else
       say "[dry-run] 账本：写 $ROOT/agent-workflow/tasks/dev/current/$TASK_ID.md [${TASK_ID}] release-prep ${version}，校验后归档到 dev/done/"
     fi
-    say "[dry-run] 写 VERSION=$version"
+    say "[dry-run] 写版本锚点 ${VF} = ${version}（路径 = project.yaml 的 version_file，默认仓库根 VERSION）"
     if [ -f "$ROOT/CHANGELOG.md" ] && grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
       say "[dry-run] CHANGELOG: ## [Unreleased] → ## [$version] - $(today)"
     else
@@ -1474,8 +1495,9 @@ cmd_release_prep() {
   if [ ! -f "$ROOT/CHANGELOG.md" ]; then
     die "缺少 CHANGELOG.md，无法更新版本条目（请手动补）"
   fi
-  printf '%s\n' "$version" > "$ROOT/VERSION"
-  say "已写 VERSION=$version"
+  mkdir -p "$(dirname "$VF")"
+  printf '%s\n' "$version" > "$VF"
+  say "已写版本锚点 ${VF}=$version"
   if grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
     awfk -v ver="$version" -v day="$(today)" '
       !done && /^## \[Unreleased\]/ {
@@ -1622,9 +1644,14 @@ cmd_upgrade() {
     fi
   fi
 
+  # 版本锚点路径在 dry-run 与执行两处共用（DEV-145）：读目标 project.yaml 的 version_file，
+  # 默认仓库根 VERSION；锚点不得放进 clang 头文件搜索路径（macOS IL2CPP 撞名，见 project_version_file）
+  local VF
+  VF="$(project_version_file "$target")"
+
   if [ "$dry_run" -eq 1 ]; then
     say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
-    [ -f "$KIT_DIR/VERSION" ] && say "  将写版本锚点 $target/VERSION = $(cat "$KIT_DIR/VERSION")（对外发布版）"
+    [ -f "$KIT_DIR/VERSION" ] && say "  将写版本锚点 $VF = $(cat "$KIT_DIR/VERSION")（对外发布版；路径 = 目标 project.yaml 的 version_file）"
     say "  将运行：$awf_dir/bin/awf bootstrap（刷新 AGENTS.md 入口）"
     say "  将运行：$awf_dir/bin/awf check（校验；退出码 = 失败项数量）"
     return 0
@@ -1634,12 +1661,14 @@ cmd_upgrade() {
   say "保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
   say ""
 
-  # DEV-133：版本锚点——把 kit 的对外发布版（VERSION 文件）同步到项目根；看板按它显示 v1.0.0 这类具体版本
+  # DEV-133/DEV-145：版本锚点——把 kit 的对外发布版（VERSION 文件）同步到目标的 version_file 路径；
+  # 看板按它显示 v1.0.0 这类具体版本。路径读目标 project.yaml 的 version_file（默认仓库根 VERSION），
+  # 避免在 macOS 大小写不敏感 FS 上把锚点放进 clang 头文件搜索路径（-I"."）导致 IL2CPP 编译撞名。
   local cur_ver=""
-  [ -f "$target/VERSION" ] && cur_ver="$(cat "$target/VERSION")"
+  [ -f "$VF" ] && cur_ver="$(cat "$VF")"
   if [ -f "$KIT_DIR/VERSION" ] && [ "$cur_ver" != "$(cat "$KIT_DIR/VERSION")" ]; then
-    cp "$KIT_DIR/VERSION" "$target/VERSION"
-    say "已写版本锚点 ${target}/VERSION = $(cat "$KIT_DIR/VERSION")"
+    cp "$KIT_DIR/VERSION" "$VF"
+    say "已写版本锚点 ${VF} = $(cat "$KIT_DIR/VERSION")"
   fi
 
   ( cd "$target" && "$awf_dir/bin/awf" bootstrap ) || die "bootstrap 失败：$target"

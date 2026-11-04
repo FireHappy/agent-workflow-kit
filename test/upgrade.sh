@@ -197,7 +197,24 @@ cmp -s "$PA/agent-workflow/check_workflow.sh" \
   || fail "C --force 后 check_workflow.sh 非标准入口"
 ok "C --force 覆盖为标准兼容入口"
 
-# ---------- D. 边界：非项目目标拒绝 / 项目内副本拒绝 / help 可读 ----------
+# ---------- E. 版本锚点 version_file 定向（DEV-145）：upgrade 锚点写 version_file 路径 ----------
+PE="$WORK/projE"
+"$AWF" init "$PE" --name "锚点定向" --no-register >/dev/null || fail "E init projE 失败"
+sed -i '' 's|^version_file: VERSION$|version_file: agent-workflow/VERSION|' "$PE/agent-workflow/project.yaml" \
+  || sed -i 's|^version_file: VERSION$|version_file: agent-workflow/VERSION|' "$PE/agent-workflow/project.yaml"
+grep -q '^version_file: agent-workflow/VERSION$' "$PE/agent-workflow/project.yaml" \
+  || fail "E project.yaml 未写入 version_file 定向"
+printf '9.9.9\n' > "$PE/VERSION"   # 根 VERSION 旧值：不应被 upgrade 改写
+dry_e="$("$AWF" upgrade "$PE" --dry-run)"
+grep -q '版本锚点' <<<"$dry_e" || fail "E dry-run 未打印版本锚点文案：$dry_e"
+grep -q 'agent-workflow/VERSION' <<<"$dry_e" || fail "E dry-run 未按 version_file 显示锚点路径：$dry_e"
+"$AWF" upgrade "$PE" >/dev/null 2>&1 || fail "E upgrade 失败"
+[ "$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)" = "$(cat "$KIT/VERSION")" ] \
+  || fail "E 锚点未写到 version_file 路径（agent-workflow/VERSION=[$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)]，kit=[$(cat "$KIT/VERSION")]）"
+[ "$(cat "$PE/VERSION")" = "9.9.9" ] || fail "E 根 VERSION 被 upgrade 误改写：$(cat "$PE/VERSION")"
+ok "E upgrade 版本锚点写 project.yaml 的 version_file（根 VERSION 不动）"
+
+# 边界：非项目目标拒绝 / 项目内副本拒绝 / help 可读
 mkdir -p "$WORK/notproj"
 if ( cd "$WORK" && "$AWF" upgrade "$WORK/notproj" >/dev/null 2>&1 ); then
   fail "D 非 agent-workflow 目标应被拒绝"

@@ -234,6 +234,24 @@ else
   bad "release-prep 重复执行产生了重复账本"
 fi
 
+# 版本锚点 version_file 定向（DEV-145）：锚点写 project.yaml 的 version_file，默认根 VERSION 兼容
+REL_VF="$TMP/release-vf"
+make_release_fixture "$REL_VF"
+printf 'id: release-vf\nversion_file: agent-workflow/VERSION\n' > "$REL_VF/agent-workflow/project.yaml"
+vf_dry="$("$PROJ/agent-workflow/bin/awf" release-prep --root "$REL_VF" 0.6.0 --dry-run 2>&1)"
+if printf '%s\n' "$vf_dry" | grep -q '版本锚点' && printf '%s\n' "$vf_dry" | grep -q 'agent-workflow/VERSION'; then
+  ok "release-prep --dry-run 显示 version_file 锚点路径"
+else
+  bad "release-prep --dry-run 未显示 version_file 锚点路径：$vf_dry"
+fi
+if "$PROJ/agent-workflow/bin/awf" release-prep --root "$REL_VF" 0.6.0 >/dev/null 2>&1 \
+  && [ "$(cat "$REL_VF/agent-workflow/VERSION" 2>/dev/null)" = "0.6.0" ] \
+  && [ "$(cat "$REL_VF/VERSION")" = "0.0.1" ]; then
+  ok "release-prep 写 version_file 指向的锚点（根 VERSION 不动）"
+else
+  bad "release-prep 未按 version_file 写锚点（agent-workflow/VERSION=[$(cat "$REL_VF/agent-workflow/VERSION" 2>/dev/null)]，根=[$(cat "$REL_VF/VERSION")]）"
+fi
+
 # 没有 Unreleased 且没有目标版本：提示手动，不报错
 printf '# Changelog\n' > "$REL/CHANGELOG.md"
 manual_out="$("$PROJ/agent-workflow/bin/awf" release-prep --root "$REL" 0.4.3 2>&1)"
