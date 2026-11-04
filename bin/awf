@@ -49,6 +49,20 @@ yaml_get() {
   sed -n "s/^${key}:[[:space:]]*//p" "$file" | head -n 1 | sed 's/[[:space:]]*$//'
 }
 
+# worker 名牌（DEV-118）：读项目 project.yaml 的 role 字段（一句话自述）；
+# 缺省回退到 name，再缺省输出 `-`。只读，不改索引（yaml 为单一事实源）。
+project_role() {
+  local y="$1/agent-workflow/project.yaml" r n
+  if [ -f "$y" ]; then
+    r="$(yaml_get role "$y")"
+    n="$(yaml_get name "$y")"
+  fi
+  if [ -n "$r" ]; then printf '%s\n' "$r"
+  elif [ -n "$n" ]; then printf '%s\n' "$n"
+  else printf '%s\n' '-'
+  fi
+}
+
 usage() {
   cat <<'EOF'
 awf — agent workflow framework
@@ -85,10 +99,11 @@ awf — agent workflow framework
       把当前项目登记到全局索引（~/.agents/projects.tsv 与 AGENTS.md）。
 
   awf projects
-      打印已登记的项目（别名 → 路径）。
+      打印已登记的项目（别名 → 路径 → 角色；角色来自各项目 project.yaml 的
+      role 字段即 worker 名牌，缺省回退到 name）。
 
   awf find <别名|ID>
-      按别名或 ID 查找项目路径。
+      按别名或 ID 查找项目路径；输出 `id\t路径\t角色`（角色缺省回退 name）。
 
   awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
       一键发版装配：先检测生成副本漂移（bin/awf / bin/awf-dispatch /
@@ -1646,7 +1661,7 @@ is_registered() {
 }
 
 cmd_register() {
-  local root
+  local root role
   root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
   cd "$root"
   load_project "agent-workflow/project.yaml"
@@ -1654,15 +1669,24 @@ cmd_register() {
   write_registration
   say "已登记：$P_ID → $root"
   say "全局索引：$REGISTRY_INDEX"
+  role="$(yaml_get role "agent-workflow/project.yaml")"
+  if [ -n "$role" ]; then
+    say "已登记 worker 名牌：$role"
+  else
+    say "提示：可在此项目 project.yaml 添加 role 字段作为 worker 名牌（一句话自述；router 检索工作群时可见）"
+  fi
 }
 
 cmd_projects() {
   [ -f "$REGISTRY" ] || die "尚未登记任何项目（在项目内运行 ./agent-workflow/bin/awf register）"
-  printf '| 项目ID | 别名 | 路径 |\n|--------|------|------|\n'
+  printf '| 项目ID | 别名 | 路径 | 角色 |\n|--------|------|------|------|\n'
+  local rid ralias rpath rentry rp role
   while IFS='|' read -r rid ralias rpath rentry; do
     [ -n "$(trim "$rid")" ] || continue
     case "$(trim "$rid")" in \#*) continue ;; esac
-    printf '| %s | %s | %s |\n' "$(trim "$rid")" "$(trim "$ralias")" "$(trim "$rpath")"
+    rp="$(trim "$rpath")"
+    role="$(project_role "$rp")"
+    printf '| %s | %s | %s | %s |\n' "$(trim "$rid")" "$(trim "$ralias")" "$rp" "$role"
   done < "$REGISTRY"
 }
 
@@ -1676,10 +1700,15 @@ cmd_find() {
     say "未找到：$q"
     return 1
   fi
-  printf '%s\n' "$hits" | awfk -F'|' '
-    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
-    { printf "%s\t%s\n", trim($1), trim($3) }
-  '
+  # 输出 `id\t路径\t角色`：role 读目标项目 project.yaml（yaml 为单一事实源，
+  # 手动加 role 立即生效，无需 re-register）；缺省回退 name，再缺省 `-`。
+  local rid ralias rpath rentry role
+  printf '%s\n' "$hits" | while IFS='|' read -r rid ralias rpath rentry; do
+    rid="$(trim "$rid")"
+    [ -n "$rid" ] || continue
+    role="$(project_role "$(trim "$rpath")")"
+    printf '%s\t%s\t%s\n' "$rid" "$(trim "$rpath")" "$role"
+  done
 }
 
 # ---------------------------------------------------------------- main

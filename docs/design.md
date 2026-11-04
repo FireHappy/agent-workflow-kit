@@ -118,6 +118,17 @@ FAIL「禁止转派：……派发深度 = 1，接收者保持 worker 只执行�
 
 机制上没有「转包链」：任何被派发节点出手再派发，都会在派发器这一关被截断。
 
+## worker 名牌（role）
+
+worker/router 对偶模型下，每个已登记项目是网络中的一个 worker；寻址（id / aliases / 路径）已通，但 router 检索工作群时看不到「这个 worker 是干嘛的」。DEV-118 引入可选的 **role** 字段作为 worker 名牌（一句话自述）：
+
+- **怎么填**：在项目 `agent-workflow/project.yaml` 加一行 `role: <一句话：这个 worker 主要承担什么>`；由各项目自己注册（`awf register` 即完成名牌登记，无需改索引）。
+- **单一事实源**：role 只存在 yaml，不改 `~/.agents/projects.tsv` 列结构——索引只放指针，避免索引漂移（role 改了不用 re-register，寻址时实时读 yaml）。
+- **怎么带出**：`awf find <别名|ID>` 输出 `id\t路径\t角色`；`awf projects` 表格含「角色」列；两者 role 缺省回退到 `name`，再缺省输出 `-`，向后兼容。
+- **register 提示**：登记时无 role 输出填写提示，有 role 输出「已登记 worker 名牌」。
+- **router 怎么用**：检索工作群（`awf find` / `awf projects`）时角色说明随行带出，路由决策更精准；**权限（ACL / scopes 校验 / actions 白名单）本轮明确不做**，role 只是可读名牌，无校验语义。
+- **派发票据**：票据头「目标项目：<别名>（<绝对路径>）」仍是唯一目标来源；「目标 worker：<别名>」别名寻址与路径语义会引入第二条寻址线，影响面大，本轮只做文档说明不强改解析——需要角色信息时在寻址侧（find/projects）带出即可。
+
 ## 版本
 
 `VERSION` 是技能版本；入口区块记录 `v<version>`。升级项目是一等操作：`awf upgrade <目录>` 复制框架文件 → `bootstrap` 刷新入口 → `check` 校验，保留 `project.yaml` / `tasks/**` / `memory/**` / `tools/**`；步骤与验收见 `docs/upgrade.md`。

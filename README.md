@@ -79,7 +79,7 @@ cd ~/Documents/GitHub/agent-workflow-kit
 
 当任务目标在另一个仓库时，先检查目标是否有工作流、是否已登记为当前 harness 的工作区；都满足后，优先在**目标工作区的会话**中执行，而不是默认 headless。
 
-派发遵循**激活式 router** 协议：路由能力只在直接面对**用户原始请求**的节点临时激活（任务票据头部带「来源：用户 | 工作流」标记，缺省=用户，向后兼容）；派发深度 = 1——收到「来源：工作流」任务的节点保持 worker、**禁止转派**，`awf-dispatch` 对工作流来源票据的二次派发直接拒绝（退出码 2）。设计权衡与「激活派发 / 转派被拒」两段示意见 [docs/design.md](docs/design.md)「激活式 Router」，票据来源字段与派发器校验见 [docs/dispatch.md](docs/dispatch.md)「任务票据来源」。`templates/AGENTS.md.tmpl` 任务路由段与生成的 `agent-workflow/workflows/cross-project.md` 已内置同一规则。
+派发遵循**激活式 router** 协议：路由能力只在直接面对**用户原始请求**的节点临时激活（任务票据头部带「来源：用户 | 工作流」标记，缺省=用户，向后兼容）；派发深度 = 1——收到「来源：工作流」任务的节点保持 worker、**禁止转派**，`awf-dispatch` 对工作流来源票据的二次派发直接拒绝（退出码 2）。每个 worker 可在项目 `project.yaml` 填 `role` 作**名牌**（一句话自述，`awf find` / `awf projects` 检索时带出；缺省回退 name），router 检索工作群时可见。设计权衡与「激活派发 / 转派被拒」两段示意见 [docs/design.md](docs/design.md)「激活式 Router」，名牌说明见同文「worker 名牌（role）」，票据来源字段与派发器校验见 [docs/dispatch.md](docs/dispatch.md)「任务票据来源」。`templates/AGENTS.md.tmpl` 任务路由段与生成的 `agent-workflow/workflows/cross-project.md` 已内置同一规则。
 
 ```bash
 ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>

@@ -2040,5 +2040,40 @@ else
   bad "DEV-117 install-hooks --uninstall 卸载失败"
 fi
 
+# 23. DEV-118：worker 名牌（role 自述 + find/projects/register 带出）
+# init 项目 yaml 有空的 role: 行（模板默认）→ find 回退 name，不报错，输出三列
+if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 ) 2>&1 \
+   | grep -Eq '^[^	]+	[^	]+	[^	]+$'; then
+  ok "DEV-118 find 输出三列（id/路径/role），role 缺省不报错"
+else
+  bad "DEV-118 find 输出未达三列或缺省 role 报错"
+fi
+if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 2>&1 | grep -q '冒烟项目' ); then
+  ok "DEV-118 find 缺省 role 回退到 name（冒烟项目）"
+else
+  bad "DEV-118 find 缺省 role 未回退到 name"
+fi
+# 手动填 role（替换模板空 role 行，不 re-register）→ find 立即带出
+sed -i '' 's|^role: *$|role: 生成脚手架与校验工作流|' "$PROJ/agent-workflow/project.yaml" 2>/dev/null \
+  || sed -i 's|^role: *$|role: 生成脚手架与校验工作流|' "$PROJ/agent-workflow/project.yaml"
+if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 | grep -q '生成脚手架与校验工作流' ); then
+  ok "DEV-118 手动加 role 后 find 立即带出（无需 re-register）"
+else
+  bad "DEV-118 find 未带出手动加的 role"
+fi
+# projects 表格含角色列并带出 role
+if ( cd "$PROJ" && ./agent-workflow/bin/awf projects | grep -q '角色' ) \
+   && ( cd "$PROJ" && ./agent-workflow/bin/awf projects | grep -q '生成脚手架与校验工作流' ); then
+  ok "DEV-118 projects 表格含「角色」列并带出 role"
+else
+  bad "DEV-118 projects 表格缺角色列/role"
+fi
+# register：有 role → 已登记 worker 名牌提示
+if ( cd "$PROJ" && ./agent-workflow/bin/awf register 2>&1 | grep -q '已登记 worker 名牌' ); then
+  ok "DEV-118 register 对已有 role 项目提示已登记名牌"
+else
+  bad "DEV-118 register 名牌提示缺失"
+fi
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

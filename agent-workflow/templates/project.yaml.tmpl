@@ -1,0 +1,36 @@
+# agent-workflow 项目事实（唯一输入）
+#
+# 改完这里运行：./agent-workflow/bin/awf bootstrap
+# 说明：只使用扁平 `key: value`，列表字段写成逗号分隔的单行字符串，
+#       这样无需 YAML 解析器也能被 awf 与任意 shell 稳定读取。
+
+version: {{VERSION}}
+id: {{ID}}
+name: {{NAME}}
+purpose: {{PURPOSE}}
+aliases: {{ALIASES}}
+stack: {{STACK}}
+
+# worker 名牌：一句话自述（router 检索工作群时可见；可选，不填则 awf find/projects 回退到 name）
+# 例：role: 负责生成/校验 agent 工作流脚手架，管理任务账本
+role: 
+
+# 校验命令（留空表示暂未配置）
+gate: {{GATE}}
+compile: {{COMPILE}}
+test: {{TEST}}
+
+# 并行切分：格式为 “名称(路径), 名称(路径)”
+scopes: {{SCOPES}}
+
+# 并行时任何单元都不许同时修改的文件或目录
+serialized: {{SERIALIZED}}
+
+# 发版落点（可选键：不写某个键即回退到默认值；流程见 agent-workflow/workflows/release.md）
+# version_file: 版本号所在文件，单行 semver；默认 VERSION。
+#               语言生态有原生版本字段（package.json / pyproject.toml / Cargo.toml）时指向它，只改一处。
+# changelog:    变更记录文件；默认 CHANGELOG.md。
+# tag_prefix:   发版 tag 前缀；默认 v（tag 形如 v1.2.3）。
+version_file: VERSION
+changelog: CHANGELOG.md
+tag_prefix: v
