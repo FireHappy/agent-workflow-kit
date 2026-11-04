@@ -7,14 +7,18 @@
   G3 目标没有已跟踪改动 / 其他 active 任务
   G4 DSH GUI 与会话通道可用
 
-全过时默认复用目标工作区里「项目 + 模块」对应的常驻会话（标题 `[awf] <项目名> · <模块名>`）；
-会话正在运行时先等它空闲再发送，没有可用会话时才新建。随后发送任务并立即返回
+全过时默认复用目标工作区里「目标项目」对应的常驻会话（标题 `[awf] <目标项目>`——
+目标 worker 承接派发任务的会话）；
+选中的会话正在运行时进入**等待队列**（默认最多等 60s，`--queue-timeout` 可调；
+回合结束等待仍走 --wait/--timeout），超时才报队列超时，不再立即失败；
+没有可用会话时才新建。随后发送任务并立即返回
 （默认异步，不等待回合）。需要本回合结果时加 --wait；需要隔离/调试时加 --new；
 也可以用 --session <id> 直接续跑某个指定会话。会话留在 GUI 里，用户可以继续提细节。
-旧格式（无 [awf] 标记）会话默认不再自动迁移，避免误吞用户自建会话；确认要迁移时
-加 --allow-legacy-reuse（有派发任务包标记的旧会话仍会自动迁移）。
+旧格式（无 [awf] 标记）会话默认不再自动迁移，避免误吞用户
+自建会话；确认要迁移时加 --allow-legacy-reuse（有派发任务包标记的旧会话仍会自动迁移）。
 
-模块来源：`--module` > 票据「模块：」行 > 默认「通用」；不同模块各自一个会话，不串上下文。
+模块来源：`--module` > 票据「模块：」行 > 默认「通用」；模块只影响票据分类展示，
+会话标题统一为 `[awf] <目标项目>`（同项目一个常驻会话；繁忙时排队等待）。
 
 用法：
   ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
@@ -68,9 +72,14 @@ DEFAULT_WAIT = False
 DEFAULT_REUSE = True
 # 上下文压力只作提示：达到该值提醒可考虑 --new，但不自动切换会话。
 PRESSURE_HINT_LIMIT = 0.9
-# 选中的会话正在运行时，默认最多等它空闲这么多秒再发送。
+# 兼容保留：DEV-126 起会话繁忙的队列等待由 DEFAULT_QUEUE_TIMEOUT 控制；本常量仅保留解析/校验。
 DEFAULT_IDLE_WAIT = 300
+# DEV-126：会话命名简化为 [awf] <目标项目>（"派发者" = 承接派发任务的 worker 名）。
+# 前缀保持 [awf]（DEV-126 澄清）；标题简化为 [awf] <目标项目>，模块不再进标题。
 AWF_TITLE_PREFIX = "[awf]"
+# 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
+# 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
+DEFAULT_QUEUE_TIMEOUT = 60
 SESSION_TITLE_LIMIT = 40
 # 票据没写「模块：」、命令行也没给 --module 时的默认模块。
 MODULE_DEFAULT = "通用"
@@ -191,11 +200,11 @@ def task_type(text: str) -> str:
     return "dev"
 
 
-def awf_session_title(project: str, module: str,
+def awf_session_title(project: str, module: str = "",
                       limit: int = SESSION_TITLE_LIMIT) -> str:
-    """会话标题约定：`[awf] <项目名> · <模块名>`；模块为空时用「通用」。"""
-    label = clean_title(module, limit=limit) if (module or "").strip() else MODULE_DEFAULT
-    return f"{AWF_TITLE_PREFIX} {project} · {label or MODULE_DEFAULT}"
+    """会话标题约定（DEV-126）：`[awf] <目标项目>`——目标 worker 承接派发任务的
+    常驻会话；模块不再进标题（简洁优先），module 形参保留供复用键/迁移兼容。"""
+    return f"{AWF_TITLE_PREFIX} {clean_title(project, limit=limit) or project}"
 
 
 def ticket_module(text: str) -> str:
@@ -649,7 +658,7 @@ def _reuse_rank(row: dict):
 
 def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
                          legacy_probe=None):
-    """按「同 cwd + 标题等于 `[awf] <项目> · <模块>`」复用；没有候选返回 None。
+    """按「同 cwd + 标题等于 `[awf] <目标项目>`」复用；没有候选返回 None。
 
     复用键是「项目 + 模块」：
     - 精确命中规范标题的会话优先；多个时先选空闲的，再取 updatedAt 最新；
@@ -1377,7 +1386,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     api = state["api"]
     workspace = state["workspace"]
 
-    # 会话标题约定：`[awf] <项目名> · <模块名>`；模块来自 --module / 票据「模块：」/ 默认「通用」。
+    # 会话标题约定（DEV-126）：`[awf] <目标项目>`；模块只影响展示/票据分类（--module 已解析）。
     module = resolve_module(text, args.module)
     session_name = args.title or awf_session_title(target.name, module)
     # G4 探针已在 preflight 拉过 session/list，这里直接复用，避免重复调用。
@@ -1449,11 +1458,11 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             )
         if row.get("running") is not False:
             emit(
-                f"目标会话 {session_id} 正在运行，等待空闲（最多 {args.idle_wait}s；"
-                "--idle-wait 可调）",
+                f"目标会话 {session_id} 正在运行，进入等待队列（最多 {args.queue_timeout}s；"
+                "--queue-timeout 可调）",
                 args.json,
             )
-            outcome = wait_for_idle(api, session_id, args.idle_wait, args.json)
+            outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json)
             if outcome is SESSION_GONE:
                 raise DispatchError(
                     f"等待期间会话消失或被归档：{session_id}；"
@@ -1461,8 +1470,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                 )
             if outcome is None:
                 raise DispatchError(
-                    f"等待会话 {session_id} 空闲超时（>{args.idle_wait}s）："
-                    "会话仍在运行；稍后重试、加大 --idle-wait，"
+                    f"目标会话 {session_id} 队列等待超时（>{args.queue_timeout}s）："
+                    "会话仍在运行；稍后重试、加大 --queue-timeout，"
                     "或加 --new 新建会话（原会话保留）"
                 )
             row = outcome
@@ -1471,7 +1480,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         if hint:
             session_note = hint
             emit(f"提示：{hint}", args.json)
-        # 旧格式/其它标题顺手改成 `[awf] <项目> · <模块>`（--session 也归一）；改名失败不阻塞派发。
+        # 旧格式/其它标题顺手改成 `[awf] <目标项目>`（--session 也归一）；改名失败不阻塞派发。
         if reuse_rename_needed(row, session_name):
             try:
                 api.rename(session_id, session_name)
@@ -1484,7 +1493,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         match = TICKET_ID_RE.search(text or "")
         task_id = match.group(0) if match else ""
 
-    # 落地基线在 prompt 发送前一刻读取（RT-3）：idle-wait（最长 300s）期间其它
+    # 落地基线在 prompt 发送前一刻读取（RT-3）：队列等待（最长 --queue-timeout 秒）期间其它
     # 会话或用户的 commit 不再落入「初始 HEAD → 当前 HEAD」变化区间，误判窗口消除；
     # 读取失败时区分「目标非 git」与「仓库不可读」。
     initial_head = None
@@ -1989,15 +1998,15 @@ def main(argv=None) -> int:
             "        接收者保持 worker、禁止转派（派发深度 = 1），再次作为 target 派发\n"
             "        直接 FAIL（退出码 2，输出禁止转派错误；需转包时由用户创建「来源：用户」新票据）。\n"
             "\n会话复用（默认）：派发前先 session/list，按「项目 + 模块」复用目标工作区会话：\n"
-            "        复用键 = 同 cwd + 标题等于「[awf] <项目名> · <模块名>」；\n"
+            "        复用键 = 同 cwd + 标题等于「[awf] <目标项目>」；\n"
             "        模块来源：--module > 票据「模块：」行 > 默认「通用」；\n"
             "        匹配不到时不借用同项目其它模块的会话，直接新建本模块会话（避免上下文串味）；\n"
             "        旧格式迁移（默认关闭）：项目里恰好只有一个旧格式（无 [awf] 标记）空闲会话时，\n"
             "        仅当会话消息含派发任务包标记、或显式 --allow-legacy-reuse 才复用它并改名；\n"
             "        用户自建的 <项目> · xxx 普通会话不会被复用/改名/注入；\n"
             "        不看上下文压力（上下文是开发资产，收缩交给 harness 压缩机制）；\n"
-            "        复用时不新建会话，标题更新为「[awf] <项目名> · <模块名>」后直接 prompt。\n"
-            "        选中的会话 running=true 时先等它空闲（--idle-wait，默认 300s），超时报错并建议 --new，\n"
+            "        复用时不新建会话，标题更新为「[awf] <目标项目>」后直接 prompt。\n"
+            "        选中的会话 running=true 时进入等待队列（--queue-timeout，默认 60s），超时报队列超时并建议 --new，\n"
             "        不会静默改成新建；上下文压力 ≥ 0.9 只在输出/日志里提示可考虑 --new，不自动切换。\n"
             "        没有可用会话时才新建并同样命名，作为该项目该模块后续派发的常驻会话。\n"
             "        --new 强制新建（隔离/调试）；--session <id> 直接向指定会话发送；--reuse 可显式书写（默认值）。\n"
@@ -2064,7 +2073,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--module",
         default="",
-        help="模块名（默认取票据「模块：」行，都没有用「通用」）；标题为 [awf] <项目> · <模块>",
+        help="模块名（默认取票据「模块：」行，都没有用「通用」）；标题统一为 [awf] <目标项目>",
     )
     parser.add_argument(
         "--session",
@@ -2075,7 +2084,13 @@ def main(argv=None) -> int:
         "--idle-wait",
         type=int,
         default=DEFAULT_IDLE_WAIT,
-        help="目标会话正在运行时最多等待其空闲的秒数（默认 300，仅会话模式生效）",
+        help="兼容保留（DEV-126 起会话繁忙的队列等待由 --queue-timeout 控制，默认 60；本参数不再生效）",
+    )
+    parser.add_argument(
+        "--queue-timeout",
+        type=int,
+        default=DEFAULT_QUEUE_TIMEOUT,
+        help="会话繁忙时的队列等待上限秒数（默认 60；超时报队列超时，建议 --new 或稍后重试）",
     )
     parser.add_argument(
         "--timeout",
@@ -2117,7 +2132,7 @@ def main(argv=None) -> int:
         action="store_true",
         help="开启 --check-role 时静默 role 不匹配警告（仍不硬拒）",
     )
-    parser.add_argument("--title", default="", help="会话标题（默认 [awf] <项目> · <模块>）")
+    parser.add_argument("--title", default="", help="会话标题（默认 [awf] <目标项目>）")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
     args = parser.parse_args(argv)
 

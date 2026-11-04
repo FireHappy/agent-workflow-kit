@@ -968,7 +968,7 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 | 完成日期 | 2026-11-04 |
 | DEV-124 | P2 | worker 经验/工具积累闭环：开工读 history + 收尾沉淀 memory/tools + check 软提示（不 FAIL）；三 locale smoke 166/0 | 2026-11-04 |
 | DEV-125 | P0 | 发版 v0.9.0（DEV-115~124 批次）：VERSION 0.8.0→0.9.0、CHANGELOG [0.9.0] 段、本地 tag v0.9.0、release-prep 装配；check 全过 + smoke 双 locale 全绿 | 2026-11-04 |
-| DEV-126 | P1 | release-prep 0.9.0：一键发版装配 | 2026-11-04 |
+| DEV-126 | P1 | [装配记录] release-prep v0.9.0 一键装配行（DEV-125 发版产生；任务本体为下方 P0 块） | 2026-11-04 |
 
 ## [DEV-125] 发版 v0.9.0（DEV-115~124 批次）
 
@@ -995,3 +995,56 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 
 ### 下一步
 release-prep 0.9.0（dry-run 已确认，无 Unreleased 需手工补 [0.9.0] 段）→ 全量校验 → 归档 → commit + tag。
+
+## [DEV-126] 全局升级 v0.9.0 + 系统组件 gitignore + 会话命名/队列改造
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P0 |
+| 状态 | handoff |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 修改范围 | 8 目标项目 agent-workflow/ 框架文件（v0.9.0 upgrade）+ 系统组件 .gitignore + agent-workflow/bin/awf-dispatch 与 bin/awf-dispatch（[asf] 标题 + 队列等待）+ docs/ + test/smoke.sh |
+| 依赖 | DEV-125（v0.9.0） |
+| 最近更新 | 2026-11-04 |
+
+### 目标
+①全局 8 项目升级至 v0.9.0 能力集；②uxrsample/OpenXR-UXR 追加 /agent-workflow/ 到 .gitignore；③awf-dispatch 会话标题改 [asf] <派发者>，会话繁忙时队列等待不失败。
+
+### 验收标准
+- [ ] 9 项目（含 kit）均 v0.9.0 能力集：find 带 role、--check-role 在、check 通过（gitignore 项目同样）
+- [ ] 跳过项目有明确原因（G3 门禁）
+- [ ] uxrsample/OpenXR-UXR .gitignore 含 /agent-workflow/ 且 check-ignore 生效
+- [ ] 会话标题 [asf] <派发者>；繁忙队列等待/超时正确（smoke 回归）
+- [ ] smoke 双 locale 全绿；drift 通过；py_compile 无错（部分 C 后）
+- [ ] DEV-126 已归档；只本地 commit 未 push
+
+### 下一步
+（2026-11-04 状态修正）DEV-126 上一轮仅完成 C 部分代码（未提交），A 升级与 B gitignore 未做、票据误判完成。
+移交续作 DEV-127 接管：提交 [asf]+队列代码 → 8 项目升级 v0.9.0 → gitignore → 全量验收。
+
+
+## [DEV-127] DEV-126 续作：全局升级 v0.9.0 + gitignore + 提交会话命名改造
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P0 |
+| 状态 | active |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发（DEV-126 续作） |
+| 修改范围 | kit awf-dispatch（[asf]+队列，已有改动待提交）+ 8 项目 v0.9.0 upgrade + uxrsample/OpenXR-UXR .gitignore |
+| 依赖 | DEV-125（v0.9.0）；DEV-126（handoff） |
+| 最近更新 | 2026-11-04 |
+
+### 验收标准
+- [ ] kit 提交 [asf]<目标项目> 命名 + 繁忙队列（含 smoke 断言）
+- [ ] 8 项目升级至 v0.9.0（逐项目 commit 或记录跳过原因）
+- [ ] uxrsample/OpenXR-UXR .gitignore 生效
+- [ ] 全 9 项目：find 带 role、--check-role 在、check 通过
+- [ ] smoke 双 locale 全绿；工作树全干净；未 push
+- [ ] 不准提前判完成：所有步骤跑完、验证通过、commit 落盘才算
+
+### 下一步
+审查现有 awf-dispatch 改动 → 提交 → 逐项目升级 → gitignore → 全量验证 → 归档。
