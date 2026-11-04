@@ -7,8 +7,8 @@
   G3 目标没有已跟踪改动 / 其他 active 任务
   G4 DSH GUI 与会话通道可用
 
-全过时默认复用目标工作区里「目标项目」对应的常驻会话（标题 `[awf] <目标项目>`——
-目标 worker 承接派发任务的会话）；
+全过时默认复用目标工作区里「目标项目」对应的常驻会话（标题 `[awf] [派发者] [任务名]`——
+目标 worker 承接派发任务的会话，任务名随派发动态更新）；
 选中的会话正在运行时进入**等待队列**（默认最多等 60s，`--queue-timeout` 可调；
 回合结束等待仍走 --wait/--timeout），超时才报队列超时，不再立即失败；
 没有可用会话时才新建。随后发送任务并立即返回
@@ -17,8 +17,12 @@
 旧格式（无 [awf] 标记）会话默认不再自动迁移，避免误吞用户
 自建会话；确认要迁移时加 --allow-legacy-reuse（有派发任务包标记的旧会话仍会自动迁移）。
 
-模块来源：`--module` > 票据「模块：」行 > 默认「通用」；模块只影响票据分类展示，
-会话标题统一为 `[awf] <目标项目>`（同项目一个常驻会话；繁忙时排队等待）。
+模块来源：`--module` > 票据「模块：」行 > 默认「通用」；模块只影响票据分类展示。
+会话标题统一为 `[awf] [派发者] [任务名]`（DEV-134）：派发者 = `--sender` > 票据
+「派发者：」行 > 默认 lead；任务名 = 当次票据的 `ID 短标题`（动态）。会话收敛：
+同一派发者在同一目标项目最多 3 个 [awf] 任务会话——池内空闲（running=False）
+优先复用（改名接新任务）；都忙且池未满则新建扩充；池满（>=3）都忙才排队等待
+（--queue-timeout，默认 60s；超时按队列超时报错）。
 
 用法：
   ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
@@ -26,6 +30,7 @@
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流
+  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --sender lead
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx
   ./agent-workflow/bin/awf-dispatch demo02 task.md --headless
   ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
@@ -74,9 +79,12 @@ DEFAULT_REUSE = True
 PRESSURE_HINT_LIMIT = 0.9
 # 兼容保留：DEV-126 起会话繁忙的队列等待由 DEFAULT_QUEUE_TIMEOUT 控制；本常量仅保留解析/校验。
 DEFAULT_IDLE_WAIT = 300
-# DEV-126：会话命名简化为 [awf] <目标项目>（"派发者" = 承接派发任务的 worker 名）。
-# 前缀保持 [awf]（DEV-126 澄清）；标题简化为 [awf] <目标项目>，模块不再进标题。
+# DEV-134：会话标题 = [awf] [派发者] [任务名]——派发者（--sender > 票据「派发者：」> lead）
+# + 当前任务摘要（ID + 短标题，随派发动态更新）；前缀保持 [awf]（DEV-126 澄清）。
 AWF_TITLE_PREFIX = "[awf]"
+# DEV-134：同一派发者在同一目标项目的 [awf] 任务会话数量上限（并发上限）。
+# 池内空闲优先复用；都忙且池未满 → 新建扩充；池满（>=MAX）都忙 → 等待空闲。
+MAX_SENDER_SESSIONS = 3
 # 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
 # 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
 DEFAULT_QUEUE_TIMEOUT = 60
@@ -200,11 +208,39 @@ def task_type(text: str) -> str:
     return "dev"
 
 
-def awf_session_title(project: str, module: str = "",
+def awf_session_title(sender: str, task_name: str = "",
                       limit: int = SESSION_TITLE_LIMIT) -> str:
-    """会话标题约定（DEV-126）：`[awf] <目标项目>`——目标 worker 承接派发任务的
-    常驻会话；模块不再进标题（简洁优先），module 形参保留供复用键/迁移兼容。"""
-    return f"{AWF_TITLE_PREFIX} {clean_title(project, limit=limit) or project}"
+    """会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者标识 + 当前任务摘要；
+    任务名随派发动态更新；同项目一个常驻会话（复用/排队），不因任务增多新建会话。"""
+    sender_clean = clean_title(sender, limit=20) if (sender or "").strip() else "lead"
+    task_clean = clean_title(task_name, limit=limit) if (task_name or "").strip() else "未命名任务"
+    return (f"{AWF_TITLE_PREFIX} [{sender_clean}] "
+            f"[{task_clean}]")
+
+
+def ticket_sender(text: str) -> str:
+    """读取票据头部「派发者：<名>」行；没写返回空串。"""
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*]\s*)?派发者\s*[：:]\s*(.+?)\s*$", line)
+        if match:
+            return clean_title(match.group(1))
+    return ""
+
+
+def resolve_sender(text: str, override: str = "") -> str:
+    """派发者来源：`--sender` > 票据「派发者：」行 > 默认「lead」。"""
+    if (override or "").strip():
+        return clean_title(override)
+    return ticket_sender(text) or "lead"
+
+
+def task_display(task: Path, text: str, limit: int = SESSION_TITLE_LIMIT) -> str:
+    """当前任务摘要：`<ID> <短标题>`（供会话标题使用，随票据动态）。"""
+    tid = ticket_task_id(task.name) or ""
+    title = task_title(task, text)
+    if tid and not title.startswith(tid):
+        return clean_title(f"{tid} {title}", limit=limit)
+    return clean_title(title, limit=limit)
 
 
 def ticket_module(text: str) -> str:
@@ -636,6 +672,23 @@ def session_pressure(row: dict):
     return float(tokens) / float(window)
 
 
+def awf_title_sender(title: str) -> str:
+    """提取 `[awf] [<派发者>] ...` 标题的派发者段；非 [awf] / 无派发者段返回 ''。"""
+    if not title.startswith(AWF_TITLE_PREFIX):
+        return ""
+    body = title[len(AWF_TITLE_PREFIX):].lstrip()
+    match = re.match(r"^\[([^\]]*)\]", body)
+    return match.group(1).strip() if match else ""
+
+
+def row_sender_key(title: str) -> str:
+    """复用池的派发者键：`[awf] [<派发者>]` 取派发者段；旧格式 `[awf] <项目>`
+    （DEV-126 时代、无派发者段）按 lead 处理——会被 lead 池复用并升级改名。"""
+    if not title.startswith(AWF_TITLE_PREFIX):
+        return ""
+    return awf_title_sender(title) or "lead"
+
+
 def is_legacy_session_title(title: str, project: str) -> bool:
     """模块约定之前的旧标题：`<项目> · <任务>`（没有 `[awf]` 标记）。"""
     title = (title or "").strip()
@@ -657,23 +710,17 @@ def _reuse_rank(row: dict):
 
 
 def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
-                         legacy_probe=None):
-    """按「同 cwd + 标题等于 `[awf] <目标项目>`」复用；没有候选返回 None。
+                         legacy_probe=None, sender: str = ""):
+    """选承接会话：优先「同 cwd + 同派发者 + 空闲」的 [awf] 会话（DEV-134）。
 
-    复用键是「项目 + 模块」：
-    - 精确命中规范标题的会话优先；多个时先选空闲的，再取 updatedAt 最新；
-    - `running=true` 的规范会话仍会被选中，由调用方等它空闲（不静默新建）；
-    - 匹配不到时**不借用同项目其它模块的会话**，直接返回 None 让调用方新建；
-    - 旧格式迁移（RT-1）默认关闭：只有项目里没有任何 `[awf]` 规范会话、且恰好
-      只有一个旧格式空闲会话时，才调用 `legacy_probe(候选)` 确认——确认通过才复用
-      它（调用方随后把标题改成规范格式）。probe 返回 False 或抛异常都视为不迁移。
-      显式 `--allow-legacy-reuse` 把 probe 固定为 True；probe 探到会话消息含派发
-      任务包标记（旧版派发器在它里面派发过）也放行。用户自建的 `<项目> · xxx`
-      会话既无标记、也无显式放行，不会被复用/改名/注入。
-    上下文压力不参与筛选：会话上下文是开发资产，收缩交给 harness 的压缩机制。
-    """
+    复用池 = 同 cwd 下标题派发者段 == 本次派发者的会话，最多 {MAX} 个：
+    - 池里有空闲（running=False）→ 选最新空闲的复用（改名接新任务）；
+    - 池里都忙：池未满（<{MAX}）→ 返回 None，调用方新建扩充并发；
+    - 池满（>={MAX}）都忙 → 返回一个忙碌候选，调用方等它空闲（不新建第 4 个）。
+    任务名段（有/无/新旧）不参与判定，复用后由调用方改名覆盖；不做完成还原。
+    匹配不到同派发者会话时，旧格式（无 [awf] 段）迁移由 legacy_probe 决定；
+    都不满足返回 None 让调用方新建。""".format(MAX=MAX_SENDER_SESSIONS)
     project = Path(target).name
-    canonical = awf_session_title(project, module)
     real = os.path.realpath(str(target))
     same = []
     for row in rows or []:
@@ -686,12 +733,20 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
             continue
         same.append(row)
 
-    exact = [row for row in same if session_title(row) == canonical]
-    if exact:
-        return sorted(exact, key=_reuse_rank)[0]
-
-    # 旧格式迁移（RT-1）：一旦项目里已有规范会话，就只按模块精确匹配，绝不借用。
-    if any(session_title(row).startswith(AWF_TITLE_PREFIX) for row in same):
+    # DEV-134：同 cwd + 标题的派发者键 == 本次派发者（段级精确匹配，避免
+    # [lead] 误吞 [leadership] 这类前缀）；旧格式 [awf] <项目> 归 lead 池（平滑升级）。
+    # 任务名段不参与判定，复用后改名覆盖。
+    sender_raw = (sender or "").strip()
+    sender_key = clean_title(sender_raw, limit=20) if sender_raw else "lead"
+    pool = [row for row in same if row_sender_key(session_title(row)) == sender_key]
+    if pool:
+        idle = [row for row in pool if row.get("running") is False]
+        if idle:
+            return sorted(idle, key=_reuse_rank)[0]
+        if len(pool) >= MAX_SENDER_SESSIONS:
+            # 并发达上限：都忙就等（调用方 wait_for_idle；超时按 --queue-timeout 报错）
+            return sorted(pool, key=_reuse_rank)[0]
+        # 池未满：新建扩充并发（到第 3 个为止）
         return None
     legacy = [
         row
@@ -1397,9 +1452,11 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     api = state["api"]
     workspace = state["workspace"]
 
-    # 会话标题约定（DEV-126）：`[awf] <目标项目>`；模块只影响展示/票据分类（--module 已解析）。
+    # 会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者 + 动态任务摘要；
+    # 模块只影响展示/票据分类（--module 已解析）；--title 完全定制时优先。
     module = resolve_module(text, args.module)
-    session_name = args.title or awf_session_title(target.name, module)
+    session_name = args.title or awf_session_title(
+        resolve_sender(text, getattr(args, "sender", "")), task_display(task, text))
     # G4 探针已在 preflight 拉过 session/list，这里直接复用，避免重复调用。
     rows = state.get("sessions") or []
     row = None
@@ -1432,7 +1489,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             # 派发任务包标记（旧版派发器在里面派发过）才允许迁移复用。
             return bool(args.allow_legacy_reuse) or session_has_dispatch_marker(api, row)
 
-        row = select_reuse_session(rows, target, module, legacy_probe=legacy_probe)
+        row = select_reuse_session(rows, target, module, legacy_probe=legacy_probe,
+                                    sender=resolve_sender(text, getattr(args, "sender", "")))
         if row is not None:
             session_id = row["sessionId"]
             reused = True
@@ -2084,7 +2142,12 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--module",
         default="",
-        help="模块名（默认取票据「模块：」行，都没有用「通用」）；标题统一为 [awf] <目标项目>",
+        help="模块名（默认取票据「模块：」行，都没有用「通用」）；标题统一为 [awf] [派发者] [任务名]",
+    )
+    parser.add_argument(
+        "--sender",
+        default="",
+        help="派发者名（默认取票据「派发者：」行，都没有用 lead）；标题格式 [awf] [派发者] [任务名]",
     )
     parser.add_argument(
         "--session",
@@ -2143,7 +2206,7 @@ def main(argv=None) -> int:
         action="store_true",
         help="开启 --check-role 时静默 role 不匹配警告（仍不硬拒）",
     )
-    parser.add_argument("--title", default="", help="会话标题（默认 [awf] <目标项目>）")
+    parser.add_argument("--title", default="", help="完全定制会话标题（默认 [awf] [派发者] [任务名]）")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
     args = parser.parse_args(argv)
 

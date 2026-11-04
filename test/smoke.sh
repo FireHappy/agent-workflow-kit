@@ -293,10 +293,13 @@ assert module.AWF_TITLE_PREFIX == "[awf]", "DEV-126 前缀仍为 [awf]（派发�
 assert module.MODULE_DEFAULT == "通用", "默认模块必须是「通用」"
 
 project = target.name
-title = module.awf_session_title(project, "工作流")
-# DEV-126：标题简化为 [awf] <目标项目>，模块不再进标题（同项目一个常驻会话）
-assert title == f"[awf] {project}", title
-assert module.awf_session_title(project, "") == f"[awf] {project}"
+title = module.awf_session_title("lead", "TEST-001 工作流")
+# DEV-134：标题 = [awf] [派发者] [任务名]——派发者（--sender > 票据「派发者：」> lead）
+# + 动态任务摘要；模块不进标题（同项目同派发者收敛复用）
+assert title == "[awf] [lead] [TEST-001 工作流]", title
+assert module.awf_session_title("lead", "") == "[awf] [lead] [未命名任务]"
+assert module.awf_title_sender(title) == "lead"
+assert module.awf_title_sender("[awf] 周报") == ""
 
 # 模块来源：--module > 票据「模块：」行 > 默认「通用」
 ticket = "任务：TEST-001\n\n- 目标项目：proj（/tmp/proj）\n- 模块：工作流\n"
@@ -306,24 +309,34 @@ assert module.resolve_module(ticket) == "工作流"
 assert module.resolve_module(ticket, "文档") == "文档", "--module 必须覆盖票据"
 assert module.resolve_module("任务：TEST-001\n") == "通用"
 
-# DEV-126：标题不含模块——同项目任何模块票据复用同一 [awf] <项目> 会话（繁忙时排队）
+# DEV-134：标题不含模块——同项目同派发者的会话复用（无论任务名/模块），改名接新任务
 same = row("s-same", title=title, updated=1)
-other_module = row("s-other-module", title=module.awf_session_title(project, "文档"), updated=9)
-assert module.select_reuse_session([same], target, "工作流")["sessionId"] == "s-same"
-assert module.select_reuse_session([other_module], target, "文档")["sessionId"] == "s-other-module", \
-    "标题不再含模块：不同模块票据复用到同一项目会话（DEV-126 简化）"
-assert module.select_reuse_session([same, other_module], target, "工作流")["sessionId"] == "s-other-module", \
-    "同标题多会话（模块不同已同标题）选 updatedAt 最新"
+other_module = row("s-other-module", title=module.awf_session_title("lead", "TEST-002 文档"), updated=9)
+assert module.select_reuse_session([same], target, "工作流", sender="lead")["sessionId"] == "s-same"
+assert module.select_reuse_session([other_module], target, "工作流", sender="lead")["sessionId"] == "s-other-module", \
+    "不同模块（同派发者）复用到同一会话"
+assert module.select_reuse_session([same, other_module], target, "工作流", sender="lead")["sessionId"] == "s-other-module", \
+    "多候选选 updatedAt 最新"
+# 不同派发者不复用（lead 不借 member 的会话）
+member = row("s-member", title=module.awf_session_title("member", "TEST-003 任务"), updated=99)
+assert module.select_reuse_session([member], target, "工作流", sender="lead") is None, \
+    "不同派发者的会话不得借用"
 
-# 运行中的项目会话也选中（由调用方进入队列等待空闲，不静默新建）
+# 池未满时运行中会话不选中 → 新建扩充（DEV-134 并发上限内扩充；满了才等）
 running_same = row("s-running", title=title, running=True, updated=99)
-assert module.select_reuse_session([running_same], target, "工作流")["sessionId"] == "s-running"
+assert module.select_reuse_session([running_same], target, "工作流", sender="lead") is None, \
+    "池未满且都忙 → 新建（不静默等）"
 
-# 同项目多个：先选空闲，再取 updatedAt 最新
+# 同项目多个空闲：选 updatedAt 最新
 older = row("s-old", title=title, updated=10)
 newer = row("s-new", title=title, updated=20)
-assert module.select_reuse_session([older, newer], target, "工作流")["sessionId"] == "s-new"
-assert module.select_reuse_session([older, running_same], target, "工作流")["sessionId"] == "s-old"
+assert module.select_reuse_session([older, newer], target, "工作流", sender="lead")["sessionId"] == "s-new"
+assert module.select_reuse_session([older, running_same], target, "工作流", sender="lead")["sessionId"] == "s-old"
+
+# 并发上限：同派发者同项目 3 个都忙 → 返回候选等待（不新建第 4 个）
+pool_full = [row(f"s-r{i}", title=title, running=True, updated=i) for i in (1, 2, 3)]
+assert module.select_reuse_session(pool_full, target, "工作流", sender="lead")["sessionId"] == "s-r3", \
+    "池满（3 个都忙）→ 选择等待（不新建第 4 个）"
 
 # 旧格式标题（无 [awf]）：默认不再自动迁移（RT-1，防误吞用户自建会话）；
 # 只有 legacy_probe 确认（显式放行 / 消息含派发任务包标记）才复用；多条不猜；运行中不迁移
@@ -365,8 +378,9 @@ hint = module.pressure_hint(high)
 assert hint and "--new" in hint and "可考虑" in hint, hint
 assert module.pressure_hint(row("s-low", tokens=500, window=1000)) == "", "低压力不得提示"
 
-# 标题约定（DEV-126）：[awf] <目标项目>（模块不进标题）
-assert module.awf_session_title("proj", "x" * 50) == "[awf] proj"
+# 标题约定（DEV-134）：[awf] [派发者] [任务名]（任务段截断）
+long_t = module.awf_session_title("lead", "x" * 50)
+assert long_t.startswith("[awf] [lead] [") and long_t.endswith("]") and long_t.count("[") == 3, long_t
 
 
 class FakeApi:
@@ -778,7 +792,7 @@ assert "会话来源：复用" in logs[0]
 assert same_api.calls == 1, f"G4 探针与复用查找应合并为一次 session/list，实际 {same_api.calls} 次"
 
 # DEV-126 后标题不含模块：已有的 [awf] <项目> 会话（即使曾按其它模块建过）直接复用，不新建
-shared_api = FakeDispatchApi([row("s-doc", title=module.awf_session_title(project, "文档"))])
+shared_api = FakeDispatchApi([row("s-doc", title=module.awf_session_title("lead", "TEST-002 文档"))])
 logs, _ = run_dispatch(shared_api, "工作流")
 assert shared_api.prompts and shared_api.prompts[0][0] == "s-doc", shared_api.prompts
 assert shared_api.created == [], "同标题会话应复用而非新建"
@@ -799,9 +813,9 @@ MARKER_PAGE = {"records": [{"event": {"type": "user/message", "seq": 1,
 marker_api = FakeDispatchApi([row("s-legacy-marker", title=f"{project} · 旧任务")], page=MARKER_PAGE)
 logs, _ = run_dispatch(marker_api, "工作流")
 assert marker_api.created == [], "含派发任务包标记的旧格式会话应迁移复用"
-assert ("s-legacy-marker", title) in marker_api.renamed, marker_api.renamed
+assert ("s-legacy-marker", "[awf] [lead] [TEST-001 冒烟]") in marker_api.renamed, marker_api.renamed
 assert marker_api.prompts and marker_api.prompts[0][0] == "s-legacy-marker", marker_api.prompts
-assert f"（{title}）" in logs[0], logs[0]
+assert f"（[awf] [lead] [TEST-001 冒烟]）" in logs[0], logs[0]
 assert f"（{project} · 旧任务）" not in logs[0], logs[0]
 assert "会话来源：复用" in logs[0]
 
@@ -809,20 +823,24 @@ assert "会话来源：复用" in logs[0]
 forc_api = FakeDispatchApi([row("s-legacy-forc", title=f"{project} · 旧任务")])
 logs, _ = run_dispatch(forc_api, "工作流", allow_legacy=True)
 assert forc_api.created == [], "显式放行应迁移复用"
-assert ("s-legacy-forc", title) in forc_api.renamed, forc_api.renamed
+assert ("s-legacy-forc", "[awf] [lead] [TEST-001 冒烟]") in forc_api.renamed, forc_api.renamed
 assert forc_api.prompts and forc_api.prompts[0][0] == "s-legacy-forc", forc_api.prompts
 
 legacy_json_api = FakeDispatchApi([row("s-legacy-json", title=f"{project} · 旧任务")], page=MARKER_PAGE)
 _, legacy_json = run_dispatch(legacy_json_api, "工作流", json_mode=True)
 payload = json.loads(legacy_json)
 assert payload["reused"] is True and payload["sessionId"] == "s-legacy-json", payload
-assert payload["sessionTitle"] == title, payload
+assert payload["sessionTitle"] == "[awf] [lead] [TEST-001 冒烟]", payload
 
-# running=true → 等空闲后再发送（不静默新建）
-running_api = FakeDispatchApi([row("s-same", title=title, running=True)], idle_after=3)
+# DEV-134 并发上限：池满（3 个都忙）→ 等空闲后再发送（不静默新建第 4 个）
+running_api = FakeDispatchApi(
+    [row("s-r1", title=title, running=True, updated=1),
+     row("s-r2", title=title, running=True, updated=2),
+     row("s-r3", title=title, running=True, updated=3)],
+    idle_after=3)
 logs, _ = run_dispatch(running_api, "工作流")
 assert running_api.created == [], running_api.created
-assert running_api.prompts and running_api.prompts[0][0] == "s-same", running_api.prompts
+assert running_api.prompts and running_api.prompts[0][0] == "s-r3", running_api.prompts
 assert any("等待队列" in m for m in running_api.emitted), running_api.emitted
 
 # --new 不碰 session/list：mock sessions() 抛错也应成功（不应报 G4 / 复用检查失败）
@@ -846,7 +864,11 @@ assert forced_api.created == ["s-created-1"], forced_api.created
 assert "会话来源：新建" in forced_logs[0]
 
 # 等待超时 vs 会话消失：两类错误分开（文案与恢复建议不同）
-timeout_api = FakeDispatchApi([row("s-same", title=title, running=True)])
+# 等待超时 vs 会话消失：两类错误分开（文案与恢复建议不同）；池满才触发等待
+timeout_api = FakeDispatchApi(
+    [row("s-r1", title=title, running=True, updated=1),
+     row("s-r2", title=title, running=True, updated=2),
+     row("s-r3", title=title, running=True, updated=3)])
 timeout_msg = run_dispatch(
     timeout_api, "工作流", idle_wait=0, queue_timeout=0, expect_error=True,
 )
@@ -855,7 +877,10 @@ assert "消失" not in timeout_msg, timeout_msg
 assert any("等待队列" in m for m in timeout_api.emitted), timeout_api.emitted
 
 gone_msg = run_dispatch(
-    VanishApi([row("s-same", title=title, running=True)], disappear_after=3),
+    VanishApi([row("s-r1", title=title, running=True, updated=1),
+               row("s-r2", title=title, running=True, updated=2),
+               row("s-r3", title=title, running=True, updated=3)],
+              disappear_after=3),
     "工作流", expect_error=True,
 )
 assert "消失" in gone_msg and "重新派发" in gone_msg, gone_msg
@@ -1604,7 +1629,7 @@ with tempfile.TemporaryDirectory() as tmp:
     proj = pathlib.Path(tmp) / "proj"
     proj.mkdir()
     module_awf = "工作流"
-    canonical = module.awf_session_title(proj.name, module_awf)
+    canonical = module.awf_session_title("lead", "TEST-001 冒烟")
     legacy = mkrow("s-legacy", str(proj), title=f"{proj.name} · 旧任务")
     user = mkrow("s-user", str(proj), title=f"{proj.name} · 用户的分析记录")
 
