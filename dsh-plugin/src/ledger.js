@@ -1723,6 +1723,16 @@ export async function readProjectAWFVersion(projectPath) {
   return parseAWFVersion(script)
 }
 
+/** DEV-133：读取项目根 VERSION 文件的对外发布版（如 1.0.0）；读不到返回 null。 */
+export async function readProjectRelease(projectPath) {
+  try {
+    const v = String(await readFile(join(projectPath, 'VERSION'), 'utf8')).trim()
+    return v || null
+  } catch {
+    return null
+  }
+}
+
 /** 解析 semver（X.Y.Z，允许 v 前缀）；无法解析返回 null。 */
 export function parseSemver(s) {
   const m = /^v?([0-9]+)\.([0-9]+)\.([0-9]+)/.exec(String(s || '').trim())

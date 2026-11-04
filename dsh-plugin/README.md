@@ -104,6 +104,12 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.3.2（DEV-133）**：版本徽章显示具体发布版（v1.0.0）+ 版本判定/锚点修正 + 拷贝按钮与徽章对比度加强
+  - 版本显示：项目卡版本徽章优先读「项目根 VERSION 文件」（对外发布版，如 v1.0.0），不再只显示 awf 框架代次整数（v1）；缺 VERSION 文件回退 v{代次}（旧行为兼容）
+  - 版本判定：`versionStatus` 优先按「项目根 VERSION vs kit VERSION」semver 比对（与显示一致），无 VERSION 回退 AWF 代次、再回退 scaffold_version；`awf upgrade` 新增版本锚点——把 kit 的 VERSION 文件同步到目标项目根（无 VERSION 或落后时更新）
+  - UI 加强：`awf-icon-btn`（项目卡/弹框拷贝按钮）24px、1.5px 边框、图标 C.sub、hover 提亮（边框+文字）、ok 态更实；版本徽章 latest 文字 C.dim→C.sub + 边框透明度 55%→72%，不再发虚
+  - 测试 33/33 全绿
+
 - **0.3.1（DEV-132）**：点击任务图标改读「该任务单文件详情」，不再打开整桶 README 索引
   - `GET /awf/source` 新增可选 `id` 查询参数：目录式账本下带 id 读 `tasks/<type>/<桶>/<ID>.md`（仅该任务内容，预览/编辑/拷贝路径均指向单文件），不带 id 仍返回桶 README 检索索引（查看整桶视图保留）
   - 前端「最近完成 / 当前任务 / 待办」行点击源文件时自动携带任务 id（`fetchSource`/`openSource` 透传）；id 非法返回 400 bad-id，目录式 404 文案带 `tasks/<type>/<桶>/<ID>` 路径提示

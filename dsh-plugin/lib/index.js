@@ -53,7 +53,7 @@ import { spawnSync } from 'node:child_process'
 import {
   ledgerOf, readIndex, initSkeleton, startTask, archiveTask, isWhitelistedPath, TASK_TYPES,
   parseTodoRows, todoEdit, taskEdit, revertPreview, readSource, writeSource, SOURCE_FILES,
-  writeProjectRegistration, readProjectMetaFile, readProjectAWFVersion,
+  writeProjectRegistration, readProjectMetaFile, readProjectAWFVersion, readProjectRelease,
   setProjectTrack, setScaffoldVersion, writeLocalGitignore, semverLt,
   parseCheckItems, findBlock, cmdCriterion, isSafeCommand, applyCmdEvidence,
   replaceBlockInMd, taskLedgerOverdue, classifyFreshness, isOpenTaskStatus,
@@ -294,7 +294,7 @@ async function kitVersions() {
 async function projectVersions(projectPath) {
   const installedAWF = await readProjectAWFVersion(projectPath)
   const meta = await readProjectMetaFile(projectPath)
-  return { installedAWF, scaffoldVersion: (meta && meta.scaffold_version) || null }
+  return { installedAWF, scaffoldVersion: (meta && meta.scaffold_version) || null, installedRelease: await readProjectRelease(projectPath) }
 }
 
 /**
@@ -306,15 +306,18 @@ async function versionStatus(projectPath) {
   const k = await kitVersions()
   let status = 'unknown'
   let upgradeTo = null
-  if (p.installedAWF !== null && k.latestAWF !== null) {
+  // DEV-133：优先按「项目根 VERSION vs kit VERSION」发布版 semver 判定；缺 VERSION 文件回退 AWF 代次
+  if (p.installedRelease && k.latestRelease) {
+    status = semverLt(p.installedRelease, k.latestRelease) === true ? 'outdated' : 'latest'
+  } else if (p.installedAWF !== null && k.latestAWF !== null) {
     status = p.installedAWF < k.latestAWF ? 'outdated' : 'latest'
   }
-  if (status !== 'outdated' && k.latestRelease && p.scaffoldVersion) {
+  if (status !== 'outdated' && !p.installedRelease && k.latestRelease && p.scaffoldVersion) {
     const lt = semverLt(p.scaffoldVersion, k.latestRelease)
     if (lt === true) status = 'outdated'
   }
   if (status === 'outdated') {
-    if (p.installedAWF !== null && k.latestAWF !== null && p.installedAWF < k.latestAWF) {
+    if (!p.installedRelease && p.installedAWF !== null && k.latestAWF !== null && p.installedAWF < k.latestAWF) {
       upgradeTo = `v${k.latestAWF}`
     } else if (k.latestRelease) {
       upgradeTo = k.latestRelease
@@ -324,7 +327,8 @@ async function versionStatus(projectPath) {
   }
   return {
     status, upgradeTo,
-    installed: p.installedAWF === null ? null : `v${p.installedAWF}`,
+    installed: p.installedRelease ? `v${p.installedRelease}` : (p.installedAWF === null ? null : `v${p.installedAWF}`),
+    installedRelease: p.installedRelease || null,
     scaffold: p.scaffoldVersion || null,
     latestAWF: k.latestAWF === null ? null : `v${k.latestAWF}`,
     latestRelease: k.latestRelease || null,

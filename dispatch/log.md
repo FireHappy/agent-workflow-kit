@@ -388,3 +388,99 @@
 - 目标 HEAD：4b29052 upgrade(pluto): v1.0.0 目录式账本迁移 UP-101
 - 回报节选：✅ **UP-101 已完成并本地提交（未 push）**。本次为重复派发：上一会话（12:23 超时）已完成升级+迁移+归档但未落 commit；本会话补齐了 kit HEAD（含 v1.0.0 补丁 47949d7：check F3 目录式按桶传 mode + 迁移归一补「取消」）、重跑迁移与校验，并完成提交。 ```dsh-ui {"title":"UP-101 升级回报","gap":14,"items":[{"type":"row","items":[{"type":"stat","label":"commit","value":"4b29052"},{"type":"stat","…（已截断，完整回报见会话）
 
+## 2026-11-04 14:37 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · openxr-uxr 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/openxr-uxr-UP-102.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-db34b441-cf44-47b3-a7b9-89f0c6a3247e（[awf] OpenXR-UXR）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：d4db560 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：UP-102 完成 ✅ ## 回报（按任务文件要求） **1. 变更**：项目根新建 `VERSION`，内容单行 `1.0.0`（5 字节，结尾换行，`od -c` 已验证）。 **2. 校验实际执行**：`./agent-workflow/check_workflow.sh` → 退出码 0，**65 ok / 0 fail**（全部检查通过）。 **3. commit hash**：`d4db560`（full `d4db56026da78b0105f69be73a9709916e37aae2`） - 消息：`chore(workflow): 版本锚点 VERSION=1.0.0 UP-…（已截断，完整回报见会话）
+
+## 2026-11-04 14:37 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · dsh-settings 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/dsh-settings-UP-102.md）
+- 模块：通用
+- 工作区：dsh-settings（d6ddf210-7583-4013-bdad-3d3f07897034）
+- 会话：session-5a4d10dc-4919-4218-aa1a-1691007c7ab2（[awf] dsh-settings）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：74a9a3a chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：UP-102 完成，本地 commit 落盘，未 push。 ## 回报（任务包三项） - **commit hash**：`74a9a3a6bfd529eb5ce7c6fa3c7e99a36475c149`（chore(workflow): 版本锚点 VERSION=1.0.0 UP-102） - **状态**：完成。UP-102 已归档至 `tasks/dev/done/UP-102.md`（done + 完成日期 2026-11-04）。 - **变更**：项目根新增 `VERSION`（单行 `1.0.0` + 结尾换行，od 校验 6 字节 `1.0.0\n`）；账本 `dev/do…（已截断，完整回报见会话）
+
+## 2026-11-04 14:37 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · finderpathbar 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/finderpathbar-UP-102.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-f5fc8193-5b9e-424b-a3f2-a2d4b6509b52（[awf] FinderPathBar）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：23c0cbf chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：UP-102 完成。 ## 回报：版本锚点 VERSION=1.0.0 - **commit hash**：`23c0cbfdfc1b09ee84c00d6114f0226d5e87c36e`（`chore(workflow): 版本锚点 VERSION=1.0.0 UP-102`，4 files，+27/−1） - **VERSION**：项目根新建，单行 `1.0.0` + 结尾换行（od 校验 6 字节 `1 . 0 . 0 \n` 通过） - **门禁**：check_workflow.sh **30 ok / 0 fail**；账本已刷新（UP-102 归档 `tasks/dev/d…（已截断，完整回报见会话）
+
+## 2026-11-04 14:37 → naboo
+
+- 目标：/Users/chenlin/projects/UnityProjects/naboo
+- 任务：naboo · naboo 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/naboo-UP-102.md）
+- 模块：通用
+- 工作区：naboo（1c1f6c3a-523c-454c-8257-243e520735c4）
+- 会话：session-888941de-4d22-4fe0-8cb0-9b64bc69f2a7（[awf] naboo）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：777035963 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：UP-102 完成并落盘。 ## 任务回报（chore(workflow): 版本锚点 VERSION=1.0.0 UP-102） - **commit**：`777035963085c2ee4ef70ecf46ec4fd279686b39`（短 `777035963`，分支 `station3_component_empty`，4 文件 +31/-1，**未 push**，`ahead 2`） - **check 结果**：`check_workflow.sh` 全绿，**25 ok / 0 fail**；`awf status` 无「账本迁移：」动作行（幂等） - **VERSION**：…（已截断，完整回报见会话）
+
+## 2026-11-04 14:38 → 周报
+
+- 目标：/Users/chenlin/Documents/周报
+- 任务：周报 · weekly-report 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/weekly-report-UP-102.md）
+- 模块：通用
+- 工作区：weekly report（cdfef88e-807f-4ef2-8556-de9cca1507e7）
+- 会话：session-0e9e7d7a-143e-4372-94a4-bacfd8951d23（[awf] 周报）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：ffa4c87 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：UP-102 完成。 ## 回报 - **Commit：`ffa4c87`**（`chore(workflow): 版本锚点 VERSION=1.0.0 UP-102`，4 files，+28/−1） - VERSION 已创建：项目根单行 `1.0.0` + 结尾换行（`od -c` 逐字节验证 `1 . 0 . 0 \n`） - 验证命令实际执行：`awf status` 幂等通过（UP-102 已入账 `tasks/dev/done/`，dev/done README 与 status.md 重生成）、`check_workflow.sh` **29 ok / 0 fail** - 本地…（已截断，完整回报见会话）
+
+## 2026-11-04 14:38 → im
+
+- 目标：/Users/chenlin/.dsh/im
+- 任务：im · dsh-im 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/dsh-im-UP-102.md）
+- 模块：通用
+- 工作区：im（31ca7718-0b39-4f07-9f6a-ec6ebd100193）
+- 会话：session-d58aaa2e-082f-4d6d-9cde-82c5e93a38db（[awf] im）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：839dc55 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：任务完成，已落盘（本会话保留）。 **回报 — UP-102 版本锚点** - **commit hash**：`839dc554ff78db380890833107858f3bb62366c3`（main，`chore(workflow): 版本锚点 VERSION=1.0.0 UP-102`，4 files +29/−2） - **VERSION**：项目根新建，内容单行 `1.0.0` + 结尾换行（xxd 验证 `0a`），与 `project.yaml` 的 `version_file: VERSION` 对齐 - **账本**：UP-102 已认领→归档（状态 done + 完成日…（已截断，完整回报见会话）
+
+## 2026-11-04 14:39 → uxrsample
+
+- 目标：/Users/chenlin/projects/UnityProjects/uxrsample
+- 任务：uxrsample · uxrsample 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/uxrsample-UP-102.md）
+- 模块：通用
+- 工作区：uxrsample（646d3ae9-385f-4bcf-8592-60ad4cdbddad）
+- 会话：session-a46b5d65-5879-4169-a548-ae007330f9e0（[awf] uxrsample）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：ff2a6d14 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：UP-102 完成并本地提交（未 push）。 ```dsh-ui {"title":"uxrsample VERSION 锚点（UP-102）","gap":12,"items":[{"type":"keyvalue","pairs":[{"key":"Commit","value":"ff2a6d14（ff2a6d144757ddeb44038c0d1f1f4dceb742bacb）"},{"key":"提交消息","value":"chore(workflow): 版本锚点 VERSION=1.0.0 UP-102"},{"key":"VERSION 内容","value":"1.0.0…（已截断，完整回报见会话）
+
+## 2026-11-04 14:39 → pluto
+
+- 目标：/Users/chenlin/projects/Rokid-System/pluto
+- 任务：pluto · pluto 补版本锚点 VERSION=1.0.0目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/anchor-v1.0.0/pluto-UP-102.md）
+- 模块：通用
+- 工作区：pluto（dc20d453-a176-4406-834f-0d5d04269864）
+- 会话：session-4724583b-4fef-4796-8f15-7801854b92f2（[awf] pluto）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：11070a3 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+- 回报节选：**UP-102 完成回报** ```dsh-ui {"title":"UP-102 回报：版本锚点","gap":12,"items":[{"type":"row","items":[{"type":"stat","label":"commit","value":"11070a3"},{"type":"stat","label":"VERSION","value":"1.0.0"},{"type":"stat","label":"check","value":"25 ok / 0 fail"}]},{"type":"keyvalue","pairs":[{"key":"commit","va…（已截断，完整回报见会话）
+

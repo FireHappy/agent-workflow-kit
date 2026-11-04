@@ -1624,6 +1624,7 @@ cmd_upgrade() {
 
   if [ "$dry_run" -eq 1 ]; then
     say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
+    [ -f "$KIT_DIR/VERSION" ] && say "  将写版本锚点 $target/VERSION = $(cat "$KIT_DIR/VERSION")（对外发布版）"
     say "  将运行：$awf_dir/bin/awf bootstrap（刷新 AGENTS.md 入口）"
     say "  将运行：$awf_dir/bin/awf check（校验；退出码 = 失败项数量）"
     return 0
@@ -1632,6 +1633,14 @@ cmd_upgrade() {
   say ""
   say "保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
   say ""
+
+  # DEV-133：版本锚点——把 kit 的对外发布版（VERSION 文件）同步到项目根；看板按它显示 v1.0.0 这类具体版本
+  local cur_ver=""
+  [ -f "$target/VERSION" ] && cur_ver="$(cat "$target/VERSION")"
+  if [ -f "$KIT_DIR/VERSION" ] && [ "$cur_ver" != "$(cat "$KIT_DIR/VERSION")" ]; then
+    cp "$KIT_DIR/VERSION" "$target/VERSION"
+    say "已写版本锚点 ${target}/VERSION = $(cat "$KIT_DIR/VERSION")"
+  fi
 
   ( cd "$target" && "$awf_dir/bin/awf" bootstrap ) || die "bootstrap 失败：$target"
   say "已刷新 AGENTS.md 入口（bootstrap）"

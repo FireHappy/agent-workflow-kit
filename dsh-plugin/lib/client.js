@@ -237,11 +237,11 @@ window.__ModuleLoader__.load({
       // 紧凑 icon 按钮（项目卡路径复制用，替代带 minWidth 的 tinyBtn）。
       '.awf-row:last-child{border-bottom:none!important}' +
       '.awf-icon-btn{display:inline-flex;align-items:center;justify-content:center;' +
-      'width:22px;height:22px;padding:0;font-size:12px;line-height:1;flex-shrink:0;' +
-      'border:1px solid '+C.border+';border-radius:6px;background:'+C.surface+';color:'+C.dim+';' +
-      'cursor:pointer;transition:background .15s ease}' +
-      '.awf-icon-btn:hover{background:'+C.hover+';color:'+C.text+'}' +
-      '.awf-icon-btn-ok{color:'+C.success+'!important;border-color:color-mix(in srgb,'+C.success+' 45%,transparent)!important}'
+      'width:24px;height:24px;padding:0;font-size:13px;line-height:1;flex-shrink:0;' +
+      'border:1.5px solid '+C.border+';border-radius:7px;background:'+C.surface+';color:'+C.sub+';' +
+      'cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}' +
+      '.awf-icon-btn:hover{background:'+C.hover+';color:'+C.text+';border-color:'+C.sub+'}' +
+      '.awf-icon-btn-ok{color:'+C.success+'!important;border-color:color-mix(in srgb,'+C.success+' 70%,transparent)!important}'
 
     // DEV-037 进行中动画 + 流程质感：纯装饰 CSS，不影响布局，不改变既有类名契约。
     // 动画目标——① 当前步骤节点呼吸光圈（box-shadow 脉动，静态 2px 光圈无缝衔接）；
@@ -2776,9 +2776,9 @@ window.__ModuleLoader__.load({
               : (vs.status === 'outdated' ? '工作流可升级：' + (vs.installed || vs.scaffold || '?') + ' → ' + (vs.upgradeTo || '最新') + '（点击升级）' : '框架版本'),
             style: {
               display: 'inline-flex', alignItems: 'center', gap: 4,
-              fontSize: F(11), color: vs.status === 'outdated' ? C.warn : C.dim,
+              fontSize: F(11), fontWeight: 700, color: vs.status === 'outdated' ? C.warn : C.sub,
               background: C.surface,
-              border: '1px solid color-mix(in srgb, ' + (vs.status === 'outdated' ? C.warn : C.border) + ' 55%, transparent)',
+              border: '1px solid color-mix(in srgb, ' + (vs.status === 'outdated' ? C.warn : C.border) + ' 72%, transparent)',
               borderRadius: C.radiusSm, padding: '1px 7px', flexShrink: 0, fontWeight: 600,
               opacity: U.upgrading ? 0.6 : 1, cursor: upgradable && !U.upgrading ? 'pointer' : 'default',
             },
