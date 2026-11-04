@@ -2054,11 +2054,16 @@ else
   bad "DEV-118 find 缺省 role 未回退到 name"
 fi
 
-# 23.1 DEV-119：模板不再生成空 role: 键（避免 head -n 1 吞掉后填值）
-if grep -q '^role: *$' "$PROJ/agent-workflow/project.yaml"; then
-  bad "DEV-119 模板仍生成了空 role: 键（会吞用户后填值）"
+# 23.1 DEV-119/121：模板源无字面空 role 键（防吞值回归）；init 缺省保留空 role 键（方案 B 跳过空值）
+if grep -q '^role: *$' "$KIT_DIR/templates/project.yaml.tmpl"; then
+  bad "DEV-119 模板源含字面空 role: 键（会吞用户后填值）"
 else
-  ok "DEV-119 模板不再生成空 role: 键"
+  ok "DEV-119 模板源无字面空 role: 键（防回归，改为 {{ROLE}} 占位）"
+fi
+if grep -q '^role: *$' "$PROJ/agent-workflow/project.yaml"; then
+  ok "DEV-121 init 缺省保留空 role: 键（解析跳过空值，不报错）"
+else
+  bad "DEV-121 init 缺省未保留空 role 键"
 fi
 # 追加第二行 role（模拟用户后填）→ find 立即输出该 role，不再回退 name
 printf '\nrole: 生成脚手架并维护任务账本\n' >> "$PROJ/agent-workflow/project.yaml"
@@ -2100,6 +2105,43 @@ if ( cd "$PROJ3" && ./agent-workflow/bin/awf find 空角色 | grep -q '双键兜
   ok "DEV-119 双 role 键 yaml 取到有值项（旧项目兼容）"
 else
   bad "DEV-119 双 role 键未取到有值项"
+fi
+
+# 23.3 DEV-121：init --role 初始化即登记能力名牌；缺省给出填写提示（保留空键，find 回退）
+PROJ4="$TMP/proj4"
+"$KIT_DIR/bin/awf" init "$PROJ4" --name "能力项目" --role "擅长冒烟测试" > "$TMP/proj4-init.log" 2>&1
+if grep -q '^role: 擅长冒烟测试$' "$PROJ4/agent-workflow/project.yaml"; then
+  ok "DEV-121 init --role 写入 project.yaml 的 role 字段"
+else
+  bad "DEV-121 init --role 未写入 role 字段"
+fi
+if ( cd "$PROJ4" && ./agent-workflow/bin/awf find 能力项目 | grep -q '擅长冒烟测试' ); then
+  ok "DEV-121 init --role 后 find 立即带出能力自述"
+else
+  bad "DEV-121 init --role 后 find 未带出能力自述"
+fi
+if ( cd "$PROJ4" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
+  ok "DEV-121 init --role 项目 check 通过"
+else
+  bad "DEV-121 init --role 项目 check 未通过"
+fi
+if ! grep -q '填写本项目的 worker 能力自述' "$TMP/proj4-init.log"; then
+  ok "DEV-121 有 role 时 init 不输出填写提示"
+else
+  bad "DEV-121 有 role 时仍输出填写提示"
+fi
+PROJ5="$TMP/proj5"
+"$KIT_DIR/bin/awf" init "$PROJ5" --name "缺省能力" > "$TMP/proj5-init.log" 2>&1
+if grep -q '填写本项目的 worker 能力自述' "$TMP/proj5-init.log"; then
+  ok "DEV-121 init 缺省 role 时给出填写提示"
+else
+  bad "DEV-121 init 缺省 role 未给填写提示"
+fi
+if grep -q '^role: *$' "$PROJ5/agent-workflow/project.yaml" \
+   && ( cd "$PROJ5" && ./agent-workflow/bin/awf find 缺省能力 2>&1 | grep -q '缺省能力' ); then
+  ok "DEV-121 init 缺省保留空 role 键且 find fallback name"
+else
+  bad "DEV-121 init 缺省空 role 键/fallback 异常"
 fi
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"

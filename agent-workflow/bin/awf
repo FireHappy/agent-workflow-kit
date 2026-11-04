@@ -74,9 +74,11 @@ usage() {
 awf — agent workflow framework
 
 用法:
-  awf init [目录] [--name 名称] [--id 标识] [--purpose 一句话] [--stack 类型]
+  awf init [目录] [--name 名称] [--id 标识] [--purpose 一句话] [--role 能力自述] [--stack 类型]
            [--keep-docs] [--force]
       在目标目录生成 agent-workflow/ 框架与仓库根 AGENTS.md。
+      --role 能力自述（一句话）写入 project.yaml 的 role 字段作为 worker 名牌，
+             init 即带能力定义；缺省保留空 role 键，可稍后在 project.yaml 补充。
       --keep-docs  已存在的 README.md 与 workflows/*.md 不覆盖（迁移旧项目用）。
       --no-register 不写入全局索引（默认自动登记，便于跨项目检索）。
 
@@ -159,6 +161,7 @@ render() {
     -v v_id="$P_ID" \
     -v v_name="$P_NAME" \
     -v v_purpose="$P_PURPOSE" \
+    -v v_role="$P_ROLE" \
     -v v_aliases="$P_ALIASES" \
     -v v_stack="$P_STACK" \
     -v v_gate="$P_GATE" \
@@ -182,6 +185,7 @@ render() {
       l = rep(l, "{{ID}}", v_id)
       l = rep(l, "{{NAME}}", v_name)
       l = rep(l, "{{PURPOSE}}", v_purpose)
+      l = rep(l, "{{ROLE}}", v_role)
       l = rep(l, "{{ALIASES}}", v_aliases)
       l = rep(l, "{{STACK}}", v_stack)
       l = rep(l, "{{GATE}}", v_gate)
@@ -211,6 +215,7 @@ load_project() {
   P_TEST="$(yaml_get test "$f")"
   P_SCOPES="$(yaml_get scopes "$f")"
   P_SERIALIZED="$(yaml_get serialized "$f")"
+  P_ROLE="$(yaml_get role "$f")"
 
   [ -n "$P_ID" ] || die "$f 缺少 id"
   [ -n "$P_NAME" ] || die "$f 缺少 name"
@@ -448,7 +453,7 @@ EOF
 }
 
 cmd_init() {
-  local target="." name="" id="" purpose="" stack="" force=0 keep_docs=0 no_register=0
+  local target="." name="" id="" purpose="" role="" stack="" force=0 keep_docs=0 no_register=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -458,6 +463,8 @@ cmd_init() {
       --id=*)    id="${1#*=}"; shift ;;
       --purpose) purpose="$2"; shift 2 ;;
       --purpose=*) purpose="${1#*=}"; shift ;;
+      --role)    role="$2"; shift 2 ;;
+      --role=*)  role="${1#*=}"; shift ;;
       --stack)   stack="$2"; shift 2 ;;
       --stack=*) stack="${1#*=}"; shift ;;
       --keep-docs) keep_docs=1; shift ;;
@@ -539,6 +546,7 @@ cmd_init() {
   P_ID="$id"
   P_NAME="$name"
   P_PURPOSE="$purpose"
+  P_ROLE="$role"
   P_ALIASES="$name"
   P_STACK="$stack"
   P_GATE="./agent-workflow/check_workflow.sh"
@@ -603,6 +611,10 @@ EOF
     fi
   else
     say "已跳过全局索引登记（--no-register）"
+  fi
+
+  if [ -z "$role" ]; then
+    say "提示：在 agent-workflow/project.yaml 的 role 字段填写本项目的 worker 能力自述（如：擅长…），awf find / awf projects 检索时可见"
   fi
 }
 
