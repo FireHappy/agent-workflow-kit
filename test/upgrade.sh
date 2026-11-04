@@ -167,10 +167,21 @@ cat > "$PB/agent-workflow/tasks/dev/current.md" <<'EOF'
 
 （暂无进行中任务）
 EOF
-sed -i '' 's/| Status |/| 状态 |/' "$PB/agent-workflow/tasks/dev/done.md" 2>/dev/null \
-  || sed -i 's/| Status |/| 状态 |/' "$PB/agent-workflow/tasks/dev/done.md"
-( cd "$PB" && ./agent-workflow/bin/awf status >/dev/null ) || fail "B 修复后 status 失败"
-( cd "$PB" && ./agent-workflow/bin/awf check >/dev/null ) || fail "B 按指引修复后 check 未通过"
+# 按指引修复（只改表头，保留归档原值），check 恢复 0；兼容旧大文件与目录式 current/、done/ 单文件
+for _fix in "$PB/agent-workflow/tasks/dev/current.md" "$PB/agent-workflow/tasks/dev/done.md" \
+            "$PB/agent-workflow/tasks/dev/current/"*.md "$PB/agent-workflow/tasks/dev/done/"*.md; do
+  [ -f "$_fix" ] || continue
+  sed -i '' 's/| Status |/| 状态 |/' "$_fix" 2>/dev/null \
+    || sed -i 's/| Status |/| 状态 |/' "$_fix"
+done
+( cd "$PB" && ./agent-workflow/bin/awf status >/dev/null )
+if ( cd "$PB" && ./agent-workflow/bin/awf check >/dev/null 2>&1 ); then
+  :
+else
+  echo "--- B 修复后 check 输出（调试） ---"
+  ( cd "$PB" && ./agent-workflow/bin/awf check 2>&1 | head -25 )
+  fail "B 按指引修复后 check 未通过"
+fi
 ok "B 按指引修复（| Status | → | 状态 |）后 check 通过"
 
 # ---------- C. 自定义 check_workflow.sh：默认保留，--force 才覆盖 ----------
