@@ -108,10 +108,12 @@ awf find 系统组件          # 别名 → 路径
 ## 测试
 
 ```bash
-bash test/smoke.sh        # init / check / status / bootstrap / --force / 全局索引 / 派发 CLI / 迁移修复指引
+bash test/smoke.sh        # init / check / status / bootstrap / --force / 全局索引 / 派发 CLI / 迁移修复指引 / locale 回归
 bash test/upgrade.sh      # awf upgrade：干净升级 / 旧账本迁移 / 自定义门禁保留 / 边界拒绝
 bash test/registry-concurrency.sh  # 全局索引并发写入无丢失更新
 ```
+
+冒烟测试已并入日常门禁：`awf check` 默认在校验末尾提示运行 smoke，`awf check --with-smoke` 全过后自动执行；`awf install-hooks` 可安装 git pre-commit 钩子（提交前自动跑 `check_workflow.sh`，未过即拒绝）。locale 相关说明与门禁细节见 [docs/enforcement.md](docs/enforcement.md)。
 
 CI（GitHub Actions）在每次 push 时运行同一套测试。
 

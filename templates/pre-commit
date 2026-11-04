@@ -1,0 +1,24 @@
+#!/bin/sh
+# awf pre-commit 钩子（DEV-117 日常门禁）
+# 由 `awf install-hooks` 安装到 .git/hooks/pre-commit（模板源：kit templates/pre-commit，
+# 或项目 agent-workflow/templates/pre-commit，后者由 `awf upgrade` 复制）。
+# 行为：提交前自动运行 ./agent-workflow/check_workflow.sh；未通过即拒绝提交并给出中文提示。
+# 只检查、不改写任何文件、不 push；卸载：awf install-hooks --uninstall。
+set -u
+
+# 钩子执行时可能不在仓库根；先切到 git 顶层（失败则放行，避免误伤非 git 场景）。
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$root" || exit 0
+
+# 非 agent-workflow 项目（钩子装错位置）直接放行。
+[ -x ./agent-workflow/check_workflow.sh ] || exit 0
+
+if ./agent-workflow/check_workflow.sh >/dev/null 2>&1; then
+  exit 0
+fi
+
+echo "== awf pre-commit：check_workflow.sh 未通过，已拒绝本次提交 ==" >&2
+echo "   查看 FAIL：./agent-workflow/check_workflow.sh（或 ./agent-workflow/bin/awf check）" >&2
+echo "   修复后重试 git commit；确需跳过（不推荐）：git commit --no-verify" >&2
+echo "   卸载本钩子：./agent-workflow/bin/awf install-hooks --uninstall" >&2
+exit 1

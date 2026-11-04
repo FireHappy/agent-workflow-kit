@@ -1936,5 +1936,109 @@ else
   bad "DEV-115 docs/design.md 缺少两段示意"
 fi
 
+# 22. DEV-117：默认 locale 下中文任务块解析（macOS awk 20200816 en_US.UTF-8 中文 == 恒真防回归）
+# 根因：en_US.UTF-8 下多字节中文 `==` 比较恒真（"状态"=="字段"→1），把
+# `| 证伪方法 | z |` 的 z 误当状态 → check 报「状态非法：z」。
+# 修复：awf 内所有 awk 统一以 LC_ALL=C 包装（awfk），比较退回字节语义。
+cat > "$PROJ/agent-workflow/tasks/debug/current.md" <<'D117'
+# 正在调试
+
+## [DEBUG-200] locale 解析回归
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | t |
+| 现象 | x |
+| 假设 | y |
+| 证伪方法 | z |
+
+### 下一步
+验证默认 locale 下解析正确。
+D117
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+
+dev117_locale_check() {
+  # $1 = LC_ALL 值；空串 = 继承调用环境（即"默认 locale"，不强制 LC_ALL=C）
+  local lc="$1" tag log
+  tag="${lc:-default}"
+  log="$TMP/d117-$tag.log"
+  if ( cd "$PROJ" && LC_ALL="$lc" ./agent-workflow/check_workflow.sh ) >"$log" 2>&1; then
+    if grep -q '状态非法：z' "$log"; then
+      bad "DEV-117 [$tag] 中文任务块被误判：状态非法：z"
+    else
+      ok "DEV-117 [$tag] 中文任务块解析正确（证伪方法 z 不再误当状态）"
+    fi
+  else
+    bad "DEV-117 [$tag] check 未通过（见 $log）"
+  fi
+}
+dev117_locale_check ""          # 默认 locale（继承当前环境，不强制 LC_ALL=C）
+if locale -a 2>/dev/null | grep -qx 'en_US.UTF-8'; then
+  dev117_locale_check en_US.UTF-8   # 复现 bug 的 locale：修复后必须同样正确
+else
+  ok "DEV-117 跳过 en_US.UTF-8 专项（系统无该 locale）"
+fi
+
+# 22.1 check --with-smoke 开关与默认末尾提示
+if "$KIT_DIR/bin/awf" check --help 2>&1 | grep -q -- '--with-smoke'; then
+  ok "DEV-117 check --help 列出 --with-smoke"
+else
+  bad "DEV-117 check --help 未列出 --with-smoke"
+fi
+if ( cd "$KIT_DIR" && ./bin/awf check ) 2>&1 | grep -q '请运行 bash test/smoke.sh'; then
+  ok "DEV-117 check 默认输出末尾提示跑 smoke（kit 形态）"
+else
+  bad "DEV-117 check 默认未提示跑 smoke"
+fi
+
+# 22.2 install-hooks：模板存在 / 安装 / 检查 / 脏账本拒绝提交 / 卸载
+assert_file "$KIT_DIR/templates/pre-commit" "templates/pre-commit"
+assert_file "$PROJ/agent-workflow/templates/pre-commit" "init 复制的 pre-commit 模板"
+git init -q "$PROJ" 2>/dev/null || true
+if ( cd "$PROJ" && ./agent-workflow/bin/awf install-hooks --check 2>&1 | grep -q 'NONE' ); then
+  ok "DEV-117 install-hooks --check 识别未安装状态"
+else
+  bad "DEV-117 install-hooks --check 未识别未安装状态"
+fi
+if ( cd "$PROJ" && ./agent-workflow/bin/awf install-hooks >/dev/null 2>&1 ) \
+   && [ -x "$PROJ/.git/hooks/pre-commit" ]; then
+  ok "DEV-117 install-hooks 安装成功且可执行"
+else
+  bad "DEV-117 install-hooks 安装失败"
+fi
+if ( cd "$PROJ" && ./agent-workflow/bin/awf install-hooks --check 2>&1 | grep -q '已安装且与模板一致' ); then
+  ok "DEV-117 install-hooks --check 确认已安装且与模板一致"
+else
+  bad "DEV-117 install-hooks --check 安装状态不符"
+fi
+# 构造脏账本（缺状态字段 + status 过期）→ 直接执行钩子应拒绝并输出中文提示
+cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'D117D'
+# 正在开发
+
+## [DEV-201] 脏块（缺状态）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| Owner | t |
+D117D
+if ( cd "$PROJ" && ./.git/hooks/pre-commit ) >"$TMP/d117-hook.log" 2>&1; then
+  bad "DEV-117 脏账本未被钩子拒绝"
+else
+  if grep -q '拒绝本次提交' "$TMP/d117-hook.log"; then
+    ok "DEV-117 钩子拒绝脏账本提交（含中文提示）"
+  else
+    bad "DEV-117 钩子拒绝了但缺中文提示（见 $TMP/d117-hook.log）"
+  fi
+fi
+if ( cd "$PROJ" && ./agent-workflow/bin/awf install-hooks --uninstall >/dev/null 2>&1 ) \
+   && [ ! -f "$PROJ/.git/hooks/pre-commit" ]; then
+  ok "DEV-117 install-hooks --uninstall 卸载成功"
+else
+  bad "DEV-117 install-hooks --uninstall 卸载失败"
+fi
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

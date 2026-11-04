@@ -597,3 +597,46 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无。uxrsample / openxr-uxr / dsh-settings / naboo 待各自收尾（提交改动、归档在途任务）后，可再派一轮 upgrade。
 | 完成日期 | 2026-11-04 |
 | DEV-116 | P1 | 全局框架升级至 DEV-115 激活式 Router：周报/pluto/FinderPathBar 升级（2 提交，pluto 框架被 gitignore）；uxrsample/openxr-uxr/dsh-settings/naboo 按规则跳过（改动或在途任务） | 2026-11-04 |
+
+
+## [DEV-117] 修复 locale 依赖的中文解析 bug + smoke 并入日常门禁
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | agent-workflow/bin/awf（awfk LC_ALL=C 包装 + check --with-smoke + install-hooks + upgrade/init 复制 pre-commit 模板）、bin/awf（同步）、templates/pre-commit（新）、agent-workflow/templates/pre-commit（新）、test/smoke.sh（第 22 节）、docs/enforcement.md（新）、README.md |
+| 依赖 | DEV-115（6752d63） |
+| 最近更新 | 2026-11-04 |
+
+### 目标与结果
+修复 macOS awk 20200816 在 en_US.UTF-8 下多字节中文 `==` 比较恒真（"状态"=="字段"→1）导致的账本字段误判（把 `| 证伪方法 | z |` 的 z 误当状态 → 「状态非法：z」，默认 locale smoke 7 项失败）；并把冒烟测试并入日常门禁。
+
+### 实现方案（选 A，无副作用）
+- `awfk() { LC_ALL=C awk "$@"; }` 包装 awf 内全部 16 处 awk 调用（check_current_file / status_build_block / bootstrap 区块注入 / render / release / find 等一并覆盖，不遗留）；ASCII 锚点 + 字面替换无字符级截断中文依赖，C locale 下行为一致。
+- smoke 第 22 节：默认 locale（继承环境、不强制 LC_ALL=C）构造含 现象/假设/证伪方法 的 debug 账本断言 check 不再报「状态非法：z」；系统有 en_US.UTF-8 时以该 locale 复跑（保证 C.UTF-8 环境下断言仍咬得住）。
+- 门禁：`awf check [--with-smoke]`（默认末尾提示跑 smoke；--with-smoke 全过后自动执行 bash test/smoke.sh，无 test/smoke.sh 时跳过说明）；`templates/pre-commit` + `awf install-hooks [--check|--uninstall]`；upgrade/init 复制 pre-commit 模板到项目 agent-workflow/templates/，upgrade 成功后提示安装。
+
+### 验收标准
+- [x] 默认 locale 与 LC_ALL=C 下 smoke 全绿（135/0，含新增断言）
+- [x] en_US.UTF-8（复现 bug 的 locale）下 smoke 全绿（135/0）；手工中文任务块（证伪方法 z）check rc=0、「状态非法：z」不再出现
+- [x] check --with-smoke 可用（kit 形态跑通 smoke；项目内副本无 test/smoke.sh 时跳过说明）；钩子拒绝脏账本提交（rc=1 + 中文提示）
+- [x] DEV-117 已归档，check_workflow.sh 全过，status.md 已刷新
+- [x] 只本地 commit，未 push
+
+### 验证
+- bash test/smoke.sh（C.UTF-8 默认）= 135/0；LC_ALL=C = 135/0；LC_ALL=en_US.UTF-8 = 135/0
+- bash -n agent-workflow/bin/awf、bin/awf、test/smoke.sh、install.sh、test/upgrade.sh 全过；python3 -m py_compile bin/awf-dispatch 通过
+- ./agent-workflow/check_workflow.sh = 49 ok / 0 FAIL；check --with-smoke = rc 0（smoke 全绿）
+- test/upgrade.sh 与 test/registry-concurrency.sh 均全部通过
+- 钩子演示：临时 git 仓库装钩子 → 脏账本 git commit 被拒（rc=1，中文提示，0 个 commit）→ --uninstall 成功
+- 附带修复：macOS bash 3.2 下 `$hook（` 的 UTF-8 标点首字节被并入变量名（hook�: unbound variable）→ 改为 `${hook}（` 花括号形式（enforcement 文档已记录）
+
+### 下一步
+无。各项目经 awf upgrade 拉取新框架后即可用 check --with-smoke 与 install-hooks。
+| 完成日期 | 2026-11-04 |
+| DEV-117 | P1 | locale 中文解析修复（awfk LC_ALL=C 包装）+ smoke 并入日常门禁（--with-smoke + pre-commit 钩子）；三 locale 下 smoke 135/0，钩子拒脏提交验证通过 | 2026-11-04 |

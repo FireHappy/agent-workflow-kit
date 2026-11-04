@@ -20,11 +20,21 @@ die() { printf 'FAIL  %s\n' "$*" >&2; exit 1; }
 today() { date '+%Y-%m-%d'; }
 now() { date '+%Y-%m-%d %H:%M'; }
 
+# awk 包装（DEV-117）：统一以 LC_ALL=C 调用，避免 macOS awk 20200816 在
+# en_US.UTF-8 等 UTF-8 locale 下多字节中文 `==` 字符串比较恒真（实测
+# "状态"=="字段" → 1），导致账本字段名误判（如把 `| 证伪方法 | z |` 的 z 当
+# 状态 → check 报「状态非法：z」）。LC_ALL=C 使字符串比较退回字节语义，中文
+# 不再互相误等；输出字节原样透传，UTF-8 内容不受影响（本文件 awk 均为 ASCII
+# 锚点 + 字面替换，无字符级截断中文的依赖，C locale 下行为一致）。
+awfk() {
+  LC_ALL=C awk "$@"
+}
+
 hash_files() {
   if command -v shasum >/dev/null 2>&1; then
-    cat "$@" | shasum -a 256 | awk '{print substr($1,1,8)}'
+    cat "$@" | shasum -a 256 | awfk '{print substr($1,1,8)}'
   else
-    cat "$@" | sha256sum | awk '{print substr($1,1,8)}'
+    cat "$@" | sha256sum | awfk '{print substr($1,1,8)}'
   fi
 }
 
@@ -54,10 +64,19 @@ awf — agent workflow framework
       按当前 project.yaml 重建 AGENTS.md 受控区块（只替换区块，不动其他内容）。
       若项目已在全局索引中，会顺带刷新其路径与别名。
 
-  awf check
+  awf check [--with-smoke]
       校验框架完整性、AGENTS.md 入口新鲜度、进行中任务的必填字段、
       status.md 新鲜度、done.md 归档块与生成副本漂移（kit 仓库）。
       状态枚举只允许 active/blocked/review/verify/handoff。
+      --with-smoke：check 全过后追加运行 bash test/smoke.sh（有 test/smoke.sh
+      时；无则跳过），把冒烟并入日常门禁。默认只在末尾提示「请跑 smoke」。
+
+  awf install-hooks [--check | --uninstall]
+      git pre-commit 钩子管理（日常门禁）：安装/检查/卸载 .git/hooks/pre-commit
+      ——提交前自动运行 ./agent-workflow/check_workflow.sh，非零即拒绝提交并输出
+      中文提示。模板来自 templates/pre-commit（kit）或
+      agent-workflow/templates/pre-commit（由 awf upgrade 复制）；需在 git 仓库内的
+      agent-workflow 项目中执行。钩子不入库、不 push、不自动卸载。
 
   awf status
       从 tasks/*/current.md、todo.md、done.md 生成 tasks/status.md。
@@ -92,7 +111,7 @@ awf — agent workflow framework
 
 说明:
   init 之后请编辑 agent-workflow/project.yaml，再运行 awf bootstrap。
-  check 的退出码 = 失败项数量，可直接用于 pre-commit / CI。
+  check 的退出码 = 失败项数量，可直接用于 pre-commit / CI（install-hooks 已内置）。
 EOF
 }
 
@@ -115,7 +134,7 @@ find_root() {
 # 使用调用方设置的 P_* 变量渲染模板；字面替换，不受正则或 & 影响。
 render() {
   local tpl="$1" out="$2"
-  awk \
+  awfk \
     -v v_id="$P_ID" \
     -v v_name="$P_NAME" \
     -v v_purpose="$P_PURPOSE" \
@@ -208,7 +227,7 @@ write_agents() {
     if [ "$nb" != "$ne" ] || [ "$nb" -gt 1 ]; then
       die "AGENTS.md 受控区块不完整（begin $nb / end ${ne}）：请手工补成一对 <!-- awf:begin --> … <!-- awf:end --> 后重试；本次未改写文件"
     fi
-    awk -v bf="$block" '
+    awfk -v bf="$block" '
       BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
       /<!-- awf:begin/ { printf "%s", blk; skip = 1; next }
       /<!-- awf:end/   { skip = 0; next }
@@ -481,6 +500,9 @@ cmd_init() {
     fi
   done
   cp "$TPL_DIR/AGENTS.md.tmpl" "$target/agent-workflow/templates/AGENTS.md.tmpl"
+  if [ -f "$TPL_DIR/pre-commit" ]; then
+    cp "$TPL_DIR/pre-commit" "$target/agent-workflow/templates/pre-commit"
+  fi
   cp "$KIT_DIR/bin/awf" "$target/agent-workflow/bin/awf"
   chmod +x "$target/agent-workflow/bin/awf"
   if [ -f "$KIT_DIR/bin/awf-dispatch" ]; then
@@ -594,7 +616,7 @@ cmd_bootstrap() {
 # 并额外校验归档表行：ID 格式 + 优先级 P0-P3 + YYYY-MM-DD 完成日期）。
 check_current_file() {
   local f="$1" type="$2" mode="${3:-current}"
-  awk -v wf="$type" -v m="$mode" '
+  awfk -v wf="$type" -v m="$mode" '
     function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
     function flush(   miss) {
       if (id == "") return
@@ -676,7 +698,7 @@ status_build_block() {
     for type in dev debug docs; do
       f="agent-workflow/tasks/$type/current.md"
       [ -f "$f" ] || continue
-      r="$(awk -F'|' -v wf="$type" '
+      r="$(awfk -F'|' -v wf="$type" '
         function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
         function flush() {
           if (id != "") printf "| %s | %s | %s | %s | %s | %s |\n", wf, id, pri, st, ow, title
@@ -719,7 +741,7 @@ status_build_block() {
     for type in dev debug docs; do
       f="agent-workflow/tasks/$type/todo.md"
       [ -f "$f" ] || continue
-      r3="$(awk -F'|' -v wf="$type" '
+      r3="$(awfk -F'|' -v wf="$type" '
         function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
         function pick_date(   i) {
           for (i = 2; i < NF; i++) if ($i ~ /^ *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *$/) return trim($i)
@@ -751,7 +773,7 @@ status_build_block() {
       # 取该类型全部归档行（不做 tail 截断），排序在汇总后统一做：
       # 日期倒序优先，同日按文件出现顺序倒序（越晚归档越靠前）。
       # 记录格式：seq|wf|id|prio|desc|date；date = 行内第一个 YYYY-MM-DD（兼容 4/5/6 列 + 链接列）。
-      r2="$(grep -nE '^\| *[A-Z]+-[0-9]+' "$f" | awk -F'|' -v wf="$type" '
+      r2="$(grep -nE '^\| *[A-Z]+-[0-9]+' "$f" | awfk -F'|' -v wf="$type" '
         function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
         {
           seq = $1
@@ -775,7 +797,7 @@ status_build_block() {
       # 排序：日期（第6字段）倒序 → 行号（第1字段）倒序；取前 8 条，输出规格化行
       printf '%s' "$done_rows" | sort -t'|' -k6,6r -k1,1nr \
         | head -n 8 \
-        | awk -F'|' -v wf='' '{ printf "| %s | %s | %s | %s | %s |\n", $2, $3, $4, $5, $6 }' >> "$block"
+        | awfk -F'|' -v wf='' '{ printf "| %s | %s | %s | %s | %s |\n", $2, $3, $4, $5, $6 }' >> "$block"
     fi
 
     printf '\n*最后更新：%s*\n' "$(now)" >> "$block"
@@ -844,6 +866,18 @@ copy_drift_report() {
 }
 
 cmd_check() {
+  local with_smoke=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --with-smoke) with_smoke=1; shift ;;
+      -h|--help)
+        say "用法：awf check [--with-smoke]" \
+             "  --with-smoke   check 全过后追加运行 bash test/smoke.sh（有则跑，无则跳过）"
+        return 0 ;;
+      *) die "未知参数：$1（用法：awf check [--with-smoke]）" ;;
+    esac
+  done
+
   local root fails=0 out f
   root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
   cd "$root"
@@ -936,6 +970,30 @@ agent-workflow/tasks/docs/done.md
     say ""
     say "发现 $fails 处问题"
   fi
+
+  # DEV-117：smoke 并入日常门禁——默认只在末尾提示；--with-smoke 实际执行
+  if [ -f "test/smoke.sh" ]; then
+    say ""
+    say "提示：改动/发版后请运行 bash test/smoke.sh，或直接用 awf check --with-smoke 一并执行"
+    if [ "$with_smoke" -eq 1 ]; then
+      if [ "$fails" -gt 0 ]; then
+        say "skip  check 存在 $fails 处问题，跳过 smoke（先修 FAIL 再 --with-smoke）"
+      else
+        say "== 运行 bash test/smoke.sh（--with-smoke）=="
+        local smoke_rc=0
+        bash test/smoke.sh || smoke_rc=$?
+        if [ "$smoke_rc" -ne 0 ]; then
+          say "FAIL  冒烟测试未通过（退出码 ${smoke_rc}）；修复后重跑"
+          return 1
+        fi
+        say ""
+        say "ok    smoke 全绿（日常门禁通过）"
+      fi
+    fi
+  elif [ "$with_smoke" -eq 1 ]; then
+    say ""
+    say "skip  test/smoke.sh 不存在（项目内副本无冒烟测试；kit 形态才可 --with-smoke）"
+  fi
   return "$fails"
 }
 
@@ -959,7 +1017,7 @@ cmd_status() {
       printf '<!-- awf:status:end -->\n'
     } > "$target"
   elif grep -q 'awf:status:begin' "$target"; then
-    awk -v bf="$block" '
+    awfk -v bf="$block" '
       BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
       /<!-- awf:status:begin/ { printf "<!-- awf:status:begin -->\n"; printf "%s", blk; skip = 1; next }
       /<!-- awf:status:end/   { skip = 0; printf "<!-- awf:status:end -->\n"; next }
@@ -1016,7 +1074,7 @@ release_next_dev_id() {
 
 release_current_id() {
   [ -f "$CURRENT" ] || return 0
-  awk -v ver="$VERSION" '
+  awfk -v ver="$VERSION" '
     index($0, "## [") == 1 && index($0, "release-prep " ver) > 0 {
       line = substr($0, 5); c = index(line, "] ")
       if (c > 0) { print substr(line, 1, c - 1); exit }
@@ -1026,7 +1084,7 @@ release_current_id() {
 
 release_done_id() {
   [ -f "$DONE" ] || return 0
-  awk -F'|' -v ver="$VERSION" '
+  awfk -F'|' -v ver="$VERSION" '
     index($0, "release-prep " ver) > 0 && $2 ~ /DEV-/ {
       id = $2; gsub(/^[ \t]+|[ \t]+$/, "", id); print id; exit
     }
@@ -1075,7 +1133,7 @@ release_archive() {
     say "账本：$DONE 已有 release-prep $VERSION 记录（幂等跳过）"
   fi
   if [ -f "$CURRENT" ]; then
-    awk -v id="$TASK_ID" '
+    awfk -v id="$TASK_ID" '
       $0 ~ "^## \\[" id "\\]" { skip = 1; next }
       skip && /^## \[/ { skip = 0 }
       !skip { print }
@@ -1186,7 +1244,7 @@ cmd_release_prep() {
   printf '%s\n' "$version" > "$ROOT/VERSION"
   say "已写 VERSION=$version"
   if grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
-    awk -v ver="$version" -v day="$(today)" '
+    awfk -v ver="$version" -v day="$(today)" '
       !done && /^## \[Unreleased\]/ {
         print "## [" ver "] - " day
         done = 1
@@ -1288,6 +1346,7 @@ cmd_upgrade() {
       "bin/awf:$KIT_DIR/bin/awf" \
       "bin/awf-dispatch:$KIT_DIR/bin/awf-dispatch" \
       "templates/AGENTS.md.tmpl:$TPL_DIR/AGENTS.md.tmpl" \
+      "templates/pre-commit:$TPL_DIR/pre-commit" \
       "README.md:$TPL_DIR/README.md"; do
     dst="$awf_dir/${item%%:*}"; src="${item#*:}"
     [ -f "$src" ] || continue
@@ -1356,7 +1415,84 @@ cmd_upgrade() {
   [ "$shim_cur" != "$shim_std" ] && [ "$force" -eq 0 ] \
     && warn "check_workflow.sh 为项目自定义门禁（未覆盖）；请另行确认其通过"
   say "后续：目标项目只本地 commit（消息含任务 ID），禁止 push"
+  if [ -d "$target/.git" ] && [ -f "$awf_dir/templates/pre-commit" ]; then
+    say "提示：可用 ./agent-workflow/bin/awf install-hooks 安装 git pre-commit 钩子（提交前自动跑 check，未过即拒绝）"
+  fi
   return "$rc"
+}
+
+# ---------------------------------------------------------------- install-hooks
+
+install_hooks_usage() {
+  cat <<'EOF'
+用法：awf install-hooks [--check | --uninstall]
+
+git pre-commit 钩子管理（DEV-117 日常门禁）：提交前自动运行
+./agent-workflow/check_workflow.sh，非零即拒绝提交并输出中文提示。
+
+  --check      只检查状态（已安装且一致 / 已安装但过期 / 未安装），不改写任何文件
+  --uninstall  删除已安装的钩子
+  默认         安装：钩子已与模板一致时跳过，否则覆盖为模板版本
+
+模板来源：kit 根 templates/pre-commit，或项目 agent-workflow/templates/pre-commit
+（由 awf upgrade 复制进项目）。需在 git 仓库内的 agent-workflow 项目中执行。
+钩子不入库，不影响其他协作者；只检查、不改写文件、不 push。
+EOF
+}
+
+cmd_install_hooks() {
+  local action="install"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check)     action="check"; shift ;;
+      --uninstall) action="uninstall"; shift ;;
+      -h|--help)   install_hooks_usage; return 0 ;;
+      *) die "未知参数：$1（用法见 awf install-hooks --help）" ;;
+    esac
+  done
+
+  local root tpl hook
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
+  [ -d "$root/.git" ] || die "不是 git 仓库：${root}（钩子需要 .git/hooks/pre-commit）"
+
+  tpl="$root/agent-workflow/templates/pre-commit"
+  if [ ! -f "$tpl" ] && [ -f "$TPL_DIR/pre-commit" ]; then
+    tpl="$TPL_DIR/pre-commit"   # kit 形态兜底（项目副本 upgrade 后通常已有模板）
+  fi
+  [ -f "$tpl" ] || die "找不到钩子模板：$TPL_DIR/pre-commit（kit）或 agent-workflow/templates/pre-commit（先 awf upgrade）"
+
+  hook="$root/.git/hooks/pre-commit"
+  case "$action" in
+    check)
+      if [ -f "$hook" ] && cmp -s "$hook" "$tpl"; then
+        say "ok    钩子已安装且与模板一致：$hook"
+      elif [ -f "$hook" ]; then
+        say "STALE 钩子存在但与模板不一致：${hook}（重跑 install-hooks 可覆盖为模板版本）"
+      else
+        say "NONE  未安装钩子：${hook}（运行 awf install-hooks 安装）"
+      fi
+      return 0
+      ;;
+    uninstall)
+      if [ -f "$hook" ]; then
+        rm -f "$hook"
+        say "已卸载钩子：$hook"
+      else
+        say "提示：钩子不存在，无需卸载"
+      fi
+      return 0
+      ;;
+  esac
+
+  if [ -f "$hook" ] && cmp -s "$hook" "$tpl"; then
+    say "ok    钩子已是最新，跳过安装：$hook"
+    return 0
+  fi
+  mkdir -p "$root/.git/hooks"
+  cp "$tpl" "$hook"
+  chmod +x "$hook"
+  say "已安装钩子：$hook"
+  say "效果：git commit 前自动跑 ./agent-workflow/check_workflow.sh，未过即拒绝并提示；确认跳过可用 git commit --no-verify"
 }
 
 # ---------------------------------------------------------------- 全局索引
@@ -1472,7 +1608,7 @@ write_registry_index() {
       printf '<!-- awf:projects:end -->\n'
     } > "$REGISTRY_INDEX"
   elif grep -q 'awf:projects:begin' "$REGISTRY_INDEX"; then
-    awk -v bf="$block" '
+    awfk -v bf="$block" '
       BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
       /<!-- awf:projects:begin/ { printf "<!-- awf:projects:begin -->\n"; printf "%s", blk; skip = 1; next }
       /<!-- awf:projects:end/   { skip = 0; printf "<!-- awf:projects:end -->\n"; next }
@@ -1540,7 +1676,7 @@ cmd_find() {
     say "未找到：$q"
     return 1
   fi
-  printf '%s\n' "$hits" | awk -F'|' '
+  printf '%s\n' "$hits" | awfk -F'|' '
     function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
     { printf "%s\t%s\n", trim($1), trim($3) }
   '
@@ -1555,15 +1691,16 @@ main() {
   case "$cmd" in
     init)      cmd_init "$@" ;;
     bootstrap) cmd_bootstrap ;;
-    check)     cmd_check ;;
+    check)     cmd_check "$@" ;;
     status)    cmd_status ;;
     register)  cmd_register ;;
     projects)  cmd_projects ;;
     find)      cmd_find "$@" ;;
     release-prep) cmd_release_prep "$@" ;;
     upgrade)     cmd_upgrade "$@" ;;
+    install-hooks) cmd_install_hooks "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / register / projects / find / release-prep / upgrade）" ;;
+    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / register / projects / find / release-prep / upgrade / install-hooks）" ;;
   esac
 }
 
