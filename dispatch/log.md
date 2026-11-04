@@ -742,3 +742,243 @@
 - 目标 HEAD：d4db560 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
 - 回到会话：在 GUI 的 `openxr-uxr` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.0]」（会话 session-ee838ae8-a99e-4f9c-b5d5-5ed4a257c038）继续提细节。
 
+## 2026-11-04 21:07 → pluto
+
+- 目标：/Users/chenlin/projects/Rokid-System/pluto
+- 任务：pluto · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/pluto.md）
+- 模块：通用
+- 工作区：pluto（dc20d453-a176-4406-834f-0d5d04269864）
+- 会话：session-a0e146ef-7125-44f6-8d8a-1ebd76e09578（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：a808fa6 chore(workflow): 框架升级至 v1.1.1（DISPATCH-135）
+- 回到会话：在 GUI 的 `pluto` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-a0e146ef-7125-44f6-8d8a-1ebd76e09578）继续提细节。
+
+## 2026-11-04 21:07 → naboo
+
+- 目标：/Users/chenlin/projects/UnityProjects/naboo
+- 任务：naboo · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/naboo.md）
+- 模块：通用
+- 工作区：naboo（1c1f6c3a-523c-454c-8257-243e520735c4）
+- 会话：session-f7ab9660-e5ab-40cd-adce-753f953608c7（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：73aeadc7a upgrade: agent-workflow v1.1.1（DISPATCH-135）
+- 回到会话：在 GUI 的 `naboo` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-f7ab9660-e5ab-40cd-adce-753f953608c7）继续提细节。
+
+## 2026-11-04 21:07 → 周报
+
+- 目标：/Users/chenlin/Documents/周报
+- 任务：周报 · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/weekly-report.md）
+- 模块：通用
+- 工作区：weekly report（cdfef88e-807f-4ef2-8556-de9cca1507e7）
+- 会话：session-6df0a1e8-a648-4be8-b80d-211e79a3803b（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：fc89796 upgrade: agent-workflow v1.1.1（DISPATCH-135）
+- 回到会话：在 GUI 的 `weekly report` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-6df0a1e8-a648-4be8-b80d-211e79a3803b）继续提细节。
+
+## 2026-11-04 21:07 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/finderpathbar.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-4aa2a868-165a-4dd4-8fd9-9b51e25c5bf2（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：c729412 fix: DEBUG-002 Save As/另存为弹框不再显示路径栏（打开类保留）
+- 回到会话：在 GUI 的 `finderpathbar` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-4aa2a868-165a-4dd4-8fd9-9b51e25c5bf2）继续提细节。
+
+## 2026-11-04 21:07 → im
+
+- 目标：/Users/chenlin/.dsh/im
+- 任务：im · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/dsh-im.md）
+- 模块：通用
+- 工作区：im（31ca7718-0b39-4f07-9f6a-ec6ebd100193）
+- 会话：session-ff62ea0d-7548-4690-bee7-ddb48d0c4fd5（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：2de59fa docs(dispatch): 撤销 uxrsample 装机 SP-303（用户手动处理，DISPATCH-142→handoff）+ 归档 DISPATCH-141（kit DEV-144 契约修复完成）+ prune 15 票据
+- 回到会话：在 GUI 的 `im` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-ff62ea0d-7548-4690-bee7-ddb48d0c4fd5）继续提细节。
+
+## 2026-11-04 21:07 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/dsh-settings.md）
+- 模块：通用
+- 工作区：dsh-settings（d6ddf210-7583-4013-bdad-3d3f07897034）
+- 会话：session-1599edec-e073-4990-b40b-86f87f2aa7df（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：4b1616c upgrade: agent-workflow v1.1.1（DISPATCH-135）
+- 回到会话：在 GUI 的 `dsh-settings` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-1599edec-e073-4990-b40b-86f87f2aa7df）继续提细节。
+
+## 2026-11-04 21:07 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/openxr-uxr.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-725fabc0-51f1-4a08-88bc-511ab8db346a（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：9ef1981 chore(agent-workflow): archive DEV-047 — build rokid_openxr_runtime inProcessStation3Release APK(v4.0.2)
+- 回到会话：在 GUI 的 `openxr-uxr` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-725fabc0-51f1-4a08-88bc-511ab8db346a）继续提细节。
+
+## 2026-11-04 21:07 → uxrsample
+
+- 目标：/Users/chenlin/projects/UnityProjects/uxrsample
+- 任务：uxrsample · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/uxrsample.md）
+- 模块：通用
+- 工作区：uxrsample（646d3ae9-385f-4bcf-8592-60ad4cdbddad）
+- 会话：session-f83aa4b3-d64c-436c-90cf-8a780388658a（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：6296ed60 fix(workflow): 版本锚点移出仓库根消除 IL2CPP 编译撞名，构建 uxr010 APK（DEV-076，DISPATCH-143 派发 kit 上游）
+- 回到会话：在 GUI 的 `uxrsample` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-f83aa4b3-d64c-436c-90cf-8a780388658a）继续提细节。
+
+## 2026-11-04 21:07 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/rokid-system-components.md）
+- 模块：通用
+- 工作区：rokid_system_components（3fdbbe7c-90af-425e-9916-e3c42e6494a0）
+- 会话：session-09a253b3-a76f-4a2a-9d22-cbfb7b228223（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：0c793f9c chore: 工作流信息改为本地保留，agent-workflow 移出 git 跟踪（不上传）
+- 回到会话：在 GUI 的 `rokid_system_components` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-09a253b3-a76f-4a2a-9d22-cbfb7b228223）继续提细节。
+
+## 2026-11-04 21:22 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · 工作流架构升级 v1.1.2（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.2/finderpathbar.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-c5a7ebdc-12f4-4baf-adb3-c1e0d8bd7a65（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：c729412 fix: DEBUG-002 Save As/另存为弹框不再显示路径栏（打开类保留）
+- 回到会话：在 GUI 的 `finderpathbar` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.2]」（会话 session-c5a7ebdc-12f4-4baf-adb3-c1e0d8bd7a65）继续提细节。
+
+## 2026-11-05 03:55 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · 决定：DEV-007 版本锚点裁决用户选定 C（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/DEV-007-decision-version-anchor.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-c5a7ebdc-12f4-4baf-adb3-c1e0d8bd7a65（[awf] [agent-workflow-kit] [决定：DEV-007 版本锚点裁决用户选定 C]）
+- 会话来源：复用（--session 指定）
+- 状态：已发送，未等待回合
+- 目标 HEAD：c729412 fix: DEBUG-002 Save As/另存为弹框不再显示路径栏（打开类保留）
+- 回到会话：在 GUI 的 `finderpathbar` 工作区打开「[awf] [agent-workflow-kit] [决定：DEV-007 版本锚点裁决用户选定 C]」（会话 session-c5a7ebdc-12f4-4baf-adb3-c1e0d8bd7a65）继续提细节。
+
+## 2026-11-05 07:22 → 周报
+
+- 目标：/Users/chenlin/Documents/周报
+- 任务：周报 · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/weekly-report.md）
+- 模块：通用
+- 工作区：weekly report（cdfef88e-807f-4ef2-8556-de9cca1507e7）
+- 会话：session-255d9713-0e22-4aa5-9f47-ba8f91f437bd（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：ad908ce chore(workflow): DEV-003 归档框架升级 v1.1.2（账本+经验沉淀）
+- 回到会话：在 GUI 的 `weekly report` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-255d9713-0e22-4aa5-9f47-ba8f91f437bd）继续提细节。
+
+## 2026-11-05 07:22 → pluto
+
+- 目标：/Users/chenlin/projects/Rokid-System/pluto
+- 任务：pluto · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/pluto.md）
+- 模块：通用
+- 工作区：pluto（dc20d453-a176-4406-834f-0d5d04269864）
+- 会话：session-d80df268-d8e1-46cf-9462-725aa433df96（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：204bb89 chore(workflow): 框架升级至 v1.1.2（DEV-101）
+- 回到会话：在 GUI 的 `pluto` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-d80df268-d8e1-46cf-9462-725aa433df96）继续提细节。
+
+## 2026-11-05 07:22 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/finderpathbar.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-c22e5456-9f4a-42f5-bc81-8a0a050b3c0d（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：a972cea chore(workflow): 框架升级至 v1.1.2（DEV-007）
+- 回到会话：在 GUI 的 `finderpathbar` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-c22e5456-9f4a-42f5-bc81-8a0a050b3c0d）继续提细节。
+
+## 2026-11-05 07:22 → im
+
+- 目标：/Users/chenlin/.dsh/im
+- 任务：im · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/im.md）
+- 模块：通用
+- 工作区：im（31ca7718-0b39-4f07-9f6a-ec6ebd100193）
+- 会话：session-bdc5ddc5-87b9-4e1e-aef6-e7146010e4b5（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：5ccf5ca docs: DISPATCH-144 派发（kit 发版 v1.1.3 + 全项目升级）
+- 回到会话：在 GUI 的 `im` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-bdc5ddc5-87b9-4e1e-aef6-e7146010e4b5）继续提细节。
+
+## 2026-11-05 07:23 → naboo
+
+- 目标：/Users/chenlin/projects/UnityProjects/naboo
+- 任务：naboo · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/naboo.md）
+- 模块：通用
+- 工作区：naboo（1c1f6c3a-523c-454c-8257-243e520735c4）
+- 会话：session-d0a4c082-c0ec-434a-94ab-166190963665（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：e2b90390e chore(workflow): 框架升级至 v1.1.2 DEV-101
+- 回到会话：在 GUI 的 `naboo` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-d0a4c082-c0ec-434a-94ab-166190963665）继续提细节。
+
+## 2026-11-05 07:23 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/rokid-system-components.md）
+- 模块：通用
+- 工作区：rokid_system_components（3fdbbe7c-90af-425e-9916-e3c42e6494a0）
+- 会话：session-89b66bdb-4133-4a2a-82f9-16b64f9c217f（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：3b9dac0c chore(workflow): 框架升级至 v1.1.2（DEV-033）
+- 回到会话：在 GUI 的 `rokid_system_components` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-89b66bdb-4133-4a2a-82f9-16b64f9c217f）继续提细节。
+
+## 2026-11-05 07:23 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/dsh-settings.md）
+- 模块：通用
+- 工作区：dsh-settings（d6ddf210-7583-4013-bdad-3d3f07897034）
+- 会话：session-32ffddc2-fcc7-4287-876d-5fd07519ca9c（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：dad2b96 chore(workflow): 框架升级至 v1.1.2 DEV-014
+- 回到会话：在 GUI 的 `dsh-settings` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-32ffddc2-fcc7-4287-876d-5fd07519ca9c）继续提细节。
+
+## 2026-11-05 07:23 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/openxr-uxr.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-c3b43b23-9c50-45b1-8ed4-655187866ac5（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：be890da chore(workflow): 框架升级至 v1.1.2（DEV-048）
+- 回到会话：在 GUI 的 `openxr-uxr` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-c3b43b23-9c50-45b1-8ed4-655187866ac5）继续提细节。
+
+## 2026-11-05 07:23 → uxrsample
+
+- 目标：/Users/chenlin/projects/UnityProjects/uxrsample
+- 任务：uxrsample · 工作流架构升级 v1.1.3（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.3/uxrsample.md）
+- 模块：通用
+- 工作区：uxrsample（646d3ae9-385f-4bcf-8592-60ad4cdbddad）
+- 会话：session-8a4195bf-9484-4ff2-a385-4c466576d568（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：25b1bd5b chore(workflow): 框架升级至 v1.1.2 DEV-078
+- 回到会话：在 GUI 的 `uxrsample` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.3]」（会话 session-8a4195bf-9484-4ff2-a385-4c466576d568）继续提细节。
+
