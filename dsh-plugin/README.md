@@ -104,6 +104,11 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.2.5（DEBUG-001）**：修复 md 表格渲染重叠（长摘要列溢出覆盖相邻列）
+  - 渲染层（`lib/client.js` `mdToHtml`）：表格 td 此前仅第 3 列（任务描述）允许换行，其余列一律 `white-space:nowrap`——`实现方案摘要` 列的超长文本（无空格长串：包路径 / commit hash / JSON 片段）在 `table-layout:fixed` 下不换行直接绘出单元格边界，横向覆盖 `完成日期`/`状态` 列、纵向压贴下一行（6 列归档表复现）
+  - 修复：全部 td 统一 `word-break:break-word;overflow-wrap:anywhere`（去除 nowrap）；colgroup 列宽按比例归一化合计 100%（旧值 18+12+52+18+16+16=132% 溢出）；4 列 docs 型表格宽度不变（回归）
+  - 验证：抽取 mdToHtml 对真实 6 列归档表合成渲染断言通过 + 单测回归 26/26 全绿
+
 - **0.2.4（DEV-103 等）**：看板初始化 agent 化 + 引导卡提亮
   - 初始化改走 agent 完整配置（`lib/index.js` 新增 `POST /awf/init/agent`）：受管理子代理读项目上下文（README/技术栈/结构）→ 生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin/awf + 标准 4 列账本骨架 + 初始真实任务）→ awf check/status 验证 → 回报；替代仅空模板的最小骨架
   - `buildActPrompt` 新增 init 动作分支（`INIT_AGENT_GUIDE`），`AGENT_ACTIONS` 白名单加入 init

@@ -1423,10 +1423,17 @@ window.__ModuleLoader__.load({
         const maxCols = Math.max(first.length, ...bodyRows.map((r) => r.length))
         const tdStyle = 'padding:3px 8px;border:1px solid var(--dsw-alias-hairline,rgba(127,127,127,.16));font-size:' + F(13) + 'px;vertical-align:top'
         const head = '<tr>' + first.map((c, i) => '<th style="' + tdStyle + ';font-weight:700;text-align:left;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.06))">' + inline(c) + '</th>').join('') + '</tr>'
-        const rows = bodyRows.map((r) => '<tr>' + Array.from({ length: maxCols }, (_, i) => '<td style="' + tdStyle + (i === 2 ? ';word-break:break-word' : ';white-space:nowrap') + '">' + inline(r[i] || '') + '</td>').join('') + '</tr>').join('')
-        // 列宽比例：描述（第3列）最宽，其余按内容自适应（fixed 布局下显式分配）
+        // DEBUG-001：全部 td 统一允许换行（word-break + overflow-wrap:anywhere），
+        // 去掉 nowrap——此前仅第 3 列可换行，长摘要（无空格长串/路径/commit hash/JSON）
+        // 在 table-layout:fixed 下不换行直接绘出单元格边界，横向覆盖完成日期/状态列、
+        // 纵向压贴下一行（见 rokid_system_components dev/done.md 看板重叠）
+        const rows = bodyRows.map((r) => '<tr>' + Array.from({ length: maxCols }, (_, i) => '<td style="' + tdStyle + ';word-break:break-word;overflow-wrap:anywhere">' + inline(r[i] || '') + '</td>').join('') + '</tr>').join('')
+        // 列宽比例：描述（第3列）最宽，其余按内容自适应；按比例归一化保证合计 100%
+        // （固定布局下显式分配；6 列时旧值 18+12+52+18+16+16=132% 溢出加剧重叠）
         const colWidths = [18, 12, 52, 18]
-        const colgroup = '<colgroup>' + Array.from({ length: maxCols }, (_, i) => '<col style="width:' + (colWidths[i] || Math.floor(100 / maxCols)) + '%">').join('') + '</colgroup>'
+        const rawW = Array.from({ length: maxCols }, (_, i) => colWidths[i] != null ? colWidths[i] : 100 / maxCols)
+        const sumW = rawW.reduce((a, b) => a + b, 0)
+        const colgroup = '<colgroup>' + rawW.map((w) => '<col style="width:' + Math.round((w / sumW) * 1000) / 10 + '%">').join('') + '</colgroup>'
         html.push('<table style="border-collapse:collapse;margin:6px 0;max-width:100%;table-layout:fixed;width:100%">' + colgroup + head + rows + '</table>')
         tableBuf = []
         inTable = false
