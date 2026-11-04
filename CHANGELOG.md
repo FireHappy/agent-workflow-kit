@@ -1,4 +1,12 @@
-## [Unreleased]
+## [1.1.2] - 2026-11-04
+
+### Fixed
+- **dispatch 审查修复（DEV-144，DISPATCH-138）**：修正派发器 S1/S2（会话选择与命名边界）、M1（多轮 --session 续发的票据/模块解析）、M2（队列与复用的状态一致性）四类问题，smoke 增加对应回归场景
+
+### Changed
+- **版本锚点可配置（DEV-145，DISPATCH-143）**：`release-prep` 与 `upgrade`（DEV-133 锚点同步）的版本锚点读写一律改读目标 `agent-workflow/project.yaml` 的 `version_file`（默认仍为仓库根 `VERSION`，未配置的项目行为不变）。锚点**不得放进 clang 头文件搜索路径**（如 `-I"."` / Unity IL2CPP 的 Bee）：macOS 大小写不敏感 FS 上根 `VERSION` 与 C++ 标准库头 `<version>` 撞名，`#include <version>` 被解析成该文本文件报 `expected unqualified-id` 并级联误报（Linux/CI 不触发）。文档（`templates/workflows/release.md` / `docs/release.md` 双副本）同步说明
+- **需用户确认时决策回派发端（DISPATCH-141）**：目标 worker 不得在目标会话内向用户提问（ask_user_question 等），按回报格式写「阻塞：需用户确认 X（问题 + 选项 + 建议 + 解除条件）」并保持会话等待、**不擅自行事**；派发方（router）转述用户决策后用 `awf-dispatch --session <会话ID>` 续发，worker 继续。awf-dispatch 注入文本、docs/dispatch.md、docs/design.md 与跨项目模板（AGENTS.md.tmpl / cross-project.md 双副本）同步，替换「用户在目标会话内回复即可继续」旧表述
+
 
 ### Changed
 - **版本锚点可配置（DEV-145，DISPATCH-143）**：`release-prep` 与 `upgrade`（DEV-133 锚点同步）的版本锚点读写一律改读目标 `agent-workflow/project.yaml` 的 `version_file`（默认仍为仓库根 `VERSION`，未配置的项目行为不变）。锚点**不得放进 clang 头文件搜索路径**（如 `-I"."` / Unity IL2CPP 的 Bee）：macOS 大小写不敏感 FS 上根 `VERSION` 与 C++ 标准库头 `<version>` 撞名，`#include <version>` 被解析成该文本文件报 `expected unqualified-id` 并级联误报（Linux/CI 不触发）。文档（`templates/workflows/release.md` / `docs/release.md` 双副本）同步说明
