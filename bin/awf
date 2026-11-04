@@ -1256,10 +1256,10 @@ release_usage() {
 一键发版装配（在 kit 仓库根运行）：
   0. 检查生成副本漂移（bin/awf / bin/awf-dispatch / templates/ ↔ agent-workflow/），有漂移即拒绝
   1. ./bin/awf init . --force --no-register + bootstrap 刷新生成副本与 AGENTS 入口
-  2. 在 agent-workflow/tasks/dev/current.md 写入 release-prep 任务块
+  2. 在 agent-workflow/tasks/dev/current/ 写入 release-prep 任务文件（release_write_current）
   3. 改 VERSION；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
   4. 跑 ./agent-workflow/check_workflow.sh 与 bash test/smoke.sh
-  5. ./agent-workflow/bin/awf status 刷新 status.md，并把任务块归档到 done.md
+  5. ./agent-workflow/bin/awf status 刷新 status.md，并把任务文件归档到 dev/done/（状态 done + 完成日期）
   6. 打印下一步 git add/commit/tag/push 命令与建议 commit 消息
 
 --dry-run   只打印将执行的动作，不改文件、不跑命令
@@ -1423,7 +1423,7 @@ cmd_release_prep() {
     if [ -n "$(release_done_id)" ]; then
       say "[dry-run] 账本：release-prep ${version} 已归档（${TASK_ID}），跳过写入"
     else
-      say "[dry-run] 账本：写 $CURRENT 块 [$TASK_ID] release-prep ${version}，校验后归档到 $DONE"
+      say "[dry-run] 账本：写 $ROOT/agent-workflow/tasks/dev/current/$TASK_ID.md [${TASK_ID}] release-prep ${version}，校验后归档到 dev/done/"
     fi
     say "[dry-run] 写 VERSION=$version"
     if [ -f "$ROOT/CHANGELOG.md" ] && grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
@@ -1433,7 +1433,7 @@ cmd_release_prep() {
     fi
     say "[dry-run] ./agent-workflow/check_workflow.sh"
     say "[dry-run] bash test/smoke.sh"
-    say "[dry-run] 归档任务块到 done.md"
+    say "[dry-run] 归档任务文件到 dev/done/（状态 done + 完成日期）"
     say "[dry-run] ./agent-workflow/bin/awf status"
     say "[dry-run] 下一步（不会执行）：git add -A && git commit -m \"release: v${version}（${TASK_ID}）\" && git tag -a v${version} -m \"v${version}\" && git push origin main v$version"
     return 0

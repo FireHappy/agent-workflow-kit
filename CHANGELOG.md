@@ -1,3 +1,18 @@
+## [1.0.0] - 2026-11-04
+
+### Added
+- **目录式任务账本（DEV-127）**：`tasks/<type>/{todo,current,done}/<ID>.md` 单任务文件（状态=所在目录），三个目录各一个 `README.md` 检索索引（由 `awf status` 生成）；`awf status` 幂等迁移旧形态——含块大文件拆为单任务文件（archived/完成/Archive 归一为 done）、todo 表行生成待办文件、空表删除；check F1-F6 三目录扫描 + 9 个目录 README required 校验；看板插件 dsh-awf-dashboard 0.3.0 读写目录式（DEV-129）
+- awf-dispatch 会话命名 `[awf] <目标项目>` + 批量派发队列等待 `--queue-timeout 60s`（DEV-126）
+- 去掉「来源=工作流禁转派」硬校验（DEV-128）：继续转派只提示核对转派理由，不拦截、不 FAIL
+
+### Changed
+- 认领/归档语义：认领= `todo/` → `current/` 移文件 + 状态改 active；归档= `current/` → `done/` + 状态 done + 补完成日期（`awf release-prep` 自动归档）
+- status.md 数据来源 = 目录任务文件（账本改动后未跑 `awf status` → check 报「已过期」）；三目录 README 为检索视图、请勿手改
+- smoke 新增第 28 节目录式生命周期断言（认领/归档/README 同步/check），176/0
+
+### Fixed
+- en_US.UTF-8 下 `task_field` 中文键比较恒真、done 段 `sort` 排序错位（DEV-117 同款 locale 坑的目录式变体）：全部 awk 走 awfk、sort 固定 `LC_ALL=C`
+
 ## [0.9.0] - 2026-11-04
 
 ### Added
