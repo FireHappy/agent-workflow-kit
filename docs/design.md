@@ -112,6 +112,7 @@ worker/router 对偶模型下，任务无限转包会稀释责任、膨胀票据
 ```
 
 需用户确认时（DISPATCH-141）：worker 不得在目标会话内向用户提问，回报「阻塞：需用户确认 X（问题 + 选项 + 建议 + 解除条件）」→ router 转述用户 → 用户决策 → `awf-dispatch --session <会话ID>` 续发决策 → worker 继续；决策送达前不擅自行事。
+远程办公状态判定（DISPATCH-143 定义升级：熄屏＝远程办公状态，不是「离线/失联」）：worker 需用户确认前先判本机显示器状态（`awf-dispatch --screen-state`：macOS CoreGraphics 锁屏 + `pmset -g log` 最近 Display 事件，失败保守 unknown）。off/locked＝远程办公状态（remote，用户不在电脑前、但经 IM 在线随时可决策）→ 照常回报阻塞并注明「远程办公状态（remote），请派发端经 IM 通知用户决策」——派发端主动、立即经 IM 送达决策、用户手机即可决策（远程办公正常流程的一部分，不是「等待用户回来」）；on（亮屏，用户在电脑前）→ 原 DISPATCH-141 路径；unknown → 注明由派发端酌情。派发端收到「远程办公状态」→ 立即经 IM（飞书）主动通知或置待决队列（防遗忘锚点），决策后 `--session` 续发。
 
 ### 示意二：worker 转派被拒
 ```text

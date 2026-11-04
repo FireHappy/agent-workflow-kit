@@ -37,7 +37,7 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、在 de
 4. 需要本回合结果/落地确认时显式加 `--wait --timeout 900`；不加时稍后回到图形界面会话查看目标 agent 的任务包五项回报
 5. 收尾：写 `dispatch/log.md` → 更新本仓库账本 → `--prune` 归档票据 → 本地 commit
 6. 有依赖的目标等上游回报「成功 + commit 已落地」后再派；失败/超时按 `--wait` 退出码决定重试、改派或降级
-7. worker 回报「阻塞：需用户确认 X」时（DISPATCH-141）：由你（router）转述用户、拿到决策后 `awf-dispatch <目标> <票据> --session <会话ID>` 续发决策给 worker（worker 不在目标会话内提问、决策送达前不擅自行事）
+7. worker 回报「阻塞：需用户确认 X」时（DISPATCH-141）：由你（router）转述用户、拿到决策后 `awf-dispatch <目标> <票据> --session <会话ID>` 续发决策给 worker（worker 不在目标会话内提问、决策送达前不擅自行事）。回报带「远程办公状态（remote）」标记（DISPATCH-143 定义升级，worker 用 `awf-dispatch --screen-state` 判出 off/locked；熄屏＝远程办公状态：用户不在电脑前、但经 IM 在线随时可决策，不是「离线」）→ **立即、主动**经 IM（飞书小迪司）通知用户决策或置待决队列（派发方账本登记防遗忘），用户远程决策后转述续发——这是远程办公正常流程的一部分，不等用户回电脑前
 
 ### 脚本做了什么
 

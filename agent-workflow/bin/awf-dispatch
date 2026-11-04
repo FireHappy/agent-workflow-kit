@@ -697,6 +697,85 @@ class DshApi:
         return value.get("workspace", {})
 
 
+# ---------------------------------------------------------------- 本机状态感知（DISPATCH-143）
+
+
+def _session_locked_cg() -> bool:
+    """CoreGraphics 锁屏判定（macOS）。CoreGraphics ctypes 探针在部分环境/机型会段错误
+    （CFDictionaryGetValue 指针传递不稳），因此**必须经子进程运行**，段错误只杀子进程、
+    绝不崩派发器主进程；子进程异常/超时一律返回 False（由 pmset 熄屏判据兜底）。
+    锁屏不可探测时该场景自动退化为按熄屏（off/locked 都会判定为远程办公状态（remote），
+    由派发端经 IM 即时通知用户决策——不是「离线」，是用户远程办公的正常流程）。
+    """
+    code = (
+        "import ctypes,sys\n"
+        "cg=ctypes.cdll.LoadLibrary('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')\n"
+        "cg.CGSessionCopyCurrentDictionary.restype=ctypes.c_void_p\n"
+        "cg.CFDictionaryGetValue.argtypes=[ctypes.c_void_p,ctypes.c_void_p]\n"
+        "cg.CFDictionaryGetValue.restype=ctypes.c_void_p\n"
+        "cg.CFBooleanGetValue.argtypes=[ctypes.c_void_p]\n"
+        "cg.CFBooleanGetValue.restype=ctypes.c_uint8\n"
+        "d=cg.CGSessionCopyCurrentDictionary()\n"
+        "if not d: sys.exit(0)\n"
+        "v=cg.CFDictionaryGetValue(d,ctypes.c_char_p(b'CGSSessionScreenIsLocked'))\n"
+        "sys.exit(1 if (v and cg.CFBooleanGetValue(v)) else 0)\n"
+    )
+    try:
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=5)
+        return proc.returncode == 1
+    except Exception:
+        return False
+
+
+def _display_state_from_log(text: str):
+    """解析 `pmset -g log` 文本：日志按时间序，取最近一次 Display 电源转事件后的状态
+    （"on"/"off"）；完全没有转事件或解析不了返回 None。纯函数，供单元断言。
+    限制：pmset Display 事件行前缀为定宽 `YYYY-MM-DD HH:MM:SS`，同偏移下整行字典序
+    ＝时间序（真实日志单偏移 +0800）；跨时区偏移或同秒双事件理论上可能误序，
+    当前判据对此不敏感（熄屏/亮屏窗口远大于秒级）。"""
+    last_on = None
+    last_off = None
+    for line in text.splitlines():
+        if "Display is turned on" in line:
+            last_on = line
+        elif "Display is turned off" in line:
+            last_off = line
+    if last_off and last_on:
+        return "off" if last_off >= last_on else "on"
+    if last_off:
+        return "off"
+    if last_on:
+        return "on"
+    return None
+
+
+def detect_screen_state() -> str:
+    """macOS 本机显示器状态：on（亮屏）/ off（熄屏）/ locked（锁屏）/ unknown（未知）。
+
+    判据（DISPATCH-143）：锁屏用 CoreGraphics CGSessionCopyCurrentDictionary 的
+    CGSSessionScreenIsLocked（ctypes，纯 stdlib）；熄屏用 `pmset -g log` 最近一次
+    Display is turned off/on 中较新者。任何一步失败都保守返回 unknown——
+    绝不把熄屏误报成亮屏。非 macOS 直接 unknown。
+    off/locked 的语义解释为远程办公状态（remote，DISPATCH-143 定义升级：用户不在电脑前、
+    但经 IM 在线可随时决策），由回报标记与派发端承载，本函数只报物理状态。
+    """
+    if sys.platform != "darwin":
+        return "unknown"
+    if _session_locked_cg():
+        return "locked"
+    try:
+        proc = subprocess.run(
+            ["pmset", "-g", "log"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+    except Exception:
+        return "unknown"
+    if proc.returncode != 0:
+        return "unknown"
+    state = _display_state_from_log(proc.stdout)
+    return state if state in ("on", "off") else "unknown"
+
+
 # ---------------------------------------------------------------- 任务包与等待
 
 
@@ -729,6 +808,12 @@ def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = Fa
         "按回报格式写「阻塞：需用户确认 X（问题 + 选项 + 建议 + 解除条件）」并保持会话等待；"
         "由派发方（router）转述用户、拿到决策后用 `awf-dispatch --session <会话ID>` 续发；"
         "决策送达前**不得擅自执行推荐方案**，必须等待派发端转达的用户决策（DISPATCH-141）。\n"
+        "- 远程办公状态判定（DISPATCH-143 定义升级：熄屏＝远程办公，非「离线」）：需用户确认/决策前，先运行 `awf-dispatch --screen-state`"
+        "判定本机显示器状态；`off`（熄屏）/`locked`（锁屏）= 远程办公状态（remote）——用户不在电脑前，但经远程 IM 通道"
+        "（飞书小迪司）在线、随时可决策 → **照常回报**「阻塞：需用户确认 X（远程办公状态，请派发端经 IM 通知用户决策）」"
+        "并保持会话等待、不擅自决策；派发端会**主动、立即**经 IM 通知用户（用户手机即可决策）——这是远程办公正常流程的一部分，"
+        "不存在「等待用户回来」的被动态；`on`（亮屏，用户在电脑前）= 按上述原路径（DISPATCH-141）；"
+        "`unknown` = 照常回报阻塞并注明「远程办公状态未知」，由派发端酌情经 IM 通知。\n"
         "- 完成后按任务文件要求的回报格式回复，并保留本会话（多轮续跑）；"
         "用户后续细节与决策经派发端转达（`awf-dispatch --session <会话ID>` 续发）。\n"
     )
@@ -2394,6 +2479,13 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--title", default="", help="完全定制会话标题（默认 [awf] [派发者] [任务名]）")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
+    parser.add_argument(
+        "--screen-state",
+        action="store_true",
+        help="只查询本机（macOS）显示器状态并退出，不派发：on 亮屏 / off 熄屏 / "
+             "locked 锁屏 / unknown 未知（DISPATCH-143：off/locked＝远程办公状态（remote），"
+             "决策经 IM 即时通知；失败保守 unknown）",
+    )
     # DISPATCH-139 P1：--allow-dirty[=tasks] 范围豁免——把 `--allow-dirty=<scope>` 归一为
     # 裸 `--allow-dirty`（store_true），scope 单独记录；裸 --allow-dirty 向后兼容全豁免。
     allow_dirty_scope = ""
@@ -2414,6 +2506,14 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     args.allow_dirty_scope = allow_dirty_scope
 
+    # DISPATCH-143（reviewer-d143 minor-1）：--screen-state 与其它模式显式互斥，
+    # 明确退化组合语义，不做静默忽略。
+    if args.screen_state and (args.prune or args.session or args.headless or args.handoff
+                              or args.target or args.task):
+        parser.error(
+            "--screen-state 只查询本机显示器状态后退出，不能与 --prune/--apply/--session/"
+            "--headless/--handoff 或 target/task 位置参数同用"
+        )
     if args.apply and not args.prune:
         parser.error("--apply 只能配合 --prune 使用")
     if args.session and not args.reuse:
@@ -2428,6 +2528,13 @@ def main(argv=None) -> int:
         if args.headless or args.handoff:
             parser.error("--prune 不能与 --headless / --handoff 同时使用")
         return run_prune(args)
+    if args.screen_state:
+        state = detect_screen_state()
+        if args.json:
+            print(json.dumps({"screen_state": state}))
+        else:
+            print(state)
+        return 0
     if not args.target or not args.task:
         parser.error("缺少参数：需要 target 与 task（或用 --prune 归档票据）")
 

@@ -1088,6 +1088,29 @@ with contextlib.redirect_stderr(io.StringIO()):
     else:
         raise AssertionError("P1 回归：--allow-dirty= 空值应被拒绝")
 
+# S5（DISPATCH-143）：熄屏判定——解析器纯函数 fixtures + 本机状态契约 + CLI 不崩
+_off_then_on = (
+    "2026-11-04 19:00:00 +0800 Notification \tDisplay is turned off\n"
+    "2026-11-04 19:35:39 +0800 Notification \tDisplay is turned on\n"
+)
+_on_then_off = (
+    "2026-11-04 19:35:39 +0800 Notification \tDisplay is turned on\n"
+    "2026-11-04 21:07:01 +0800 Notification \tDisplay is turned off\n"
+)
+assert module._display_state_from_log(_off_then_on) == "on", "熄屏→亮屏应为 on"
+assert module._display_state_from_log(_on_then_off) == "off", "亮屏→熄屏应为 off"
+assert module._display_state_from_log("2026-11-04 19:35:39 \tDisplay is turned on\n") == "on"
+assert module._display_state_from_log("2026-11-04 21:07:01 \tDisplay is turned off\n") == "off"
+assert module._display_state_from_log("随便的日志行\n") is None, "无转事件应 None"
+_state = module.detect_screen_state()
+assert _state in ("on", "off", "locked", "unknown"), _state
+probe = subprocess.run([sys.argv[1], "--screen-state"], capture_output=True, text=True, timeout=30)
+assert probe.returncode == 0, probe.returncode
+assert probe.stdout.strip() in ("on", "off", "locked", "unknown"), probe.stdout
+probe_json = subprocess.run([sys.argv[1], "--screen-state", "--json"], capture_output=True, text=True, timeout=30)
+assert probe_json.returncode == 0
+assert json.loads(probe_json.stdout)["screen_state"] in ("on", "off", "locked", "unknown"), probe_json.stdout
+
 # M1：read_task 票据必备字段校验（目标项目/任务编号/来源/路由裁决），缺失拒发并明示缺项
 with tempfile.TemporaryDirectory() as tmp:
     good = pathlib.Path(tmp) / "good.md"
@@ -2830,6 +2853,33 @@ if grep -q '决策回派发端' "$KIT_DIR/docs/dispatch.md" \
   ok "DISPATCH-141 docs/dispatch.md 决策回派发端流程（转述→决策→--session 续发）与模板同步"
 else
   bad "DISPATCH-141 决策回派发端流程缺失或模板未同步"
+fi
+
+# 30.9 DISPATCH-143 定义升级：远程办公状态（remote）——熄屏判定（--screen-state）+ 注入文本 + 文档/模板同步
+if grep -q 'detect_screen_state' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q -- '--screen-state' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'awf-dispatch --screen-state' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/docs/design.md" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/AGENTS.md" \
+   && grep -q 'DISPATCH-143' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q 'DISPATCH-143' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q 'DISPATCH-143' "$KIT_DIR/AGENTS.md" \
+   && grep -q 'DISPATCH-143' "$KIT_DIR/docs/design.md"; then
+  ok "DISPATCH-143 远程办公状态（remote：熄屏判定 + 决策经 IM 即时通知）注入文本与文档/模板同步"
+else
+  bad "DISPATCH-143 远程办公状态或注入文本未同步"
+fi
+# 30.9b DISPATCH-143 术语统一：无「用户暂离/away」残留（文档/代码/模板统一为「远程办公状态（remote）」）
+if grep -rn '用户暂离\|away' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/templates" \
+   "$KIT_DIR/bin/awf-dispatch" "$KIT_DIR/AGENTS.md" 2>/dev/null | grep -v '^Binary'; then
+  bad "DISPATCH-143 术语残留：发现「用户暂离/away」，应统一为「远程办公状态（remote）」"
+else
+  ok "DISPATCH-143 术语统一：无「用户暂离/away」残留，统一为「远程办公状态（remote）」"
 fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
