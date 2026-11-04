@@ -2144,5 +2144,69 @@ else
   bad "DEV-121 init 缺省空 role 键/fallback 异常"
 fi
 
+# 24. DEV-122：派发规则同步 role（--check-role 软校验 + 决策三件套含 role）
+# 24.0 构造三场景任务文件（匹配 / 不匹配）
+ROLE_TASK_DIR="$TMP/role-tasks"; mkdir -p "$ROLE_TASK_DIR"
+printf '# 任务：执行冒烟测试并生成测试报告\n- 类型：dev\n- 来源：用户\n正文：在目标项目执行冒烟测试。\n' > "$ROLE_TASK_DIR/match.md"
+printf '# 任务：外汇交易数据分析与图表\n- 类型：dev\n- 来源：用户\n正文：分析外汇交易数据并生成图表。\n' > "$ROLE_TASK_DIR/mismatch.md"
+# 24.1 --help 含 --check-role
+if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--check-role'; then
+  ok "DEV-122 awf-dispatch --help 含 --check-role"
+else
+  bad "DEV-122 --help 缺少 --check-role"
+fi
+# 24.2 决策三件套模板与跨项目规范含 role（防文档回归）
+if grep -q 'role' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q 'role' "$KIT_DIR/agent-workflow/workflows/cross-project.md"; then
+  ok "DEV-122 决策三件套模板与跨项目规范含 role 匹配语义"
+else
+  bad "DEV-122 决策三件套模板/规范缺 role"
+fi
+# 24.3 --check-role 匹配：输出匹配且无警告、rc=0
+if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ4" "$ROLE_TASK_DIR/match.md" \
+     --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-match.log" 2>&1 ); then
+  if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-match.log" \
+     && ! grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-match.log"; then
+    ok "DEV-122 --check-role 匹配：通过且无警告"
+  else
+    bad "DEV-122 --check-role 匹配场景输出异常"
+  fi
+else
+  bad "DEV-122 --check-role 匹配场景退出码非 0"
+fi
+# 24.4 --check-role 不匹配：警告但退出码仍 0（软校验不硬拒）
+if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ4" "$ROLE_TASK_DIR/mismatch.md" \
+     --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-mismatch.log" 2>&1 ); then
+  if grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-mismatch.log"; then
+    ok "DEV-122 --check-role 不匹配：警告但退出码 0（软校验）"
+  else
+    bad "DEV-122 --check-role 不匹配场景缺警告"
+  fi
+else
+  bad "DEV-122 --check-role 不匹配场景退出码非 0"
+fi
+# 24.5 --allow-role-mismatch 静默不匹配警告
+if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ4" "$ROLE_TASK_DIR/mismatch.md" \
+     --check-role --allow-role-mismatch --dry-run --headless > "$ROLE_TASK_DIR/out-silent.log" 2>&1 ); then
+  if ! grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-silent.log"; then
+    ok "DEV-122 --allow-role-mismatch 静默不匹配警告"
+  else
+    bad "DEV-122 --allow-role-mismatch 未静默警告"
+  fi
+else
+  bad "DEV-122 --allow-role-mismatch 场景退出码非 0"
+fi
+# 24.6 无 role：提示但不阻塞、rc=0
+if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ5" "$ROLE_TASK_DIR/match.md" \
+     --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-norole.log" 2>&1 ); then
+  if grep -q '目标未填 role' "$ROLE_TASK_DIR/out-norole.log"; then
+    ok "DEV-122 --check-role 无 role：提示但不阻塞（rc=0）"
+  else
+    bad "DEV-122 --check-role 无 role 提示缺失"
+  fi
+else
+  bad "DEV-122 --check-role 无 role 场景退出码非 0"
+fi
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -300,6 +300,72 @@ def check_active(target: Path, allow_active: bool) -> str:
     return "无 active 任务" if not active else f"{len(active)} 个 active 任务（已允许）"
 
 
+# ---------------------------------------------------------------- role 软校验（DEV-122）
+
+
+def target_role(target: Path):
+    """读目标 agent-workflow/project.yaml 的 role 字段（worker 名牌）。
+
+    与 awf 的 yaml_get 同语义：取第一个**非空值**匹配行（跳过空 `role:` 键，
+    DEV-119 后不再有字面空键，但旧项目可能遗留）；没有则返回 None。
+    """
+    y = target / "agent-workflow/project.yaml"
+    if not y.is_file():
+        return None
+    try:
+        for line in y.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^role\s*:\s*(.+?)\s*$", line)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+    except OSError:
+        return None
+    return None
+
+
+def _role_tokens(s: str) -> set:
+    """把字符串切成关键词集合：英文词（≥3 字母） + 中文二元组（n-gram=2）。"""
+    toks = set(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", s))
+    for i in range(len(s) - 1):
+        pair = s[i : i + 2]
+        if all("\u4e00" <= c <= "\u9fff" for c in pair):
+            toks.add(pair)
+    return toks
+
+
+def role_matches(role: str, task_text: str) -> bool:
+    """role 与任务文本是否有关键词交集（中英文词交集，简单做法，勿当硬语义）。"""
+    if not role or not task_text:
+        return False
+    return bool(_role_tokens(role) & _role_tokens(task_text))
+
+
+def check_role(target: Path, task_text: str, args) -> None:
+    """--check-role 软校验：匹配通过 / 不匹配警告（--allow-role-mismatch 静默）/ 无 role 提示。
+
+    只 emit 不 raise：role 匹配是软校验，不硬拒合法派发（DEV-122 明确不做硬门禁）。
+    """
+    if not args.check_role:
+        return
+    role = target_role(target)
+    if role is None:
+        emit("role 校验：目标未填 role 字段（软校验，不阻塞；可后续在 project.yaml 补充）", args.json)
+        return
+    if role_matches(role, task_text):
+        emit(f"role 校验：匹配（任务关键词命中目标 role：{role}）", args.json)
+        return
+    if args.allow_role_mismatch:
+        emit(
+            f"role 校验：目标 role（{role}）与任务描述无明显匹配（--allow-role-mismatch 已静默，仍继续）",
+            args.json,
+        )
+        return
+    emit(
+        f"警告：目标 role（{role}）与任务描述关键词无明显匹配"
+        "（软校验不硬拒，继续派发；可用 --allow-role-mismatch 静默）",
+        args.json,
+    )
+
+
 # ---------------------------------------------------------------- 工作区
 
 
@@ -1233,6 +1299,7 @@ def run_prune(args) -> int:
 def preflight(target: Path, args, need_channel: bool):
     check_workflow(target)
     emit("G1 工作流：ok", args.json)
+    check_role(target, getattr(args, "task_text", "") or "", args)   # DEV-122：--check-role 软校验
     result = {
         "target": str(target),
         "gate": "ok",
@@ -2013,6 +2080,17 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--allow-dirty", action="store_true", help="允许目标有已跟踪改动")
     parser.add_argument("--allow-active", action="store_true", help="允许目标已有 active 任务")
+    parser.add_argument(
+        "--check-role",
+        action="store_true",
+        help="软校验目标 role（worker 名牌）与任务描述是否有关键词交集："
+        "匹配通过 / 不匹配输出警告但继续 / 目标无 role 提示但不阻塞（均不改变退出码）",
+    )
+    parser.add_argument(
+        "--allow-role-mismatch",
+        action="store_true",
+        help="开启 --check-role 时静默 role 不匹配警告（仍不硬拒）",
+    )
     parser.add_argument("--title", default="", help="会话标题（默认 [awf] <项目> · <模块>）")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
     args = parser.parse_args(argv)
@@ -2037,6 +2115,7 @@ def main(argv=None) -> int:
     try:
         target = resolve_target(args.target)
         task, text = read_task(args.task)
+        args.task_text = text   # DEV-122：--check-role 软校验读取任务文本（运行时属性，不改 preflight 签名）
 
         # 激活式 router（DEV-115）：来源=工作流的票据本身是被派发的任务，接收者保持
         # worker、禁止转派（派发深度 = 1）；把它再次作为 target 派发直接 FAIL。

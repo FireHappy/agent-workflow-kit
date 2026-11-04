@@ -118,6 +118,25 @@ FAIL「禁止转派：……派发深度 = 1，接收者保持 worker 只执行�
 
 机制上没有「转包链」：任何被派发节点出手再派发，都会在派发器这一关被截断。
 
+### 示意三：按 role（特长）派发（DEV-122）
+
+```text
+用户原始请求：生成日报并总结本周 git 提交
+   │  票据头部：来源=用户
+   ▼
+节点 A（router 临时激活）——决策三件套：分析意图
+   │    → awf find / awf projects 检索工作群：逐 worker 带出 role（特长）
+   │      周报  → 擅长收集 DSH 会话历史与 git 提交，归纳生成日报/周报  ← 候选命中
+   │        pluto → 擅长 Rokid AR 系统镜像定制（不匹配，排除）
+   │    → 综合决策：目标=周报；通道=awf-dispatch；理由=role 匹配
+   │      （擅长收集会话+生成报告，对应日报任务）
+   │   awf-dispatch 周报 <ticket> --check-role   （软校验：关键词交集命中，无警告）
+   ▼
+节点 周报（worker）执行 → 回报五项 → 节点 A 落盘票据头部裁决 → 用户
+```
+
+要点：role 是**匹配依据**不是装饰字段；`--check-role` 只做关键词**软校验**（不匹配警告 / 无 role 提示，均不硬拒，避免误伤合法派发）；路由裁决理由必须写明「目标 role 与任务意图的匹配说明」（见 `agent-workflow/workflows/cross-project.md` 第 4 条），匹配不到时写「无匹配，建议用户确认」不得硬凑。
+
 ## worker 名牌（role）
 
 worker/router 对偶模型下，每个已登记项目是网络中的一个 worker；寻址（id / aliases / 路径）已通，但 router 检索工作群时看不到「这个 worker 是干嘛的」。DEV-118 引入可选的 **role** 字段作为 worker 名牌（一句话自述）：

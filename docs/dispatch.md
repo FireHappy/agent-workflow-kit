@@ -140,6 +140,8 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 | `--no-wait` | 兼容别名：等价默认行为（只发送，不等待回合） |
 | `--force` | 允许同名会话重复派发 |
 | `--allow-dirty` / `--allow-active` | 放宽 G3（需明确知道风险） |
+| `--check-role` | 软校验目标 role（worker 名牌）与任务描述的关键词交集：匹配通过 / 不匹配输出警告但继续 / 目标无 role 提示但不阻塞——均不改变退出码（不做硬门禁） |
+| `--allow-role-mismatch` | 配合 `--check-role`：静默 role 不匹配警告（仍不硬拒） |
 | `--allow-legacy-reuse` | 允许复用项目里唯一的旧格式（无 `[awf]` 标记）空闲会话并改名为规范标题；默认只在会话消息含派发任务包标记时才迁移（RT-1，防误吞用户自建会话） |
 | `--prune` | 归档已完成票据：扫描 `./dispatch/tasks/*.md`，默认 dry-run 只打印计划 |
 | `--apply` | 配合 `--prune` 真正移动文件（默认不移动） |

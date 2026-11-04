@@ -830,3 +830,49 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无。
 | 完成日期 | 2026-11-04 |
 | DEV-121 | P2 | init --role 初始化即登记能力名牌：模板 {{ROLE}} 占位 + 缺省保留空键（方案 B 兜底）+ 填写提示；三 locale smoke 151/0 | 2026-11-04 |
+
+
+## [DEV-122] 派发规则同步 role（按特长匹配 + 路由裁决理由 + --check-role 软校验）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | templates/AGENTS.md.tmpl + agent-workflow/templates/AGENTS.md.tmpl、agent-workflow/workflows/cross-project.md + templates/workflows/cross-project.md、agent-workflow/bin/awf-dispatch + bin/awf-dispatch、docs/design.md、docs/dispatch.md、test/smoke.sh（24 节）、AGENTS.md（bootstrap 重建） |
+| 依赖 | DEV-118 / DEV-119 / DEV-120 / DEV-121 |
+| 最近更新 | 2026-11-04 |
+
+### 目标与结果
+把 role（worker 特长名牌）正式纳入派发规则——决策三件套按 role 匹配候选、路由裁决理由含 role 匹配依据、awf-dispatch 新增 --check-role 软校验（不匹配只警告不硬拒）。
+
+### 实现方案
+- 决策三件套：AGENTS.md.tmpl 与 cross-project.md 第 2 步改为「检索全局索引并读各 worker 的 role（特长），按任务意图筛选候选（如任务=日报生成 → 候选含 周报）」；cross-project.md 新增第 4 条「路由裁决理由必备项」（格式：目标=<X>；理由=role 匹配（…对应…）；无匹配写「无匹配，建议用户确认」不得硬凑）。
+- awf-dispatch：--check-role / --allow-role-mismatch 参数；target_role() 读目标 project.yaml 的 role（与 yaml_get 同语义：第一个非空值）；role_matches() 中英文关键词交集（英文词 ≥3 字母 + 中文二元组）；check_role() 挂在 preflight 的 G1 后，匹配/警告/无 role 均只 emit 不 raise（软校验，不改变退出码）。任务文本经 args.task_text 运行时属性传入（保持 preflight 签名不变，兼容 smoke 既有 preflight stub）。
+- docs：design.md「示意三：按 role 派发」；dispatch.md 参数表补两行；--help 同步。
+- smoke 24 节 6 条断言。
+
+### 验收标准
+- [x] AGENTS.md.tmpl 决策三件套含「读 role 筛选候选」；cross-project.md 裁决理由含 role 匹配必备项
+- [x] --check-role：匹配通过 / 不匹配警告不硬拒 / 无 role 提示不阻塞，退出码均 0（真实 rc 实测）
+- [x] docs/design.md 含按特长派发示意；--help 与 docs/dispatch.md 同步
+- [x] smoke 断言通过；默认 locale 与 LC_ALL=C 双路径全绿（另验 en_US；含 RT 回归恢复）
+- [x] DEV-122 已归档，check_workflow.sh 全过，status.md 已刷新
+- [x] 只本地 commit，未 push；未引入硬门禁
+
+### 验证
+- bash test/smoke.sh（默认 C.UTF-8）= 157/0；LC_ALL=C = 157/0；LC_ALL=en_US.UTF-8 = 157/0（DEV-122 断言 6/6；RT-1/2/3 回归恢复）
+- python3 -m py_compile bin/awf-dispatch / agent-workflow/bin/awf-dispatch；bash -n agent-workflow/bin/awf、test/smoke.sh 全过；drift 对（AGENTS.md.tmpl / cross-project.md / awf-dispatch）diff 为空
+- 场景 A（周报 + 日报任务，真实 rc）：role 校验：匹配……rc=0
+- 场景 B（uxrsample + 微服务任务，--allow-dirty）：警告：目标 role（擅长 Rokid UXR SDK……）与任务描述关键词无明显匹配（软校验不硬拒）rc=0
+- 场景 C（无 role 隔离项目）：目标未填 role 字段（软校验，不阻塞）rc=0
+- 场景 B（--allow-role-mismatch）：静默警告，仍继续 rc=0
+- kit 自身因 AGENTS.md.tmpl 变更需 bootstrap 刷新入口（digest 1aef4bc1 → 02a3fe73），已重建；check 54 ok/0 FAIL
+
+### 下一步
+无。
+| 完成日期 | 2026-11-04 |
+| DEV-122 | P2 | 派发规则同步 role：三件套读 role 匹配候选 + 裁决理由必备项 + --check-role 软校验（警告不硬拒）；三场景实测 rc=0；三 locale smoke 157/0 | 2026-11-04 |
