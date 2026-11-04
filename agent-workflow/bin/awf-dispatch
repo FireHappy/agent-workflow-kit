@@ -168,6 +168,14 @@ def resolve_target(value: str) -> Path:
     return target
 
 
+TICKET_REQUIRED_FIELDS = [
+    ("目标项目", "目标项目行（- 目标项目：<别名>（<路径>））"),
+    ("任务编号", "任务编号行（- 任务编号：…，由目标自排）"),
+    ("来源", "来源行（- 来源：用户 | 工作流）"),
+    ("路由裁决", "路由裁决行（- 路由裁决（<派发方> → <目标>）：目标 / 通道 / 理由）"),
+]
+
+
 def read_task(path: str):
     task = Path(path).expanduser().resolve()
     if not task.is_file():
@@ -175,6 +183,25 @@ def read_task(path: str):
     text = task.read_text(encoding="utf-8")
     if not text.strip():
         raise DispatchError(f"任务文件为空：{task}")
+    # M1（DISPATCH-138）：票据零校验——只查「存在 + 非空」时，缺「目标项目/任务编号/
+    # 来源/路由裁决」的坏票据也照发，到目标侧才暴露；这里缺失即拒发并明示缺项。
+    missing = [
+        f"{key}（{desc}）"
+        for key, desc in TICKET_REQUIRED_FIELDS
+        if not any(
+            re.match(
+                r"^\s*(?:[-*]\s*)?%s\s*(?:[（(].*?[）)])?\s*[：:]\s*\S" % key,
+                line,
+            )
+            for line in text.splitlines()
+        )
+    ]
+    if missing:
+        raise DispatchError(
+            "任务票据缺少必备字段，拒绝派发（坏票据会到目标侧才暴露）："
+            + "；".join(missing)
+            + "。请按任务包头部格式补全后重试。"
+        )
     return task, text
 
 
@@ -338,8 +365,20 @@ def check_git(target: Path, allow_dirty: bool) -> str:
 
 
 def check_active(target: Path, allow_active: bool) -> str:
+    """G3 active 防护。目录式账本（v1.0.0+）：tasks/<type>/current/<ID>.md（状态=所在目录，
+    DEV-127）；旧大文件格式：tasks/<type>/current.md 内 `## [ID]` 块。两者都扫，README 跳过。"""
     active = []
-    for current in sorted((target / "agent-workflow/tasks").glob("*/current.md")):
+    tasks_dir = target / "agent-workflow/tasks"
+    # 目录式：current/ 下每个任务单文件（README.md 是检索索引，跳过）
+    for current in sorted(tasks_dir.glob("*/current/*.md")):
+        if current.name == "README.md":
+            continue
+        match = re.search(r"^## \[([A-Z]+-[0-9]+)\]\s*(.+)$",
+                          current.read_text(encoding="utf-8"), re.M)
+        if match:
+            active.append(f"{match.group(1)} {match.group(2).strip()}")
+    # 旧大文件兼容：current.md 内多个 `## [ID]` 块
+    for current in sorted(tasks_dir.glob("*/current.md")):
         text = current.read_text(encoding="utf-8")
         for match in re.finditer(r"^## \[([A-Z]+-[0-9]+)\]\s*(.+)$", text, re.M):
             active.append(f"{match.group(1)} {match.group(2).strip()}")
@@ -640,6 +679,9 @@ def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = Fa
         "补充约定：\n"
         "- 目标项目的任务账本由你维护；派发方不会改你的 current.md / status.md。\n"
         "- 只允许本地 commit，禁止 push；仓库里的验证命令必须实际执行。\n"
+        "- 若任务被置 blocked 或需派发方/用户动作（依赖缺失、范围不清、等待外部输入等）："
+        "**必须回报派发方**——写明阻塞点/原因/解除条件并保持会话等待，不得静默停等"
+        "（否则派发方误判失联，形成双向等待，如 2026-11-04 DEV-143 实证）。\n"
         "- 完成后按任务文件要求的回报格式回复，并保留本会话，用户会在这里继续提细节。\n"
     )
     if team:
@@ -1493,6 +1535,29 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             raise DispatchError(
                 f"--session 指定的会话属于其他目录：{row.get('cwd') or '未知'}"
                 f"（目标 {target}）；去掉 --session 自动选择，或用 --new"
+            )
+        # M2（DISPATCH-138）：--session 归属校验——cwd 匹配还不够，该会话若承载
+        # 其他派发者的任务 / 非 [awf] 派发会话，本次任务可能发进错误上下文（串台）。
+        st = session_title(row) or ""
+        sender_now = resolve_sender(text, getattr(args, "sender", ""))
+        if st.startswith(AWF_TITLE_PREFIX):
+            other = awf_title_sender(st)
+            if other and other != sender_now:
+                raise DispatchError(
+                    f"--session 指定的会话承载其他派发者「{other}」的任务（{st}），"
+                    "可能串台；确认无误请用 --new 新建会话，或先在该会话续跑原任务"
+                )
+            if not other:
+                emit(
+                    f"风险提示：--session 会话为旧格式 [awf] 会话（{st}），"
+                    "无法确认派发者归属，确认未串台后继续",
+                    args.json,
+                )
+        else:
+            emit(
+                f"风险提示：--session 会话标题非 [awf] 派发会话（{st or '无标题'}），"
+                "若非本派发器创建的会话，任务可能串台；确认后继续",
+                args.json,
             )
         session_id = args.session
         reused = True

@@ -506,7 +506,7 @@ def _args(**overrides):
 
 def run_dispatch(api, task_module, idle_wait=300, queue_timeout=60, force=False, reuse=True,
                  json_mode=False, expect_error=False, sessions_in_preflight=True,
-                 allow_legacy=False):
+                 allow_legacy=False, session=""):
     logs = []
     output = io.StringIO()
     original = (module.preflight, module.append_log, module.emit)
@@ -520,7 +520,7 @@ def run_dispatch(api, task_module, idle_wait=300, queue_timeout=60, force=False,
         f"- 模块：{task_module}\n"
     )
     args = _args(reuse=reuse, idle_wait=idle_wait, queue_timeout=queue_timeout, force=force,
-                 json=json_mode, allow_legacy_reuse=allow_legacy)
+                 json=json_mode, allow_legacy_reuse=allow_legacy, session=session)
     try:
         with contextlib.redirect_stdout(output):
             try:
@@ -938,6 +938,87 @@ assert "- 会话提示：" in module.log_entry(**base, reused=True, session_note
 assert "- 模块：工作流\n" in module.log_entry(**base, reused=True, module="工作流")
 assert "模块：" not in module.log_entry(**base), "未传模块时不写模块行"
 
+# --- DISPATCH-138：S1/S2/M1/M2 审查修复断言 ---
+
+# S1：check_active 目录式账本（tasks/<type>/current/<ID>.md）能检出 active；
+#     旧大文件（tasks/<type>/current.md）仍兼容；README 索引不误报。
+with tempfile.TemporaryDirectory() as tmp:
+    proj = pathlib.Path(tmp)
+    dev_cur = proj / "agent-workflow/tasks/dev/current"
+    dev_cur.mkdir(parents=True)
+    (dev_cur / "DEV-999.md").write_text(
+        "## [DEV-999] 目录式 active 冒烟\n\n| 状态 | active |\n", encoding="utf-8")
+    (dev_cur / "README.md").write_text("# 索引\n", encoding="utf-8")
+    debug_tasks = proj / "agent-workflow/tasks/debug"
+    debug_tasks.mkdir(parents=True)
+    (debug_tasks / "current.md").write_text(
+        "## [DEBUG-001] 旧大文件 active A\n## [DEBUG-002] 旧大文件 active B\n",
+        encoding="utf-8")
+    try:
+        module.check_active(proj, allow_active=False)
+        raise AssertionError("S1：目录式+旧大文件 active 应触发 G3 拦截")
+    except module.DispatchError as error:
+        msg = str(error)
+        assert "DEV-999" in msg and "DEBUG-001" in msg and "DEBUG-002" in msg, msg
+    allowed = module.check_active(proj, allow_active=True)
+    assert "3 个 active 任务（已允许）" in allowed, allowed
+    (dev_cur / "DEV-999.md").unlink()
+    (debug_tasks / "current.md").unlink()
+    assert module.check_active(proj, allow_active=False) == "无 active 任务", \
+        "README 索引不得误报为 active"
+
+# S2：派发注入的补充约定含 blocked 回报条款（必有回报主机制覆盖 blocked 场景）
+prompt = module.build_prompt(target, "TEST", "dev", "任务：TEST-001 冒烟\n")
+assert "blocked" in prompt and "必须回报派发方" in prompt, prompt
+assert "解除条件" in prompt and "静默停等" in prompt, prompt
+
+# M1：read_task 票据必备字段校验（目标项目/任务编号/来源/路由裁决），缺失拒发并明示缺项
+with tempfile.TemporaryDirectory() as tmp:
+    good = pathlib.Path(tmp) / "good.md"
+    good.write_text(
+        "- 目标项目：proj（/tmp/proj）\n- 任务编号：由目标自排\n- 来源：用户\n"
+        "- 路由裁决（a → b）：目标 proj / 通道 awf-dispatch / 理由 role\n"
+        "任务：TEST-001\n", encoding="utf-8")
+    _task, _text = module.read_task(str(good))
+    assert "TEST-001" in _text, _text
+    bad = pathlib.Path(tmp) / "bad.md"
+    bad.write_text("任务：TEST-002\n", encoding="utf-8")
+    try:
+        module.read_task(str(bad))
+        raise AssertionError("M1：缺必备字段的票据应拒发")
+    except module.DispatchError as error:
+        msg = str(error)
+        for key in ("目标项目", "任务编号", "来源", "路由裁决"):
+            assert key in msg, msg
+        assert "拒绝派发" in msg, msg
+    partial = pathlib.Path(tmp) / "partial.md"
+    partial.write_text(
+        "- 目标项目：proj（/tmp/proj）\n- 任务编号：由目标自排\n- 来源：用户\n"
+        "任务：TEST-003\n", encoding="utf-8")
+    try:
+        module.read_task(str(partial))
+        raise AssertionError("M1：缺路由裁决应拒发")
+    except module.DispatchError as error:
+        assert "路由裁决" in str(error) and "目标项目" not in str(error), str(error)
+
+# M2：--session 归属校验——其他派发者的会话拒发（串台）；本派发者会话放行；
+#     非 [awf] 普通会话放行但提示风险
+m2_other = FakeDispatchApi(
+    [row("s-m2-other", title=module.awf_session_title("member", "TEST-009 任务"))])
+m2_msg = run_dispatch(m2_other, "工作流", expect_error=True, session="s-m2-other")
+assert "其他派发者" in m2_msg and "串台" in m2_msg, m2_msg
+assert m2_other.prompts == [], "串台风险会话不得发送任务"
+
+m2_own = FakeDispatchApi([row("s-m2-own", title=module.awf_session_title("lead", "TEST-001 冒烟"))])
+m2_logs, _ = run_dispatch(m2_own, "工作流", session="s-m2-own")
+assert m2_own.prompts and m2_own.prompts[0][0] == "s-m2-own", m2_own.prompts
+assert "复用（--session 指定）" in m2_logs[0], m2_logs[0]
+
+m2_plain = FakeDispatchApi([row("s-m2-plain", title="用户的普通会话")])
+m2_plain_logs, _ = run_dispatch(m2_plain, "工作流", session="s-m2-plain")
+assert m2_plain.prompts and m2_plain.prompts[0][0] == "s-m2-plain", m2_plain.prompts
+assert any("风险提示" in m for m in m2_plain.emitted), m2_plain.emitted
+
 # 实现点：dispatch_session 走 args.module / args.reuse / --session / 等待 / 旧标题改名
 session_src = inspect.getsource(module.dispatch_session)
 for needle in ("args.module", "resolve_module(", "args.reuse", "args.session",
@@ -1093,7 +1174,7 @@ else
   bad "build_prompt / 默认异步断言失败"
 fi
 
-printf '任务：TEST-001 冒烟派发\n\n1. 只读验证。\n' > "$TMP/task.md"
+printf '# 任务：TEST-001 冒烟派发\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n\n1. 只读验证。\n' > "$TMP/task.md"
 ( cd "$TMP" && "$PROJ/agent-workflow/bin/awf-dispatch" "$PROJ" task.md --handoff >/dev/null ) \
   && ok "handoff 生成交接单" || bad "handoff 失败"
 [ -f "$TMP"/dispatch/handoff/*.md ] && ok "交接单文件存在" || bad "交接单文件缺失"
@@ -1919,7 +2000,9 @@ try:
         # DEV-128：来源=工作流 的票据允许继续转派（去掉禁转派硬 FAIL）；派发时
         # 提示核对转派理由与路由裁决（非阻塞），流程继续走 dry-run 到 G1 预检门
         wf_ticket = pathlib.Path("/tmp/awf-d115-source-workflow.md")
-        wf_ticket.write_text("任务：DEV-115 转派\n\n- 目标项目：proj（/tmp/proj）\n- 来源：工作流\n",
+        wf_ticket.write_text("任务：DEV-115 转派\n\n- 目标项目：proj（/tmp/proj）\n"
+                             "- 任务编号：由目标自排\n- 来源：工作流\n"
+                             "- 路由裁决（kit → proj）：目标 proj / 通道 awf-dispatch / 理由 测试\n",
                              encoding="utf-8")
         code, err, out = run_main(wf_ticket, "workflow")
         assert "禁止转派" not in err, "DEV-128 已移除禁转派 FAIL（不得再出现禁止转派错误）"
@@ -1929,7 +2012,9 @@ try:
 
         # 无来源旧票据不受来源校验影响：走正常前置检查（G1 门失败，非来源拦截）
         old_ticket = pathlib.Path("/tmp/awf-d115-source-old.md")
-        old_ticket.write_text("任务：DEV-115 旧票据\n\n- 目标项目：proj（/tmp/proj）\n",
+        old_ticket.write_text("任务：DEV-115 旧票据\n\n- 目标项目：proj（/tmp/proj）\n"
+                              "- 任务编号：由目标自排\n- 来源：用户\n"
+                              "- 路由裁决（kit → proj）：目标 proj / 通道 awf-dispatch / 理由 测试\n",
                               encoding="utf-8")
         code2, err2, out2 = run_main(old_ticket, "old")
         assert code2 == module.EXIT_FAIL, code2
@@ -2187,8 +2272,8 @@ fi
 # 24. DEV-122：派发规则同步 role（--check-role 软校验 + 决策三件套含 role）
 # 24.0 构造三场景任务文件（匹配 / 不匹配）
 ROLE_TASK_DIR="$TMP/role-tasks"; mkdir -p "$ROLE_TASK_DIR"
-printf '# 任务：执行冒烟测试并生成测试报告\n- 类型：dev\n- 来源：用户\n正文：在目标项目执行冒烟测试。\n' > "$ROLE_TASK_DIR/match.md"
-printf '# 任务：外汇交易数据分析与图表\n- 类型：dev\n- 来源：用户\n正文：分析外汇交易数据并生成图表。\n' > "$ROLE_TASK_DIR/mismatch.md"
+printf '# 任务：执行冒烟测试并生成测试报告\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：在目标项目执行冒烟测试。\n' > "$ROLE_TASK_DIR/match.md"
+printf '# 任务：外汇交易数据分析与图表\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：分析外汇交易数据并生成图表。\n' > "$ROLE_TASK_DIR/mismatch.md"
 # 24.1 --help 含 --check-role
 if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--check-role'; then
   ok "DEV-122 awf-dispatch --help 含 --check-role"
@@ -2251,7 +2336,7 @@ fi
 # 25. DEV-123：--check-role 过度匹配修复（泛词停用 + 2/3/4-gram 混合）
 ROLE_KIT="擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版"
 "$KIT_DIR/bin/awf" init "$TMP/proj6" --name "误判回归" --role "$ROLE_KIT" >/dev/null 2>&1
-printf '# 任务：生成本周周报并总结 git 提交\n- 类型：dev\n- 来源：用户\n正文：收集本周会话与提交，生成周报。\n' > "$ROLE_TASK_DIR/zhoubao.md"
+printf '# 任务：生成本周周报并总结 git 提交\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：收集本周会话与提交，生成周报。\n' > "$ROLE_TASK_DIR/zhoubao.md"
 if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj6" "$ROLE_TASK_DIR/zhoubao.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-kit.log" 2>&1 ); then
   if grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-kit.log"; then
@@ -2276,7 +2361,7 @@ else
 fi
 ROLE_UXR="擅长 Rokid UXR SDK 的 Unity 示例开发与真机联调测试"
 "$KIT_DIR/bin/awf" init "$TMP/proj8" --name "领域词命中" --role "$ROLE_UXR" >/dev/null 2>&1
-printf '# 任务：Unity 真机联调\n- 类型：dev\n- 来源：用户\n正文：在真机联调 Unity 示例。\n' > "$ROLE_TASK_DIR/unity.md"
+printf '# 任务：Unity 真机联调\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：在真机联调 Unity 示例。\n' > "$ROLE_TASK_DIR/unity.md"
 if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj8" "$ROLE_TASK_DIR/unity.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-uxr.log" 2>&1 ); then
   if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-uxr.log"; then
