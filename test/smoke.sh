@@ -153,13 +153,14 @@ make_release_fixture() {
     printf '## [Unreleased]\n\n### Added\n- 待发版条目\n\n'
     printf '## [0.0.1] - 2026-01-01\n'
   } > "$dir/CHANGELOG.md"
-  printf '# 正在开发\n' > "$dir/agent-workflow/tasks/dev/current.md"
+  mkdir -p "$dir/agent-workflow/tasks/dev/todo" "$dir/agent-workflow/tasks/dev/current" "$dir/agent-workflow/tasks/dev/done"
   {
-    printf '# 已完成\n\n'
-    printf '| 任务ID | 优先级 | 描述 | 完成日期 |\n'
-    printf '|--------|--------|------|----------|\n'
+    printf '# 进行中 README\n\n| ID | 优先级 | 状态 | Owner | 标题 |\n|----|--------|------|-------|------|\n'
+  } > "$dir/agent-workflow/tasks/dev/current/README.md"
+  {
+    printf '| ID | 优先级 | 标题 | 完成日期 |\n|----|--------|------|----------|\n'
     printf '| DEV-007 | P1 | 旧任务 | 2026-10-01 |\n'
-  } > "$dir/agent-workflow/tasks/dev/done.md"
+  } > "$dir/agent-workflow/tasks/dev/done/README.md"
   printf '#!/bin/sh\nexit 0\n' > "$dir/bin/awf"
   printf '#!/bin/sh\nexit 0\n' > "$dir/agent-workflow/bin/awf"
   printf '#!/bin/sh\nexit 0\n' > "$dir/agent-workflow/check_workflow.sh"
@@ -183,7 +184,7 @@ else
 fi
 if [ "$(cat "$REL_DRY/VERSION")" = "0.0.1" ] \
   && [ "$(grep -c 'Unreleased' "$REL_DRY/CHANGELOG.md")" = "1" ] \
-  && ! grep -q 'release-prep 0.4.2' "$REL_DRY/agent-workflow/tasks/dev/current.md"; then
+  && ! grep -q 'release-prep 0.4.2' "$REL_DRY/agent-workflow/tasks/dev/current/README.md"; then
   ok "release-prep --dry-run 不修改文件"
 else
   bad "release-prep --dry-run 修改了文件"
@@ -206,13 +207,14 @@ if grep -q '^## \[0.4.2\] - ' "$REL/CHANGELOG.md" && ! grep -q '^## \[Unreleased
 else
   bad "release-prep 未正确替换 Unreleased"
 fi
-if grep -q 'DEV-008' "$REL/agent-workflow/tasks/dev/done.md" \
-  && grep -q 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/done.md"; then
-  ok "release-prep 自动取下一个 ID 并归档"
+if [ -f "$REL/agent-workflow/tasks/dev/done/DEV-008.md" ] \
+  && grep -q 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/done/DEV-008.md" \
+  && grep -q '| 状态 | done |' "$REL/agent-workflow/tasks/dev/done/DEV-008.md"; then
+  ok "release-prep 自动取下一个 ID 并归档（done/DEV-008.md，状态=done）"
 else
-  bad "release-prep 未归档账本或 ID 不正确"
+  bad "release-prep 未归档账本或 ID 不正确：$(ls "$REL/agent-workflow/tasks/dev/done/" 2>/dev/null)"
 fi
-if ! grep -q 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/current.md"; then
+if ! grep -q 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/current/README.md"; then
   ok "release-prep 归档后清理 current.md"
 else
   bad "release-prep 归档后仍残留 current.md 块"
@@ -225,7 +227,7 @@ else
   bad "release-prep 下一步提示不完整"
 fi
 idem_out="$("$PROJ/agent-workflow/bin/awf" release-prep --root "$REL" 0.4.2 2>&1)"
-if [ "$(grep -c 'release-prep 0.4.2' "$REL/agent-workflow/tasks/dev/done.md")" = "1" ] \
+if [ "$(ls "$REL/agent-workflow/tasks/dev/done/"DEV-008.md 2>/dev/null | wc -l | tr -d ' ')" = "1" ] \
   && printf '%s\n' "$idem_out" | grep -q '幂等'; then
   ok "release-prep 重复执行幂等"
 else
@@ -975,7 +977,8 @@ with tempfile.TemporaryDirectory() as tmp:
     tmp = pathlib.Path(tmp)
     repo = tmp / "repo"
     (repo / "agent-workflow/tasks/dev").mkdir(parents=True)
-    (repo / "agent-workflow/tasks/dev/done.md").write_text("## [DEV-007] 已完成\n", encoding="utf-8")
+    (repo / "agent-workflow/tasks/dev/done").mkdir(parents=True, exist_ok=True)
+    (repo / "agent-workflow/tasks/dev/done/DEV-007.md").write_text("## [DEV-007] 已完成\n", encoding="utf-8")
 
     def git(*args):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
@@ -995,7 +998,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     items = {item["taskId"]: item for item in module.scan_tickets(tmp)}
     assert items["DEV-007"]["status"] == "completed", items["DEV-007"]
-    assert "done.md" in items["DEV-007"]["reason"], items["DEV-007"]["reason"]
+    assert ("done/" in items["DEV-007"]["reason"] or "done.md" in items["DEV-007"]["reason"]), items["DEV-007"]["reason"]
     month = module.datetime.date.today().strftime("%Y-%m")
     expected = f"dispatch/archive/demo02/{month}/demo02-DEV-007-ledger.md"
     assert items["DEV-007"]["archive"] == expected, items["DEV-007"]["archive"]
@@ -1081,7 +1084,8 @@ DISPATCH="$PROJ/agent-workflow/bin/awf-dispatch"
 PRUNE="$TMP/prune"
 PRUNE_TARGET="$TMP/prune-target"
 mkdir -p "$PRUNE/dispatch/tasks" "$PRUNE_TARGET/agent-workflow/tasks/dev"
-printf '## [DEV-101] 已完成\n' > "$PRUNE_TARGET/agent-workflow/tasks/dev/done.md"
+mkdir -p "$PRUNE_TARGET/agent-workflow/tasks/dev/done"
+printf '## [DEV-101] 已完成\n' > "$PRUNE_TARGET/agent-workflow/tasks/dev/done/DEV-101.md"
 git -C "$PRUNE_TARGET" init -q
 git -C "$PRUNE_TARGET" config user.email smoke@example.com
 git -C "$PRUNE_TARGET" config user.name smoke
@@ -1198,10 +1202,9 @@ set -e
 ( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 assert_grep '## 当前进行中' "$PROJ/agent-workflow/tasks/status.md" "status 含当前进行中"
 
-# 4. 进行中任务缺字段 → check 失败
-cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
-# 正在开发
-
+# 4. 进行中任务缺字段 → check 失败（DEV-127 目录式：current/DEV-001.md）
+mkdir -p "$PROJ/agent-workflow/tasks/dev/current"
+cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" <<'EOF'
 ## [DEV-001] 缺字段
 
 | 字段 | 内容 |
@@ -1216,9 +1219,7 @@ else
 fi
 
 # 5. 补齐字段并通过
-cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
-# 正在开发
-
+cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" <<'EOF'
 ## [DEV-001] 补齐字段
 
 | 字段 | 内容 |
@@ -1248,7 +1249,7 @@ assert_grep '变更后的定位' "$PROJ/AGENTS.md" "入口已刷新"
 # 7. --force 保留事实文件与任务账本
 "$KIT_DIR/bin/awf" init "$PROJ" --name "改名" --force >/dev/null
 assert_grep 'purpose: 变更后的定位' "$PROJ/agent-workflow/project.yaml" "--force 保留 project.yaml"
-assert_grep 'DEV-001' "$PROJ/agent-workflow/tasks/dev/current.md" "--force 保留任务块"
+assert_grep 'DEV-001' "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" "--force 保留任务文件"
 assert_grep '变更后的定位' "$PROJ/AGENTS.md" "--force 后入口仍同步"
 
 # 8. 入口外内容不被覆盖
@@ -1294,9 +1295,7 @@ after_size="$(wc -c < "$PROJ/AGENTS.md" | tr -d ' ')"
 mv "$PROJ/AGENTS.full" "$PROJ/AGENTS.md"
 
 # 11. 非法任务 ID 必须被 check 发现
-cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'AWFBAD'
-# 正在开发
-
+cat > "$PROJ/agent-workflow/tasks/dev/current/DEV_001.md" <<'AWFBAD'
 ## [DEV_001] 非法 ID
 
 | 字段 | 内容 |
@@ -1312,11 +1311,7 @@ if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
 else
   ok "非法任务 ID 被 check 发现"
 fi
-cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'AWFCLEAN'
-# 正在开发
-
-（暂无进行中任务）
-AWFCLEAN
+rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV_001.md"
 
 # 12. 派发器：无效目标应返回退出码 2（门失败）
 set +e
@@ -1326,9 +1321,8 @@ set -e
 [ "$dispatch_code" = "2" ] && ok "awf-dispatch 门失败退出码为 2" || bad "awf-dispatch 退出码为 ${dispatch_code}（期望 2）"
 
 # 13. F1：check 校验状态枚举（非法值失败）
-cat > "$PROJ/agent-workflow/tasks/docs/current.md" <<'F1B'
-# 正在撰写
-
+mkdir -p "$PROJ/agent-workflow/tasks/docs/current"
+cat > "$PROJ/agent-workflow/tasks/docs/current/DOCS-100.md" <<'F1B'
 ## [DOCS-100] 非法状态
 
 | 字段 | 内容 |
@@ -1345,18 +1339,13 @@ if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
 else
   printf '%s\n' "$out" | grep -q '状态非法' && ok "F1 非法状态值被 check 拒绝" || bad "F1 非法状态值未被点名：$out"
 fi
-cat > "$PROJ/agent-workflow/tasks/docs/current.md" <<'F1G'
-# 正在撰写
-
-（暂无进行中任务）
-F1G
+rm -f "$PROJ/agent-workflow/tasks/docs/current/DOCS-100.md"
 ( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F1 恢复合法状态后 check 通过" || bad "F1 恢复后 check 未通过"
 
-# 14. F2：status.md 新鲜度（账本改动后未刷新 → 过期失败）
-cat > "$PROJ/agent-workflow/tasks/debug/current.md" <<'F2B'
-# 正在调试
-
+# 14. F2：status.md 新鲜度（账本改动后未刷新 → 过期失败；DEV-127 目录式）
+mkdir -p "$PROJ/agent-workflow/tasks/debug/current"
+cat > "$PROJ/agent-workflow/tasks/debug/current/DEBUG-101.md" <<'F2B'
 ## [DEBUG-101] 新鲜度
 
 | 字段 | 内容 |
@@ -1379,51 +1368,62 @@ fi
 ( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F2 刷新 status 后 check 通过" || bad "F2 刷新后 check 未通过"
 
-# 15. F3：done.md 归档块校验（缺文件 / 非法归档行）
-printf '| BAD-ID | P1 | 少日期行 |\n' >> "$PROJ/agent-workflow/tasks/dev/done.md"
-if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
-  bad "F3 done.md 非法归档行未被 check 发现"
-else
-  printf '%s\n' "$out" | grep -q 'BAD-ID' && ok "F3 done.md 非法归档行被 check 拒绝" || bad "F3 未点名非法归档行：$out"
-fi
-grep -v 'BAD-ID' "$PROJ/agent-workflow/tasks/dev/done.md" > "$PROJ/agent-workflow/tasks/dev/done.md.tmp" \
-  && mv "$PROJ/agent-workflow/tasks/dev/done.md.tmp" "$PROJ/agent-workflow/tasks/dev/done.md"
-( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
-( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3 修复归档行后 check 通过" || bad "F3 修复后 check 未通过"
-mv "$PROJ/agent-workflow/tasks/debug/done.md" "$PROJ/agent-workflow/tasks/debug/done.md.hid"
-if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
-  bad "F3 缺 done.md（无归档块）未被 check 发现"
-else
-  ok "F3 缺 done.md（无归档块）check 失败"
-fi
-mv "$PROJ/agent-workflow/tasks/debug/done.md.hid" "$PROJ/agent-workflow/tasks/debug/done.md"
-
-# 15.1 F3+：归档块旧英文表头（| Status |）→ check FAIL 且输出可直接执行的修复指引
-cat >> "$PROJ/agent-workflow/tasks/dev/done.md" <<'EOF'
-
-## [DEV-102] 旧英文表头归档
+# 15. F3：任务文件校验（DEV-127 目录式；非法状态/缺字段被点名）
+mkdir -p "$PROJ/agent-workflow/tasks/dev/done"
+cat > "$PROJ/agent-workflow/tasks/dev/done/DEV-200.md" <<'EOF'
+## [DEV-200] 非法状态
 
 | 字段 | 内容 |
 |------|------|
 | 优先级 | P1 |
-| Status | 完成 |
+| 状态 | xxx |
+| Owner | t3 |
+
+### 下一步
+（待修）
+EOF
+if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  bad "F3 非法状态任务文件未被 check 发现"
+else
+  printf '%s\n' "$out" | grep -q 'DEV-200' && ok "F3 非法状态任务文件被 check 拒绝" || bad "F3 未点名：$out"
+  printf '%s\n' "$out" | grep -q '状态非法' && ok "F3 指明状态非法" || bad "F3 未指明状态非法：$out"
+fi
+rm -f "$PROJ/agent-workflow/tasks/dev/done/DEV-200.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3 移除非法文件后 check 通过" || bad "F3 修复后 check 未通过"
+mv "$PROJ/agent-workflow/tasks/debug/done/README.md" "$PROJ/agent-workflow/tasks/debug/done/README.md.hid"
+if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
+  bad "F3 缺 done/README.md 未被 check 发现"
+else
+  ok "F3 缺 done/README.md check 失败"
+fi
+mv "$PROJ/agent-workflow/tasks/debug/done/README.md.hid" "$PROJ/agent-workflow/tasks/debug/done/README.md"
+
+# 15.1 F3+：旧英文表头（| Status |）→ check FAIL 且输出可直接执行的修复指引
+mkdir -p "$PROJ/agent-workflow/tasks/dev/todo"
+cat > "$PROJ/agent-workflow/tasks/dev/todo/DEV-102.md" <<'EOF'
+## [DEV-102] 旧英文表头任务
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| Status | done |
 | Owner | t3 |
 EOF
 if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
   bad "F3+ 旧英文表头未被 check 发现"
 else
-  printf '%s\n' "$out" | grep -q 'DEV-102' && ok "F3+ 点名旧归档块" || bad "F3+ 未点名旧归档块：$out"
+  printf '%s\n' "$out" | grep -q 'DEV-102' && ok "F3+ 点名旧表头任务" || bad "F3+ 未点名：$out"
   printf '%s\n' "$out" | grep -q 'Status' && ok "F3+ 指明旧表头 Status" || bad "F3+ 未指明 Status：$out"
   printf '%s\n' "$out" | grep -q '| 状态 |' && ok "F3+ 给出 | Status | → | 状态 | 指引" || bad "F3+ 缺修复指引：$out"
 fi
-sed -i '' 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/done.md" 2>/dev/null \
-  || sed -i 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/done.md"
+sed -i '' 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/todo/DEV-102.md" 2>/dev/null \
+  || sed -i 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/todo/DEV-102.md"
 ( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 按指引修复后 check 通过" || bad "F3+ 修复后 check 未通过"
 
-# 15.2 F3+：任务块正文引用迁移字样（`| Status |` / `| 状态 |`）不污染状态列与字段检测
-cat >> "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
-
+# 15.2 F3+：任务文件正文引用迁移字样不污染状态列与字段检测
+cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-103.md" <<'EOF'
 ## [DEV-103] 正文含迁移字样
 
 | 字段 | 内容 |
@@ -1443,11 +1443,7 @@ grep -q '| dev | DEV-103 | P1 | review | t3 | 正文含迁移字样 |' "$PROJ/ag
   && ok "F3+ 正文引用迁移字样不污染状态列" \
   || bad "F3+ 状态列被正文污染：$(grep 'DEV-103' "$PROJ/agent-workflow/tasks/status.md")"
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 正文引用迁移字样时 check 通过" || bad "F3+ 正文引用迁移字样时 check 失败"
-cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'EOF'
-# 正在开发
-
-（暂无进行中任务）
-EOF
+rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" "$PROJ/agent-workflow/tasks/dev/current/DEV-103.md"
 ( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 
 # 16. F4：team-flow 文档 approval 语义统一为 automatic（无 staged 审批残留）
@@ -1959,9 +1955,8 @@ fi
 # 根因：en_US.UTF-8 下多字节中文 `==` 比较恒真（"状态"=="字段"→1），把
 # `| 证伪方法 | z |` 的 z 误当状态 → check 报「状态非法：z」。
 # 修复：awf 内所有 awk 统一以 LC_ALL=C 包装（awfk），比较退回字节语义。
-cat > "$PROJ/agent-workflow/tasks/debug/current.md" <<'D117'
-# 正在调试
-
+mkdir -p "$PROJ/agent-workflow/tasks/debug/current"
+cat > "$PROJ/agent-workflow/tasks/debug/current/DEBUG-200.md" <<'D117'
 ## [DEBUG-200] locale 解析回归
 
 | 字段 | 内容 |
@@ -1990,7 +1985,7 @@ dev117_locale_check() {
       ok "DEV-117 [$tag] 中文任务块解析正确（证伪方法 z 不再误当状态）"
     fi
   else
-    bad "DEV-117 [$tag] check 未通过（见 $log）"
+    bad "DEV-117 [$tag] check 未通过（见 ${log}）"
   fi
 }
 dev117_locale_check ""          # 默认 locale（继承当前环境，不强制 LC_ALL=C）
@@ -2033,9 +2028,7 @@ else
   bad "DEV-117 install-hooks --check 安装状态不符"
 fi
 # 构造脏账本（缺状态字段 + status 过期）→ 直接执行钩子应拒绝并输出中文提示
-cat > "$PROJ/agent-workflow/tasks/dev/current.md" <<'D117D'
-# 正在开发
-
+cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-201.md" <<'D117D'
 ## [DEV-201] 脏块（缺状态）
 
 | 字段 | 内容 |
@@ -2058,6 +2051,8 @@ if ( cd "$PROJ" && ./agent-workflow/bin/awf install-hooks --uninstall >/dev/null
 else
   bad "DEV-117 install-hooks --uninstall 卸载失败"
 fi
+rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-201.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 
 # 23. DEV-118：worker 名牌（role 自述 + find/projects/register 带出）
 # init 项目 yaml 无 role 键（DEV-119 后模板不再预置空 role: 行）→ find 回退 name，输出三列
@@ -2086,6 +2081,7 @@ else
 fi
 # 追加第二行 role（模拟用户后填）→ find 立即输出该 role，不再回退 name
 printf '\nrole: 生成脚手架并维护任务账本\n' >> "$PROJ/agent-workflow/project.yaml"
+( cd "$PROJ" && ./agent-workflow/bin/awf bootstrap >/dev/null )
 if ( cd "$PROJ" && ./agent-workflow/bin/awf find 冒烟 | grep -q '生成脚手架并维护任务账本' ); then
   ok "DEV-119 后填 role（追加行）find 立即带出，不被空行吞掉"
 else
@@ -2373,6 +2369,59 @@ if grep -q '\[awf\] <目标项目>' "$KIT_DIR/docs/dispatch.md" \
 else
   bad "DEV-126 docs/dispatch.md 未同步"
 fi
+
+# 28. DEV-127：目录式账本生命周期（认领=current/+active；归档=done/+done/+完成日期；README 由 awf status 生成）
+cat > "$PROJ/agent-workflow/tasks/dev/todo/DEV-300.md" <<'D28'
+## [DEV-300] 目录式生命周期冒烟
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | todo |
+| Owner | smoke |
+| 依赖 | 无 |
+| 最近更新 | 2026-11-04 |
+
+### 目标
+验证认领/归档的目录语义与 README 检索（DEV-127）。
+
+### 验收标准
+- [ ] 认领后 current/ 出现且状态 active
+- [ ] 归档后 done/ 出现且状态 done + 完成日期
+- [ ] 三目录 README 随 awf status 同步
+
+### 下一步
+跑 smoke。
+D28
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/todo/README.md" "DEV-127 todo/README 列 DEV-300"
+
+# 认领：文件移入 current/ + 状态改 active
+mv "$PROJ/agent-workflow/tasks/dev/todo/DEV-300.md" "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md"
+sed -i '' 's/| 状态 | todo |/| 状态 | active |/' "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md" 2>/dev/null \
+  || sed -i 's/| 状态 | todo |/| 状态 | active |/' "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/current/README.md" "认领后 current/README 列 DEV-300"
+if grep -q 'DEV-300' "$PROJ/agent-workflow/tasks/dev/todo/README.md"; then
+  bad "认领后 todo/README 不应再有 DEV-300"
+else
+  ok "认领后 todo/README 已移除 DEV-300"
+fi
+
+# 归档：文件移入 done/ + 状态改 done + 完成日期
+mv "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md" "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
+printf '| 完成日期 | %s |\n' "$(date +%Y-%m-%d 2>/dev/null || echo 2026-11-04)" >> "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
+sed -i '' 's/| 状态 | active |/| 状态 | done |/' "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md" 2>/dev/null \
+  || sed -i 's/| 状态 | active |/| 状态 | done |/' "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
+assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/done/README.md" "归档后 done/README 列 DEV-300"
+if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
+  ok "目录式账本生命周期后 check 通过"
+else
+  bad "目录式生命周期后 check 失败：$(printf '%s\n' "$out" | grep -E 'FAIL|过期' | head -3)"
+fi
+rm -f "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
+( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

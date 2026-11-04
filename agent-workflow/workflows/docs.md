@@ -15,8 +15,8 @@
 
 ## Step 1：认领
 
-1. 从 `../tasks/docs/todo.md` 或用户需求识别目标，分配唯一 `DOCS-xxx`
-2. 写入 `../tasks/docs/current.md`
+1. 从 `../tasks/docs/todo/`（todo/README.md 检索）或用户需求识别目标，分配唯一 `DOCS-xxx`
+2. 认领：把 `todo/DOCS-xxx.md` 移动到 `current/DOCS-xxx.md` 并把 `| 状态 |` 改为 `active`（目录索引 `README.md` 由 `awf status` 重生成）
 3. 明确文档类型与落点：
 
 | 类型 | 放置位置 |
@@ -76,7 +76,7 @@
 
 ## Step 5：归档
 
-1. 任务从 `current.md` 移到 `done.md`
+1. 归档：把 `current/DOCS-xxx.md` 移到 `done/DOCS-xxx.md`，状态改 `done` 并补 `| 完成日期 |`；索引 `README.md` 由 `awf status` 重生成
 2. 文档本身是长期知识时，不必再复制到 `memory/history/`
 3. 运行 `./agent-workflow/check_workflow.sh` 通过
 4. 运行 `./agent-workflow/bin/awf status` 刷新摘要

@@ -13,8 +13,8 @@
 
 ## Step 1：认领
 
-1. 从 `../tasks/debug/todo.md` 或用户输入提取问题，分配唯一 `DEBUG-xxx`
-2. 写入 `../tasks/debug/current.md`，必填：现象、状态、Owner、来源任务、修改范围、依赖、最近更新、假设、证伪方法、下一步
+1. 从 `../tasks/debug/todo/`（todo/README.md 检索）或用户输入提取问题，分配唯一 `DEBUG-xxx`
+2. 认领：把 `todo/DEBUG-xxx.md` 移动到 `current/DEBUG-xxx.md` 并把 `| 状态 |` 改为 `active`；文件必填：现象、状态、Owner、来源任务、修改范围、依赖、最近更新、假设、证伪方法、下一步
 3. 缺少复现条件时，标记 `blocked` 并写明缺失信息，不要直接开始修复
 
 ---
@@ -75,7 +75,7 @@
 
 ## Step 6：归档
 
-1. 任务从 `current.md` 移到 `done.md`
+1. 归档：把 `current/DEBUG-xxx.md` 移到 `done/DEBUG-xxx.md`，状态改 `done` 并补 `| 完成日期 |`；索引 `README.md` 由 `awf status` 重生成
 2. 有**可复用结论**（根因/修法/复现/规避）→ 追加或新建 `../memory/history/<主题>_<YYYY-MM-DD>.md`（标准见 `../memory/README.md`）；有**新写的可复用诊断/修复脚本** → 按 `../tools/README.md` 晋升三要素收录进 `tools/`
 3. 清理对应 `../memory/cache/`
 4. 运行 `./agent-workflow/check_workflow.sh` 通过

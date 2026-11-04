@@ -1106,8 +1106,19 @@ def commit_dates(target: Path, task_id: str):
 
 
 def ledger_has_id(target: Path, task_id: str) -> bool:
-    """目标账本 agent-workflow/tasks/*/done.md 是否含该 ID（工作区与 HEAD 都看）。"""
+    """目标账本是否含该 ID（工作区与 HEAD 都看）。
+
+    DEV-127 目录式：tasks/<type>/done/<ID>.md 单任务文件 + done/README.md 索引；
+    兼容旧形态 tasks/<type>/done.md（迁移前项目）。
+    """
     pattern = id_regex(task_id)
+    for done in sorted((target / "agent-workflow/tasks").glob("*/done/*.md")):
+        try:
+            if pattern.search(done.read_text(encoding="utf-8", errors="replace")):
+                return True
+        except OSError:
+            continue
+    # 旧形态：单文件含 ID（含块与归档行）
     for done in sorted((target / "agent-workflow/tasks").glob("*/done.md")):
         try:
             if pattern.search(done.read_text(encoding="utf-8", errors="replace")):
@@ -1131,7 +1142,7 @@ def ledger_has_id(target: Path, task_id: str) -> bool:
     if listing.returncode != 0:
         return False
     for rel in listing.stdout.splitlines():
-        if not rel.endswith("/done.md"):
+        if not (rel.endswith("/done.md") or "/done/" in rel):
             continue
         shown = run_git(["git", "-C", str(target), "show", f"HEAD:{rel}"])
         if shown.returncode == 0 and pattern.search(shown.stdout):
@@ -1155,9 +1166,9 @@ def judge_ticket(target, task_id: str):
         return (
             "completed",
             datetime.date.today().strftime("%Y-%m"),
-            "目标账本 done.md 已归档（提交消息不含 ID，月份按当天）",
+            "目标账本 done/ 已归档（提交消息不含 ID，月份按当天）",
         )
-    return "pending", None, "commit 消息与 done.md 都未命中"
+    return "pending", None, "commit 消息与账本 done/ 都未命中"
 
 
 def archive_relpath(alias: str, month: str, filename: str) -> str:

@@ -14,8 +14,8 @@
 
 ## Step 1：认领
 
-1. 从 `../tasks/dev/todo.md` 或用户指令确认任务，分配唯一 `DEV-xxx`
-2. 写入 `../tasks/dev/current.md`，至少包含：优先级、状态、Owner、协作模式、来源任务、修改范围、依赖、最近更新、目标、验收标准、下一步
+1. 从 `../tasks/dev/todo/`（todo/README.md 检索）或用户指令确认任务，分配唯一 `DEV-xxx`
+2. 认领：把 `todo/DEV-xxx.md` 移到 `current/DEV-xxx.md` 并把 `| 状态 |` 改为 `active`；文件至少包含：优先级、状态、Owner、协作模式、来源任务、修改范围、依赖、最近更新、目标、验收标准、下一步；目录索引 `README.md` 由 `awf status` 重生成，不要手改
 3. 需求不清晰时先澄清，不进入实现
 
 ---
@@ -27,7 +27,7 @@
 - 根因或依赖不明：先补分析，不要盲改
 - 优先复用现有模块，做最小闭环变更，并写明风险与验证方式
 
-详细设计写 `../docs/`，`current.md` 里只留 2-6 行摘要。
+详细设计写 `../docs/`，`current/DEV-xxx.md` 里只留 2-6 行摘要。
 
 ---
 
@@ -75,7 +75,7 @@
 
 ## Step 6：归档
 
-1. 任务从 `current.md` 移到 `done.md`
+1. 归档：把 `current/DEV-xxx.md` 移到 `done/DEV-xxx.md`，状态字段改 `done` 并补 `| 完成日期 | YYYY-MM-DD |`（索引由 `awf status` 重生成；迁移旧形态大文件也由 `awf status` 自动拆（含块大文件 → 单任务文件，todo 表行 → 待办文件），旧 `done.md`/`todo.md`/`current.md` 会被移除）
 2. 有**可复用结论**（根因/修法/决策/踩坑）→ 追加或新建 `../memory/history/<主题>_<YYYY-MM-DD>.md`（标准见 `../memory/README.md`）；有**新写的可复用脚本/命令** → 按 `../tools/README.md` 晋升三要素收录进 `tools/`
 3. 清理对应 `../memory/cache/`
 4. 运行 `./agent-workflow/check_workflow.sh` 通过

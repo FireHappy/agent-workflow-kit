@@ -106,11 +106,11 @@
 
 ## 状态流转
 
-唯一主路径：`todo.md -> current.md -> done.md`。
+唯一主路径：`tasks/<type>/todo/<ID>.md -> current/<ID>.md -> done/<ID>.md`（目录式，DEV-127：每任务一个文件；`todo/current/done` 各有一个 `README.md` 检索索引，由 `awf status` 生成）。
 
 规则：
 
-1. 禁止跳过 `current.md`
+1. 禁止跳过 `current/`（状态与所在目录一致；移动文件时同步改 `| 状态 |` 字段）
 2. 一个任务块只能有一个 Owner
 3. 并行时可以有多个任务块，但同一任务块不能多人修改
 4. 子流程必须保留来源任务

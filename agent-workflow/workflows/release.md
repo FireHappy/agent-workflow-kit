@@ -87,7 +87,7 @@
 
 ## Step 1：开始前检查（不通过不发版）
 
-1. **相关任务已 review 通过**：本次纳入版本的功能/修复任务都已通过 review；**当前发版任务允许仍在 `tasks/dev/current.md`**，因为它要到发版完成后（Step 6）才归档
+1. **相关任务已 review 通过**：本次纳入版本的功能/修复任务都已通过 review；**当前发版任务允许仍在 `tasks/dev/current/`**，因为它要到发版完成后（Step 6）才归档
 2. **范围明确**：写出本次纳入的任务 ID 与 commit 范围（如 `git log --oneline <上一版本tag>..HEAD`）；范围外的改动不混入
 3. **工作区只含发版相关改动**：`git status --short` 中只允许版本号 / CHANGELOG / 迁移文档等发版改动；无关的未提交改动先归档提交，或明确排除在本次发版外
 4. **校验通过**：按 `../project.yaml` 跑 `gate` 与 `test`，不能跳过；本次涉及模块至少跑一次相关验证；命令不可用时写清阻塞原因，不发版
@@ -215,7 +215,7 @@ tag 是引用，不是快照；后续有新提交时允许把 tag 移到包含�
 ## Step 6：发布后动作（默认全部停在本地）
 
 - 本地 commit 与本地 tag 完成后即算发版完成
-- **归档发版任务**：把本次发版任务从 `tasks/dev/current.md` 移到 `done.md`（发版任务的归档点在这里，Step 1 允许它留在 `current.md`），再运行 `awf status` 刷新摘要
+- **归档发版任务**：把本次发版任务从 `tasks/dev/current/` 移到 `tasks/dev/done/`（发版任务的归档点在这里，Step 1 允许它留在 `current/`；`awf release-prep` 自动完成移动+状态 done+完成日期），再运行 `awf status` 刷新摘要
 - 以下动作**必须用户明确触发**，不得自动执行：
   - `git push` / `git push --tags`
   - 合并到主干或其他分支
@@ -260,7 +260,7 @@ git push origin vX.Y.Z
 ## 检查清单
 
 - [ ] Step 0 探测完成：版本落点 / tag 风格 / CHANGELOG 形态 / 发布动作已记录在任务块
-- [ ] 相关任务已 review 通过；本次范围已列出；发版任务仍在 `current.md`，待发版完成后归档
+- [ ] 相关任务已 review 通过；本次范围已列出；发版任务仍在 `tasks/dev/current/`，待发版完成后归档
 - [ ] 开始前检查：`gate` / `test` 通过，工作区只含发版相关改动
 - [ ] 提交前检查：CHANGELOG 已更新、VERSION 与 CHANGELOG 一致、`git diff` 已自查、工作区干净
 - [ ] 不兼容变更已写迁移说明与回滚方式
@@ -269,5 +269,5 @@ git push origin vX.Y.Z
 - [ ] 发版提交只含版本号与 CHANGELOG（及迁移文档），注释 tag 打在发版提交或改动提交上（见 Step 5）
 - [ ] tag 未跨版本移动；已推送 tag 未在未获用户同意时移动
 - [ ] 未执行任何 push / 合并 / 发布动作；已给用户可复制的推送命令
-- [ ] 发版任务已归档到 `done.md`，并跑过 `awf status`
+- [ ] 发版任务已归档到 `tasks/dev/done/`，并跑过 `awf status`
 - [ ] 回滚方案已确认：保留 tag + revert 提交，不强推

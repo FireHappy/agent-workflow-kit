@@ -298,107 +298,6 @@ put_if_absent() {
   fi
 }
 
-write_task_files() {
-  local dir="$1"
-
-  put_if_absent "$dir/dev/todo.md" <<'EOF'
-# 待开发
-
-| 任务ID | 优先级 | 描述 | 登记日期 |
-|--------|--------|------|----------|
-EOF
-
-  put_if_absent "$dir/debug/todo.md" <<'EOF'
-# 待调试
-
-| 任务ID | 优先级 | 问题描述 | 登记日期 |
-|--------|--------|----------|----------|
-EOF
-
-  put_if_absent "$dir/docs/todo.md" <<'EOF'
-# 待撰写
-
-| 任务ID | 优先级 | 文档主题 | 登记日期 |
-|--------|--------|----------|----------|
-EOF
-
-  put_if_absent "$dir/dev/done.md" <<'EOF'
-# 已完成
-
-| 任务ID | 优先级 | 描述 | 完成日期 |
-|--------|--------|------|----------|
-EOF
-
-  put_if_absent "$dir/debug/done.md" <<'EOF'
-# 已完成
-
-| 任务ID | 优先级 | 问题描述 | 完成日期 |
-|--------|--------|----------|----------|
-EOF
-
-  put_if_absent "$dir/docs/done.md" <<'EOF'
-# 已完成
-
-| 任务ID | 优先级 | 文档主题 | 完成日期 |
-|--------|--------|----------|----------|
-EOF
-
-  put_if_absent "$dir/dev/current.md" <<'EOF'
-# 正在开发
-
-> 任务从 `todo.md` 移入此文件开始执行，完成后移入 `done.md`。
-> 优先级只写 `P0` / `P1` / `P2` / `P3`。
-> `awf status` 会解析本文件，任务块格式必须保持：`## [ID] 标题` + 字段表 + `### 下一步`。
-
-（暂无进行中任务）
-
-<!-- 任务块格式示例（ID 用 XXX 占位，不会被解析）：
-
-## [DEV-XXX] 任务标题
-
-| 字段 | 内容 |
-|------|------|
-| 优先级 | P1 |
-| 状态 | active |
-| Owner | agent / human / unassigned |
-| 协作模式 | single / parallel |
-| 来源任务 | 无 / DEBUG-003 / 用户直接触发 |
-| 修改范围 | 模块 / 目录 / 关键文件 |
-| 分支/工作区 | 分支名 / worktree 标识 / N/A |
-| 依赖 | 无 |
-| 最近更新 | YYYY-MM-DD |
-
-### 目标
-一句话说明交付什么。
-
-### 验收标准
-- [ ] 校验命令通过
-- [ ] 目标行为符合预期
-- [ ] 没有已知回归
-
-### 下一步
-下一位 agent 可直接接手的最小动作。
--->
-EOF
-
-  put_if_absent "$dir/debug/current.md" <<'EOF'
-# 正在调试
-
-> 问题从 `todo.md` 移入此文件开始排查，解决后移入 `done.md`。
-> 每个任务块必须写清：现象、假设、证伪方法、下一步。
-
-（暂无进行中任务）
-EOF
-
-  put_if_absent "$dir/docs/current.md" <<'EOF'
-# 正在撰写
-
-> 文档任务从 `todo.md` 移入此文件开始撰写，完成后移入 `done.md`。
-
-（暂无进行中任务）
-EOF
-}
-
 write_aux_files() {
   local root="$1"
 
@@ -496,12 +395,241 @@ EOF
   chmod +x "$root/agent-workflow/check_workflow.sh"
 }
 
-# DEV-124：经验/工具积累软提示（只提示不 FAIL，沉淀是流程引导不是门禁）
+write_task_files() {
+  local dir="$1" t b name
+  for t in dev debug docs; do
+    for b in todo current done; do
+      mkdir -p "$dir/$t/$b"
+      case "$t:$b" in
+        dev:todo)   name="待开发（todo）目录" ;;
+        dev:current) name="进行中（current）目录" ;;
+        dev:done)   name="已完成（done）目录" ;;
+        debug:todo) name="待调试（todo）目录" ;;
+        debug:current) name="进行中（current）目录" ;;
+        debug:done) name="已完成（done）目录" ;;
+        docs:todo)  name="待撰写（todo）目录" ;;
+        docs:current) name="进行中（current）目录" ;;
+        docs:done)  name="已完成（done）目录" ;;
+      esac
+      put_if_absent "$dir/$t/$b/README.md" <<EOF
+# $name 索引
+
+> 由 \`awf status\` 生成，请勿手改；任务事实以本目录下 \`<ID>.md\` 文件为准。
+
+| ID | 说明 |
+|----|------|
+EOF
+    done
+  done
+}
+
+# ---------------------------------------------------------------- 账本（DEV-127 目录式：todo/current/done 三目录）
+
+# 返回 tasks/<type>/<bucket>/ 下单任务文件（排除 README.md）
+ledger_task_files() {
+  local type="$1" bucket="$2"
+  find "agent-workflow/tasks/$type/$bucket" -maxdepth 1 -type f -name '*.md' 2>/dev/null \
+    ! -name 'README.md' | sort
+}
+
+# 读任务文件字段（第一个匹配行的值；无则输出空）
+task_field() {
+  local f="$1" key="$2"
+  # awfk（LC_ALL=C）包装：中文键比较必须在 C locale 下逐字节进行（DEV-117 同款坑，
+  # en_US.UTF-8 下多字节中文 == 恒真会把任意字段行当成目标，导致 status 块不一致）
+  awfk -F'|' -v k="$key" '
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    trim($2) == k { print trim($3); exit }
+  ' "$f"
+}
+
+# 读任务文件标题（## [ID] 标题 的标题部分）
+task_title() {
+  local f="$1"
+  awk '
+    index($0, "## [") == 1 {
+      line = substr($0, 5)
+      c = index(line, "] ")
+      if (c > 0) { print substr(line, c + 2); exit }
+    }
+  ' "$f"
+}
+
+# 读任务文件块 ID（## [ID] …）
+task_id() {
+  local f="$1"
+  awk 'index($0, "## [") == 1 { line = substr($0, 5); c = index(line, "] "); if (c > 0) { print substr(line, 1, c - 1); exit } }' "$f"
+}
+
+# 迁移旧账本（含块大文件 / todo 表行）→ 三目录；幂等。由 awf status 在重生成 README 前调用。
+migrate_ledger_files() {
+  local t f bucket blocks miss bid rowid leftover
+  for t in dev debug docs; do
+    mkdir -p "agent-workflow/tasks/$t/todo" "agent-workflow/tasks/$t/current" "agent-workflow/tasks/$t/done"
+    for f in agent-workflow/tasks/$t/todo.md agent-workflow/tasks/$t/current.md agent-workflow/tasks/$t/done.md; do
+      [ -f "$f" ] || continue
+      case "$f" in */todo.md) bucket="todo" ;; */current.md) bucket="current" ;; */done.md) bucket="done" ;; esac
+      # 1) 含块 → 拆到对应目录（不覆盖已存在文件；完成判定=所有块 ID 都有文件，幂等）
+      if grep -q '^## \[' "$f"; then
+        blocks="$(grep -c '^## \[' "$f")"
+        awk -v dir="agent-workflow/tasks/$t/$bucket" '
+          index($0, "## [") == 1 {
+            if (id != "" && buf != "") write_file(id, buf)
+            line = substr($0, 5); c = index(line, "] ")
+            id = (c > 0 ? substr(line, 1, c - 1) : "")
+            buf = $0 "\n"
+            next
+          }
+          { if (id != "") buf = buf $0 "\n" }
+          END { if (id != "" && buf != "") write_file(id, buf) }
+          function write_file(i, content,   p, n, k, ln, out) {
+            p = dir "/" i ".md"
+            if (system("test -f \"" p "\"") == 0) return
+            # 历史归档状态值归一（archived/完成/Archive → done），保持新枚举严格
+            n = split(content, ln, "\n")
+            out = ""
+            for (k = 1; k <= n; k++) {
+              if (ln[k] ~ /^\| *状态 *\| *archived *\|$/) ln[k] = "| 状态 | done |"
+              else if (ln[k] ~ /^\| *状态 *\| *完成 *\|$/) ln[k] = "| 状态 | done |"
+              else if (ln[k] ~ /^\| *Status *\| *archived *\|$/) ln[k] = "| 状态 | done |"
+              out = out ln[k] "\n"
+            }
+            print out > p
+            close(p)
+            print "账本迁移：已拆分 " p > "/dev/stderr"
+          }
+        ' "$f"
+        for bid in $(grep -o '## \[[A-Z]*-[0-9]*' "$f" | sed 's/## \[//'); do
+          [ -f "agent-workflow/tasks/$t/$bucket/$bid.md" ] || miss="$miss $bid"
+        done
+        if [ -z "$miss" ]; then
+          say "账本迁移：$f 已全部拆出 $blocks 块 → tasks/$t/$bucket/（移除旧文件）"
+          rm -f "$f"
+        else
+          say "账本迁移：$f 仍有未拆出块（$miss），保留原文件待人工处理"
+          continue
+        fi
+      fi
+      # 2) todo 表行（ID | 优先级 | 描述 | 日期）→ todo/ 下未建档任务生成文件
+      #    仅处理 todo.md（done.md 的 summary 表是历史完成记录，不得误生成）；
+      #    ID 已存在于 current/ 或 done/ 的登记行视为残留，跳过。
+      if [ "$bucket" = "todo" ]; then
+      awk -F'|' -v dir="agent-workflow/tasks/$t/todo" -v cur="agent-workflow/tasks/$t/current" -v don="agent-workflow/tasks/$t/done" '
+        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+        NR > 2 && $2 ~ /^[ \t]*[A-Z]+-[0-9]+/ {
+          id = trim($2); pri = trim($3); desc = trim($4); date = trim($5)
+          p = dir "/" id ".md"
+          if (system("test -f \"" p "\"") == 0) next
+          if (system("test -f \"" cur "/" id ".md\"") == 0) next
+          if (system("test -f \"" don "/" id ".md\"") == 0) next
+          printf "## [%s] %s\n\n", id, desc > p
+          printf "| 字段 | 内容 |\n|------|------|\n" > p
+          printf "| 优先级 | %s |\n", (pri == "" ? "P2" : pri) > p
+          printf "| 状态 | todo |\n" > p
+          printf "| 登记日期 | %s |\n", (date == "" ? "?" : date) > p
+          printf "| Owner | 待认领 |\n" > p
+          printf "\n### 目标\n（由旧 todo 登记迁移，待补全）\n\n### 验收标准\n- [ ] 待补全\n\n### 下一步\n认领：改状态为 active 并补全字段后运行 awf status。\n" > p
+          close(p)
+          print "账本迁移：todo 登记生成 " p > "/dev/stderr"
+        }
+      ' "$f"
+      fi
+      # 3) 内容已迁移的旧大文件删除（空表/表头也删）；未拆完的保留（上面 continue）
+      if ! grep -q '^## \[' "$f" && ! grep -qE '^\| *[A-Z]+-[0-9]+' "$f"; then
+        rm -f "$f"
+        say "账本迁移：移除空旧文件 $f"
+      elif ! grep -q '^## \[' "$f" && grep -qE '^\| *[A-Z]+-[0-9]+' "$f"; then
+        # 表行已消费：确认 todo/ 下已有对应文件后删除
+        leftover=0
+        for rowid in $(awk -F'|' '{ gsub(/ /, "", $2); if ($2 ~ /^[A-Z]+-[0-9]+$/) print $2 }' "$f"); do
+          [ -f "agent-workflow/tasks/$t/todo/$rowid.md" ] || leftover=1
+        done
+        if [ "$leftover" -eq 0 ]; then
+          rm -f "$f"
+          say "账本迁移：移除已迁移表行文件 $f"
+        fi
+      fi
+    done
+  done
+  ledger_cleanup_files
+}
+
+# DEV-127：清理任务文件尾部（拆块时并入的旧归档裸行 / 多余空行）
+ledger_cleanup_files() {
+  local t b f
+  for t in dev debug docs; do
+    for b in todo current done; do
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        awk '
+          { buf[++n] = $0 }
+          END {
+            while (n > 0 && (buf[n] ~ /^[ \t]*$/ || buf[n] ~ /^\| *[A-Z]+-[0-9]+.*\|$/)) n--
+            for (i = 1; i <= n; i++) print buf[i]
+          }
+        ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+      done < <(ledger_task_files "$t" "$b")
+    done
+  done
+}
+
+# 重生成三目录 README（检索索引），数据源=目录内任务文件
+render_ledger_readmes() {
+  local t b f id pri st owner title date rows
+  for t in dev debug docs; do
+    for b in todo current done; do
+      rows=""
+      for f in $(ledger_task_files "$t" "$b"); do
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        title="$(task_title "$f")"
+        pri="$(task_field "$f" 优先级)"; [ -n "$pri" ] || pri="-"
+        case "$b" in
+          todo)
+            date="$(task_field "$f" 登记日期)"; [ -n "$date" ] || date="-"
+            rows="$rows| $id | $pri | $title | $date |\n" ;;
+          current)
+            st="$(task_field "$f" 状态)"; [ -n "$st" ] || st="active"
+            owner="$(task_field "$f" Owner)"; [ -n "$owner" ] || owner="-"
+            rows="$rows| $id | $pri | $st | $owner | $title |\n" ;;
+          done)
+            date="$(task_field "$f" 完成日期)"; [ -n "$date" ] || date="-"
+            rows="$rows| $id | $pri | $title | $date |\n" ;;
+        esac
+      done
+      case "$t:$b" in
+        dev:todo)   name="待开发（todo）目录" ;;
+        dev:current) name="进行中（current）目录" ;;
+        dev:done)   name="已完成（done）目录" ;;
+        debug:todo) name="待调试（todo）目录" ;;
+        debug:current) name="进行中（current）目录" ;;
+        debug:done) name="已完成（done）目录" ;;
+        docs:todo)  name="待撰写（todo）目录" ;;
+        docs:current) name="进行中（current）目录" ;;
+        docs:done)  name="已完成（done）目录" ;;
+      esac
+      {
+        printf '# %s 索引\n\n' "$name"
+        printf '> 由 `awf status` 生成，请勿手改；任务事实以本目录下 `<ID>.md` 文件为准。\n\n'
+        case "$b" in
+          todo)   printf '| ID | 优先级 | 标题 | 登记日期 |\n|----|--------|------|----------|\n' ;;
+          current) printf '| ID | 优先级 | 状态 | Owner | 标题 |\n|----|--------|------|-------|------|\n' ;;
+          done)   printf '| ID | 优先级 | 标题 | 完成日期 |\n|----|--------|------|----------|\n' ;;
+        esac
+        printf '%b' "$rows"
+      } > "agent-workflow/tasks/$t/$b/README.md"
+      [ -n "$rows" ] || rows="（空）"
+      say "已更新 $t/$b README（$rows 行索引）"
+    done
+  done
+}
+
 check_growth_hints() {
-  local archived=0 d hfiles tfiles
-  for d in agent-workflow/tasks/*/done.md; do
-    [ -f "$d" ] || continue
-    archived=$((archived + $(grep -c '^## \[[A-Z]' "$d" || true)))
+  local archived=0 d f hfiles tfiles
+  for d in agent-workflow/tasks/*/done/; do
+    for f in "$d"[A-Z]*.md; do
+      [ -f "$f" ] || continue
+      archived=$((archived + 1))
+    done
   done
   hfiles="$(find agent-workflow/memory/history -maxdepth 1 -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
   if [ "$archived" -ge 3 ] && [ "$hfiles" -eq 0 ]; then
@@ -717,21 +845,21 @@ check_current_file() {
       miss = ""
       if (!st) miss = miss " 状态"
       if (!ow) miss = miss " Owner"
-      if (m == "current" && !nx) miss = miss " 下一步"
+      if (m == "current" && !nx && st_v != "done") miss = miss " 下一步"
       if (miss != "") {
         # FAIL 自解释：迁移类（旧英文表头 / 归档块）给出可直接执行的修复指引
         printf "FAIL  %s [%s] 缺少字段:%s\n", wf, id, miss
         if (!st) {
-          if (st_en) printf "      → 修复：旧英文表头 `| Status |` 改为 `| 状态 |`（保留原值，如 `| 状态 | 完成 |`），再跑 awf check\n"
+          if (st_en) printf "      → 修复：旧英文表头 `| Status |` 改为 `| 状态 |`，且历史值统一为 `| 状态 | done |`（archived/完成/Archive 均已归一为 done），再跑 awf check\n"
           else if (m == "done") printf "      → 修复：归档块字段表补一行 `| 状态 | <归档时状态> |`（历史归档可写 `完成`），再跑 awf check\n"
-          else printf "      → 修复：字段表补一行 `| 状态 | active`\n"
+          else printf "      → 修复：字段表补一行 `| 状态 | active`（DEV-127 后可为 todo/done）\n"
         }
         if (!ow) printf "      → 修复：字段表补一行 `| Owner | <承担者> |`\n"
-        if (m == "current" && !nx) printf "      → 修复：补 `### 下一步` 小节\n"
+        if (m == "current" && !nx && st_v != "done") printf "      → 修复：补 `### 下一步` 小节\n"
         bad++
       }
-      else if (m == "current" && st_v !~ /^(active|blocked|review|verify|handoff)$/) {
-        printf "FAIL  %s [%s] 状态非法：%s（应为 active/blocked/review/verify/handoff）\n", wf, id, st_v
+      else if (m == "current" && st_v !~ /^(active|blocked|review|verify|handoff|todo|done)$/) {
+        printf "FAIL  %s [%s] 状态非法：%s（应为 todo/active/blocked/review/verify/handoff/done）\n", wf, id, st_v
         bad++
       }
       else printf "ok    %s [%s] 字段完整\n", wf, id
@@ -784,114 +912,66 @@ check_current_file() {
 
 # 生成 status 区块内容（含 当前进行中 / 待处理 / 最近完成）到 $1
 status_build_block() {
-  local block="$1" type f r todo_rows="" r3 done_rows="" r2
+  local block="$1" type f id pri st own title date
+  local cur_rows="" todo_rows="" done_rows=""
   {
     printf '> 本区块由 `agent-workflow/bin/awf status` 生成，请勿手改。\n'
-    printf '> 数据来源：`tasks/*/current.md`、`tasks/*/todo.md`、`tasks/*/done.md`。\n\n'
+    printf '> 数据来源：`tasks/<type>/<ID>.md`（单任务文件；todo/current/done README 为检索视图）。\n\n'
 
+    # DEV-127：current/todo/done 段直接扫任务文件（README 只是视图；直接扫文件才能让
+    # check_status_fresh 探测到"账本已改但 status.md 未刷新"）
     for type in dev debug docs; do
-      f="agent-workflow/tasks/$type/current.md"
-      [ -f "$f" ] || continue
-      r="$(awfk -F'|' -v wf="$type" '
-        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
-        function flush() {
-          if (id != "") printf "| %s | %s | %s | %s | %s | %s |\n", wf, id, pri, st, ow, title
-          id = ""; pri = ""; st = ""; ow = ""; title = ""
-        }
-        index($0, "## [") == 1 {
-          flush()
-          line = substr($0, 5)
-          c = index(line, "] ")
-          id = substr(line, 1, c - 1)
-          if (id !~ /^[A-Z]+-[0-9]+$/) { id = ""; next }
-          title = substr(line, c + 2)
-          next
-        }
-        {
-          if (id == "") next
-          if ($0 !~ /^\|/) next      # 只扫字段表行；正文引用 `| Status |` 等字样不算字段
-          if (trim($2) == "优先级") pri = trim($3)
-          else if (trim($2) == "状态" || trim($2) == "Status") st = trim($3)
-          else if (trim($2) == "Owner") ow = trim($3)
-        }
-        END { flush() }
-      ' "$f")"
-      if [ -n "$r" ]; then
-        if ! grep -q '^## 当前进行中' "$block"; then
-          printf '## 当前进行中\n\n' >> "$block"
-          printf '| 工作流 | 任务ID | 优先级 | 状态 | Owner | 任务 |\n' >> "$block"
-          printf '|--------|--------|--------|------|-------|------|\n' >> "$block"
-        fi
-        printf '%s\n' "$r" >> "$block"
-      fi
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        pri="$(task_field "$f" 优先级)"; st="$(task_field "$f" 状态)"; own="$(task_field "$f" Owner)"
+        cur_rows="$cur_rows| $type | $id | ${pri:-P1} | ${st:-active} | ${own:-?} | $(task_title "$f") |"$'\n'
+      done < <(ledger_task_files "$type" "current")
     done
-
-    if ! grep -q '^## 当前进行中' "$block"; then
+    if [ -n "$cur_rows" ]; then
+      printf '## 当前进行中\n\n| 工作流 | 任务ID | 优先级 | 状态 | Owner | 任务 |\n' >> "$block"
+      printf '|--------|--------|--------|------|-------|------|\n' >> "$block"
+      printf '%s' "$cur_rows" >> "$block"
+    else
       printf '## 当前进行中\n\n（无）\n' >> "$block"
     fi
     printf '\n' >> "$block"
 
     printf '## 待处理\n\n' >> "$block"
     for type in dev debug docs; do
-      f="agent-workflow/tasks/$type/todo.md"
-      [ -f "$f" ] || continue
-      r3="$(awfk -F'|' -v wf="$type" '
-        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
-        function pick_date(   i) {
-          for (i = 2; i < NF; i++) if ($i ~ /^ *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *$/) return trim($i)
-          return trim($(NF - 1))
-        }
-        {
-          id = trim($2)
-          if (id !~ /^[A-Z]+-[0-9]+$/) next
-          printf "| %s | %s | %s | %s | %s |\n", wf, id, trim($3), trim($4), pick_date()
-        }
-      ' "$f")"
-      if [ -n "$r3" ]; then
-        todo_rows="$todo_rows$r3"$'\n'
-      fi
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        pri="$(task_field "$f" 优先级)"; date="$(task_field "$f" 最近更新)"
+        todo_rows="$todo_rows| $type | $id | ${pri:-P1} | $(task_title "$f") | ${date:-} |"$'\n'
+      done < <(ledger_task_files "$type" "todo")
     done
-    if [ -z "$todo_rows" ]; then
-      printf '（无）\n' >> "$block"
-    else
+    if [ -n "$todo_rows" ]; then
       printf '| 工作流 | 任务ID | 优先级 | 描述 | 登记日期 |\n' >> "$block"
       printf '|--------|--------|--------|------|----------|\n' >> "$block"
       printf '%s' "$todo_rows" >> "$block"
+    else
+      printf '（无）\n' >> "$block"
     fi
     printf '\n' >> "$block"
 
     printf '## 最近完成\n\n' >> "$block"
     for type in dev debug docs; do
-      f="agent-workflow/tasks/$type/done.md"
-      [ -f "$f" ] || continue
-      # 取该类型全部归档行（不做 tail 截断），排序在汇总后统一做：
-      # 日期倒序优先，同日按文件出现顺序倒序（越晚归档越靠前）。
-      # 记录格式：seq|wf|id|prio|desc|date；date = 行内第一个 YYYY-MM-DD（兼容 4/5/6 列 + 链接列）。
-      r2="$(grep -nE '^\| *[A-Z]+-[0-9]+' "$f" | awfk -F'|' -v wf="$type" '
-        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
-        {
-          seq = $1
-          sub(/^[0-9]+:/, "", $0)
-          if (match($0, /[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) date = substr($0, RSTART, RLENGTH)
-          else next
-          nf = split($0, parts, "|")
-          id = trim(parts[2]); prio = trim(parts[3]); desc = trim(parts[4])
-          printf "%s|%s|%s|%s|%s|%s\n", seq, wf, id, prio, desc, date
-        }
-      ')"
-      if [ -n "$r2" ]; then
-        done_rows="$done_rows$r2"$'\n'
-      fi
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        pri="$(task_field "$f" 优先级)"
+        date="$(task_field "$f" 完成日期)"
+        [ -n "$date" ] || date="$(task_field "$f" 最近更新)"
+        done_rows="$done_rows$type|$id|${pri:-P1}|$(task_title "$f")|${date:-0000-00-00}"$'\n'
+      done < <(ledger_task_files "$type" "done")
     done
-    if [ -z "$done_rows" ]; then
-      printf '（无）\n' >> "$block"
-    else
+    if [ -n "$done_rows" ]; then
       printf '| 工作流 | 任务ID | 优先级 | 描述 | 完成日期 |\n' >> "$block"
       printf '|--------|--------|--------|------|----------|\n' >> "$block"
-      # 排序：日期（第6字段）倒序 → 行号（第1字段）倒序；取前 8 条，输出规格化行
-      printf '%s' "$done_rows" | sort -t'|' -k6,6r -k1,1nr \
-        | head -n 8 \
-        | awfk -F'|' -v wf='' '{ printf "| %s | %s | %s | %s | %s |\n", $2, $3, $4, $5, $6 }' >> "$block"
+      printf '%s' "$done_rows" | LC_ALL=C sort -t'|' -k5,5r | head -n 8         | awfk -F'|' '{ printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5 }' >> "$block"
+    else
+      printf '（无）\n' >> "$block"
     fi
 
     printf '\n*最后更新：%s*\n' "$(now)" >> "$block"
@@ -988,16 +1068,32 @@ agent-workflow/workflows/cross-project.md
 agent-workflow/workflows/release.md
 agent-workflow/tasks/status.md
 agent-workflow/templates/AGENTS.md.tmpl
-agent-workflow/tasks/dev/done.md
-agent-workflow/tasks/debug/done.md
-agent-workflow/tasks/docs/done.md
+agent-workflow/tasks/dev/todo/README.md
+agent-workflow/tasks/dev/current/README.md
+agent-workflow/tasks/dev/done/README.md
+agent-workflow/tasks/debug/todo/README.md
+agent-workflow/tasks/debug/current/README.md
+agent-workflow/tasks/debug/done/README.md
+agent-workflow/tasks/docs/todo/README.md
+agent-workflow/tasks/docs/current/README.md
+agent-workflow/tasks/docs/done/README.md
 "
   for f in $required; do
     if [ -f "$f" ]; then
       say "ok    $f"
     else
-      say "FAIL  缺少 $f"
-      fails=$((fails + 1))
+      # 兼容旧形态：有对应该类型的旧大文件（tasks/<type>/<bucket>.md）时不算缺
+      if case "$f" in
+           agent-workflow/tasks/*/[a-z]*/README.md)
+             oldf="${f%/README.md}.md"
+             [ -f "$oldf" ] ;;
+           *) false ;;
+         esac; then
+        say "ok    ${f}（旧形态 ${f%/README.md}.md 存在；跑 awf status 自动迁移为目录）"
+      else
+        say "FAIL  缺少 $f"
+        fails=$((fails + 1))
+      fi
     fi
   done
 
@@ -1029,10 +1125,26 @@ agent-workflow/tasks/docs/done.md
   [ "$drift_n" -gt 0 ] && fails=$((fails + drift_n))
   printf '%s\n' "$drift_out" | grep -v '^$' || true
 
-  # F3：current.md 与 done.md 归档块/归档行同解析
+  # F3：新形态（DEV-127）目录式单任务文件 tasks/<type>/{todo,current,done}/<ID>.md 逐个解析
+  local t2 f2 b2
+  for t2 in dev debug docs; do
+    for b2 in todo current done; do
+      while IFS= read -r f2; do
+        [ -f "$f2" ] || continue
+        out="$(check_current_file "$f2" "$t2" "current")" || true
+        if printf '%s' "$out" | grep -q 'FAIL'; then
+          fails=$((fails + 1))
+        fi
+        printf '%s\n' "$out" | grep -v '^$' || true
+      done < <(ledger_task_files "$t2" "$b2")
+    done
+  done
+
+  # F3b：旧形态兼容——含块的大 current/done（迁移前 / 手工维护项目）仍按旧规则解析
   for f in agent-workflow/tasks/dev/current.md agent-workflow/tasks/debug/current.md agent-workflow/tasks/docs/current.md \
            agent-workflow/tasks/dev/done.md agent-workflow/tasks/debug/done.md agent-workflow/tasks/docs/done.md; do
     [ -f "$f" ] || continue
+    grep -q '^## \[' "$f" || continue
     case "$f" in
       */dev/*)   t="dev" ;;
       */debug/*) t="debug" ;;
@@ -1103,6 +1215,10 @@ cmd_status() {
   block="agent-workflow/tasks/status.md.block.tmp"
   target="agent-workflow/tasks/status.md"
 
+  # DEV-127：先迁移旧账本（若有含块大文件），再重生成三视图，最后刷新 status.md
+  migrate_ledger_files
+  render_ledger_readmes
+
   status_build_block "$block"
 
   if [ ! -f "$target" ]; then
@@ -1160,7 +1276,7 @@ release_version_ok() {
 
 release_next_dev_id() {
   local max
-  max="$(cat "$ROOT"/agent-workflow/tasks/dev/*.md 2>/dev/null \
+  max="$(cat "$ROOT"/agent-workflow/tasks/dev/todo/*.md "$ROOT"/agent-workflow/tasks/dev/current/*.md "$ROOT"/agent-workflow/tasks/dev/done/*.md 2>/dev/null \
     | grep -o 'DEV-[0-9][0-9]*' \
     | sed 's/DEV-//; s/^0*//' \
     | sort -n | tail -n 1 || true)"
@@ -1169,37 +1285,39 @@ release_next_dev_id() {
 }
 
 release_current_id() {
-  [ -f "$CURRENT" ] || return 0
-  awfk -v ver="$VERSION" '
-    index($0, "## [") == 1 && index($0, "release-prep " ver) > 0 {
-      line = substr($0, 5); c = index(line, "] ")
-      if (c > 0) { print substr(line, 1, c - 1); exit }
-    }
-  ' "$CURRENT"
+  # DEV-127：扫 current/ 目录任务文件（非 done 且标题含 release-prep <ver>）
+  local f
+  for f in "$ROOT"/agent-workflow/tasks/dev/current/[A-Z-]*.md; do
+    [ -f "$f" ] || continue
+    if head -n 1 "$f" | grep -q "release-prep $VERSION"; then
+      printf '%s' "$(task_id "$f")"
+      return 0
+    fi
+  done
+  return 0
 }
 
 release_done_id() {
-  [ -f "$DONE" ] || return 0
-  awfk -F'|' -v ver="$VERSION" '
-    index($0, "release-prep " ver) > 0 && $2 ~ /DEV-/ {
-      id = $2; gsub(/^[ \t]+|[ \t]+$/, "", id); print id; exit
-    }
-  ' "$DONE"
+  local f
+  for f in "$ROOT"/agent-workflow/tasks/dev/done/[A-Z-]*.md; do
+    [ -f "$f" ] || continue
+    if head -n 1 "$f" | grep -q "release-prep $VERSION"; then
+      printf '%s' "$(task_id "$f")"
+      return 0
+    fi
+  done
+  return 0
 }
 
 release_write_current() {
-  if [ ! -f "$CURRENT" ]; then
-    printf '# 正在开发\n\n' > "$CURRENT"
-  fi
-  if grep -q '（暂无进行中任务）' "$CURRENT"; then
-    grep -v '（暂无进行中任务）' "$CURRENT" > "$CURRENT.tmp" && mv "$CURRENT.tmp" "$CURRENT"
-  fi
-  if [ -n "$(release_current_id)" ]; then
-    say "账本：复用当前未完成的 $TASK_ID 块"
+  # DEV-127：写入 tasks/dev/current/<TASK_ID>.md（README 由 awf status 生成）
+  local target="$ROOT/agent-workflow/tasks/dev/current/$TASK_ID.md"
+  if [ -f "$target" ]; then
+    say "账本：复用已有任务文件 ${TASK_ID}（release-prep ${VERSION}）"
     return 0
   fi
   {
-    printf '\n## [%s] release-prep %s\n\n' "$TASK_ID" "$VERSION"
+    printf '## [%s] release-prep %s\n\n' "$TASK_ID" "$VERSION"
     printf '| 字段 | 内容 |\n|------|------|\n'
     printf '| 优先级 | P1 |\n'
     printf '| 状态 | active |\n'
@@ -1213,28 +1331,39 @@ release_write_current() {
     printf '### 目标\n一键发版装配 %s。\n\n' "$VERSION"
     printf '### 验收标准\n- [ ] ./agent-workflow/check_workflow.sh 通过\n- [ ] bash test/smoke.sh 通过\n\n'
     printf '### 下一步\n执行 release-prep 打印的 git add/commit/tag/push 命令（由人触发）。\n'
-  } >> "$CURRENT"
-  say "账本：$CURRENT 写入 ${TASK_ID}（release-prep ${VERSION}）"
+  } > "$target"
+  say "账本：$target 写入 ${TASK_ID}（release-prep ${VERSION}）"
 }
 
 release_archive() {
-  if [ -z "$(release_done_id)" ]; then
-    if [ ! -f "$DONE" ]; then
-      printf '# 已完成\n\n| 任务ID | 优先级 | 描述 | 完成日期 |\n|--------|--------|------|----------|\n' > "$DONE"
+  # DEV-127：归档 = 移到 done/ 目录 + 状态改 done + 完成日期（README 由 awf status 重生成）
+  local src="$ROOT/agent-workflow/tasks/dev/current/$TASK_ID.md"
+  local dst="$ROOT/agent-workflow/tasks/dev/done/$TASK_ID.md"
+  if [ -f "$src" ]; then
+    if [ -n "$(release_done_id)" ]; then
+      say "账本：${TASK_ID} 已有 release-prep ${VERSION} 归档记录（幂等跳过）"
+      return 0
     fi
-    printf '| %s | P1 | release-prep %s：一键发版装配 | %s |\n' \
-      "$TASK_ID" "$VERSION" "$(today)" >> "$DONE"
-    say "账本：已归档 $TASK_ID 到 $DONE"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+    task_set_status_done "$dst" "$(today)"
+    say "账本：已归档 ${TASK_ID}（→ done/，状态=done，完成日期 $(today)）"
+  elif [ -f "$dst" ]; then
+    say "账本：${TASK_ID} 已在 done/（幂等跳过）"
   else
-    say "账本：$DONE 已有 release-prep $VERSION 记录（幂等跳过）"
+    say "账本：任务文件 ${TASK_ID} 不存在，跳过归档（release-prep 未建账？）"
   fi
-  if [ -f "$CURRENT" ]; then
-    awfk -v id="$TASK_ID" '
-      $0 ~ "^## \\[" id "\\]" { skip = 1; next }
-      skip && /^## \[/ { skip = 0 }
-      !skip { print }
-    ' "$CURRENT" > "$CURRENT.tmp" && mv "$CURRENT.tmp" "$CURRENT"
-  fi
+}
+
+# 把任务文件状态字段改为 done，并补/更新完成日期行
+task_set_status_done() {
+  local f="$1" date="$2"
+  awk -v d="$date" '
+    /^\| *状态 *\|/ { sub(/\|[^\|]*\|$/, "| done |"); print; next }
+    /^\| *完成日期 *\|/ { found = 1; printf "| 完成日期 | %s |\n", d; next }
+    { print }
+    END { if (!found) printf "| 完成日期 | %s |\n", d }
+  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 }
 
 release_run() {

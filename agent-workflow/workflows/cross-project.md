@@ -84,10 +84,10 @@
 
 1. **生成**：文件名带任务 ID（`<项目>-<ID>-<slug>.md`），正文写 `- 目标项目：<别名>（<绝对路径>）`。
 2. **在途**：派发后票据留在 `dispatch/tasks/`；`dispatch/log.md` 记录会话、状态与目标 HEAD。
-3. **落地**：目标项目完成并本地 commit，账本归档到目标 `agent-workflow/tasks/<type>/done.md`。
+3. **落地**：目标项目完成并本地 commit，账本归档到目标 `agent-workflow/tasks/<type>/done/<ID>.md`（目录式；旧 `done.md` 大文件由目标项目内 `awf status` 自动迁移）。
 4. **归档**：完成后在调度方运行 `awf-dispatch --prune`（默认 dry-run，只打印计划），确认后加 `--apply` 把票据移到 `dispatch/archive/<目标别名>/<YYYY-MM>/<原文件名>`。
 
-判定依据：目标仓库提交消息含任务 ID，**或** 目标账本 `done.md` 已含该 ID——提交消息没写 ID 的票据也能归档；解析不到目标项目/任务 ID、目标路径不存在或不是 git 仓库时判 unknown 并跳过（不猜）。
+判定依据：目标仓库提交消息含任务 ID，**或** 目标账本 `tasks/<type>/done/`（目录式）已含该 ID（兼容旧 `done.md`）——提交消息没写 ID 的票据也能归档；解析不到目标项目/任务 ID、目标路径不存在或不是 git 仓库时判 unknown 并跳过（不猜）。
 
 ```sh
 ./agent-workflow/bin/awf-dispatch --prune           # dry-run：打印票据 / 目标 / 任务ID / 判定 / 将移往路径
