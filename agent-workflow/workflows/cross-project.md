@@ -41,12 +41,14 @@
 
 | 门 | 检查 | 不满足时 |
 |---|---|---|
-| G1 工作流 | 目标有 `AGENTS.md`、`agent-workflow/project.yaml`、`workflows/`、`check_workflow.sh` | 先 `awf init`（需用户确认），不要向无流程仓库派发 |
+| G1 工作流 | 目标有 `AGENTS.md`、`agent-workflow/project.yaml`、`workflows/`、`check_workflow.sh` | 先 `awf init`（需用户确认），不要向无流程仓库派发；仅「status.md 已过期」瞬态 warn 放行（DISPATCH-139） |
 | G2 工作区 | 目标路径已登记为当前 harness 的工作区（工作区清单） | 通过 harness 的工作区管理添加，或 `awf-dispatch --add-workspace`；否则生成交接单（handoff） |
-| G3 可写 | 目标 `git status` 无已跟踪改动、无其他 active 任务 | 停止并询问；不要和另一个写者并行 |
+| G3 可写 | 目标 `git status` 无已跟踪改动、无其他 active 任务 | `--allow-dirty=tasks` 只豁免账本自我生成物（status/README/log），业务改动仍拒；active 冲突三选项：等它完 / `--allow-active` / `--new`（DISPATCH-139） |
 | G4 通道 | 目标工作区能创建会话（会话服务在线、认证有效、模型可用） | 回退无人值守执行（需用户同意）或手工作业（handoff）；不要用不相关目录参数绕过 |
 
 只读任务可以放宽 G3，但仍建议在会话中执行，留下可追问的记录。
+
+> 门禁严格度（DISPATCH-139）：会话繁忙默认排队最多 `--queue-timeout` 180s，超时前回报中途状态（已等秒数/目标 HEAD/会话产出），不静默超时；`--wait` 回合等待超时同样先回报中途状态。
 
 ---
 

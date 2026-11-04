@@ -306,7 +306,7 @@ assert (module.EXIT_OK, module.EXIT_FAIL, module.EXIT_TIMEOUT, module.EXIT_ZOMBI
     "退出码契约：5 是 headless 子进程非零退出（独立于 3 的超时/未落地）"
 assert module.PRESSURE_HINT_LIMIT == 0.9, "压力只作 0.9 提示，不再作为轮换阈值"
 assert module.DEFAULT_IDLE_WAIT == 300, "running 等待默认 300s"
-assert module.DEFAULT_QUEUE_TIMEOUT == 60, "DEV-126 busy 会话队列等待默认 60s（--queue-timeout）"
+assert module.DEFAULT_QUEUE_TIMEOUT == 180, "DEV-126/DISPATCH-139 busy 会话队列等待默认 180s（--queue-timeout）"
 assert module.AWF_TITLE_PREFIX == "[awf]", "DEV-126 前缀仍为 [awf]（派发任务澄清，非 [asf]）"
 assert module.MODULE_DEFAULT == "通用", "默认模块必须是「通用」"
 
@@ -989,6 +989,104 @@ with tempfile.TemporaryDirectory() as tmp:
 prompt = module.build_prompt(target, "TEST", "dev", "任务：TEST-001 冒烟\n")
 assert "blocked" in prompt and "必须回报派发方" in prompt, prompt
 assert "解除条件" in prompt and "静默停等" in prompt, prompt
+
+# S3（DISPATCH-139）：门禁严格度——P0 默认 180s + 中途状态 / P1 allow-dirty=tasks 粒度 + G3 三选项 / P2 G1 瞬态豁免
+assert module.DEFAULT_QUEUE_TIMEOUT == 180, module.DEFAULT_QUEUE_TIMEOUT
+_src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+assert "report_mid_status" in _src and "中途状态" in _src and "已等 %ds" in _src, "P0 中途状态回报缺失"
+assert "--allow-dirty=" in _src and "allow_dirty_scope" in _src, "P1 allow-dirty 范围解析缺失"
+assert "只豁免账本自我生成物" in _src and "业务/代码改动仍拦截" in _src, "P1 粒度豁免语义缺失"
+assert "三选项" in _src and "--allow-active" in _src and "① 等它完成后再派" in _src, "P1 G3 三选项提示缺失"
+assert "瞬态豁免" in _src and "status.md 已过期" in _src, "P2 瞬态豁免语义缺失"
+
+# 行为级：P1 --allow-dirty=tasks 豁免生成物、拦截业务；G3 active 三选项；P2 check 瞬态/真缺损
+with tempfile.TemporaryDirectory() as tmp:
+    repo = pathlib.Path(tmp) / "proj"
+    (repo / "agent-workflow" / "tasks" / "dev" / "current").mkdir(parents=True)
+    (repo / "agent-workflow" / "workflows").mkdir(parents=True)
+    (repo / "AGENTS.md").write_text("# x\n", encoding="utf-8")
+    (repo / "agent-workflow" / "project.yaml").write_text("role: t\n", encoding="utf-8")
+    (repo / "agent-workflow" / "README.md").write_text("r\n", encoding="utf-8")
+    (repo / "agent-workflow" / "workflows" / "dev.md").write_text("w\n", encoding="utf-8")
+    (repo / "agent-workflow" / "tasks" / "status.md").write_text("s\n", encoding="utf-8")
+    (repo / "dispatch").mkdir(parents=True)
+    (repo / "dispatch" / "log.md").write_text("log\n", encoding="utf-8")
+    (repo / "src.py").write_text("code\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+    # P1：业务代码 + 生成物都脏 → =tasks 应拒
+    (repo / "agent-workflow" / "tasks" / "status.md").write_text("s2\n", encoding="utf-8")
+    (repo / "dispatch" / "log.md").write_text("log2\n", encoding="utf-8")
+    (repo / "src.py").write_text("code2\n", encoding="utf-8")
+    try:
+        module.check_git(repo, True, "tasks")
+        raise AssertionError("P1：--allow-dirty=tasks 应拦截业务代码脏")
+    except module.DispatchError as err:
+        assert "业务/代码改动仍拦截" in str(err), str(err)
+    # P1：只留生成物脏 → =tasks 放行
+    (repo / "src.py").write_text("code\n", encoding="utf-8")
+    out = module.check_git(repo, True, "tasks")
+    assert "账本自我生成物" in out, out
+    # P1：G3 active 三选项
+    (repo / "agent-workflow" / "tasks" / "dev" / "current" / "DEV-999.md").write_text(
+        "## [DEV-999] 测试\n| 状态 | active |\n", encoding="utf-8")
+    try:
+        module.check_active(repo, False)
+        raise AssertionError("P1：G3 active 应报错")
+    except module.DispatchError as err:
+        assert "三选项" in str(err) and "--allow-active" in str(err) and "--new" in str(err), str(err)
+    # P2：仅 status.md 过期 → 瞬态放行
+    (repo / "agent-workflow" / "check_workflow.sh").write_text(
+        "#!/bin/sh\necho 'FAIL  tasks/status.md 已过期（账本改动后未刷新）' >&2\nexit 1\n",
+        encoding="utf-8")
+    (repo / "agent-workflow" / "check_workflow.sh").chmod(0o755)
+    module.check_workflow(repo)  # 不应 raise
+    # P2：含真缺损 → 仍 FAIL
+    (repo / "agent-workflow" / "check_workflow.sh").write_text(
+        "#!/bin/sh\necho 'FAIL  tasks/status.md 已过期（账本改动后未刷新）' >&2\n"
+        "echo 'FAIL  缺 workflow 文件' >&2\nexit 2\n", encoding="utf-8")
+    (repo / "agent-workflow" / "check_workflow.sh").chmod(0o755)
+    try:
+        module.check_workflow(repo)
+        raise AssertionError("P2：真缺损应 FAIL")
+    except module.DispatchError:
+        pass
+
+# S3.5（DISPATCH-139 回归）：report_mid_status「HEAD 未变」分支曾 TypeError 破坏
+# wait_for_turn 的 (None,None) 语义；现必须不崩、正常回报中途状态、语义不变。
+with tempfile.TemporaryDirectory() as tmp:
+    mid_repo = pathlib.Path(tmp) / "mid"
+    mid_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=mid_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=mid_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=mid_repo, check=True)
+    (mid_repo / "f.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=mid_repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=mid_repo, check=True)
+    sha = subprocess.run(["git", "-C", str(mid_repo), "rev-parse", "--short", "HEAD"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    class _ListApi:
+        def sessions(self):
+            return [row("s-mid")]
+        def rpc(self, method, params, timeout=30):
+            raise module.DispatchError("test: rpc 不可用（session_records 应返回 None）")
+    mid_api = _ListApi()
+    with contextlib.redirect_stderr(io.StringIO()) as err:
+        trow, tsec = module.wait_for_turn(mid_api, "s-mid", 0, 0.0, False,
+                                          target=mid_repo, head_before=sha)
+    assert trow is None and tsec is None, "P0 回归：回合超时必须仍返回 (None,None)"
+    assert "未变" in err.getvalue() and "中途状态" in err.getvalue(), err.getvalue()
+# --allow-dirty=（空值）不得静默当全豁免，parser.error exit 2
+with contextlib.redirect_stderr(io.StringIO()):
+    try:
+        module.main(["demo", "task.md", "--allow-dirty="])
+    except SystemExit as code:
+        assert code.code == 2, code.code
+    else:
+        raise AssertionError("P1 回归：--allow-dirty= 空值应被拒绝")
 
 # M1：read_task 票据必备字段校验（目标项目/任务编号/来源/路由裁决），缺失拒发并明示缺项
 with tempfile.TemporaryDirectory() as tmp:

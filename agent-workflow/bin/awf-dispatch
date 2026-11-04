@@ -9,7 +9,7 @@
 
 全过时默认复用目标工作区里「目标项目」对应的常驻会话（标题 `[awf] [派发者] [任务名]`——
 目标 worker 承接派发任务的会话，任务名随派发动态更新）；
-选中的会话正在运行时进入**等待队列**（默认最多等 60s，`--queue-timeout` 可调；
+选中的会话正在运行时进入**等待队列**（默认最多等 180s，`--queue-timeout` 可调；
 回合结束等待仍走 --wait/--timeout），超时才报队列超时，不再立即失败；
 没有可用会话时才新建。随后发送任务并立即返回
 （默认异步，不等待回合）。需要本回合结果时加 --wait（默认最多等 300s，--timeout 可调；
@@ -23,7 +23,7 @@
 「派发者：」行 > 调度方项目名（默认）；任务名 = 当次票据的 `ID 短标题`（动态）。会话收敛：
 同一派发者在同一目标项目最多 3 个 [awf] 任务会话——池内空闲（running=False）
 优先复用（改名接新任务）；都忙且池未满则新建扩充；池满（>=3）都忙才排队等待
-（--queue-timeout，默认 60s；超时按队列超时报错）。
+（--queue-timeout，默认 180s；超时按队列超时报错）。
 
 用法：
   ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
@@ -89,7 +89,7 @@ AWF_TITLE_PREFIX = "[awf]"
 MAX_SENDER_SESSIONS = 3
 # 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
 # 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
-DEFAULT_QUEUE_TIMEOUT = 60
+DEFAULT_QUEUE_TIMEOUT = 180
 SESSION_TITLE_LIMIT = 40
 # 票据没写「模块：」、命令行也没给 --module 时的默认模块。
 MODULE_DEFAULT = "通用"
@@ -337,14 +337,43 @@ def check_workflow(target: Path) -> None:
         timeout=120,
     )
     if proc.returncode != 0:
-        detail = (proc.stdout + proc.stderr).strip().splitlines()[-8:]
+        output = proc.stdout + proc.stderr
+        fail_lines = [ln for ln in output.strip().splitlines() if "FAIL" in ln]
+        # P2（DISPATCH-139）：status.md 过期是「账本在动的瞬态」不是真缺损——
+        # check 缺失项只有「status.md 未刷新」（账本在动、缺的只是摘要）时降级 warn 放行。
+        only_status_stale = bool(fail_lines) and all(
+            "status.md 已过期" in ln for ln in fail_lines
+        )
+        if only_status_stale:
+            print(
+                "提示：G1 瞬态豁免（DISPATCH-139）——目标 check 仅缺「status.md 已过期」"
+                "（账本在动、缺的只是摘要，属瞬态），已放行；建议目标侧稍后运行 "
+                "./agent-workflow/bin/awf status 刷新摘要后再提交。",
+                file=sys.stderr,
+            )
+            return
+        detail = output.strip().splitlines()[-8:]
         raise DispatchError(
             "G1 工作流校验失败；先让目标项目通过 check_workflow.sh：\n"
             + "\n".join(detail)
         )
 
 
-def check_git(target: Path, allow_dirty: bool) -> str:
+def _is_generated_change(line: str) -> bool:
+    """--allow-dirty=tasks 豁免的账本自我生成物（DISPATCH-139 P1）：
+    agent-workflow/tasks/status.md、tasks/<type>/<dir>/README.md、dispatch/log.md
+    （由 awf status / 工具再生成）；业务/代码改动不豁免。"""
+    path = line[3:].strip()
+    if path == "agent-workflow/tasks/status.md":
+        return True
+    if path.startswith("agent-workflow/tasks/") and path.endswith("/README.md"):
+        return True
+    if path == "dispatch/log.md":
+        return True
+    return False
+
+
+def check_git(target: Path, allow_dirty: bool, allow_dirty_scope: str = "") -> str:
     if not (target / ".git").exists():
         return "非 git 仓库（跳过）"
     proc = subprocess.run(
@@ -358,9 +387,21 @@ def check_git(target: Path, allow_dirty: bool) -> str:
     changes = [line for line in proc.stdout.splitlines() if line.strip()]
     if changes and not allow_dirty:
         raise DispatchError(
-            "G3 可写失败：目标有已跟踪改动，先提交/清理，或加 --allow-dirty：\n"
+            "G3 可写失败：目标有已跟踪改动，先提交/清理，或加 --allow-dirty；"
+            "只想豁免账本自我生成物（status/README/log）时用 --allow-dirty=tasks：\n"
             + "\n".join(changes[:10])
         )
+    if changes and allow_dirty and allow_dirty_scope == "tasks":
+        blocked = [line for line in changes if not _is_generated_change(line)]
+        if blocked:
+            raise DispatchError(
+                "G3 可写失败：--allow-dirty=tasks 只豁免账本自我生成物"
+                "（tasks/status.md、tasks/*/README.md、dispatch/log.md）；"
+                "业务/代码改动仍拦截：\n"
+                + "\n".join(blocked[:10])
+                + "\n→ 先提交/清理业务改动；确实要全豁免再用裸 --allow-dirty"
+            )
+        return f"有 {len(changes)} 处改动（均为账本自我生成物，已豁免）"
     return "clean" if not changes else f"有 {len(changes)} 处改动（已允许）"
 
 
@@ -384,7 +425,9 @@ def check_active(target: Path, allow_active: bool) -> str:
             active.append(f"{match.group(1)} {match.group(2).strip()}")
     if active and not allow_active:
         raise DispatchError(
-            "G3 可写失败：目标已有 active 任务，避免多写者；确认后加 --allow-active：\n"
+            "G3 可写失败：目标已有 active 任务，避免多写者。三选项："
+            "① 等它完成后再派；② 确认无冲突后加 --allow-active；"
+            "③ 加 --new 新建独立会话隔离派发。当前 active：\n"
             + "\n".join(active)
         )
     return "无 active 任务" if not active else f"{len(active)} 个 active 任务（已允许）"
@@ -829,8 +872,50 @@ def pressure_hint(row: dict, limit: float = PRESSURE_HINT_LIMIT) -> str:
     )
 
 
+
+def git_head_short(target) -> str:
+    """目标 HEAD 短 sha；非 git 仓库/读取失败返回 '-'。"""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        return proc.stdout.strip() or "-"
+    except Exception:
+        return "-"
+
+
+def report_mid_status(api, session_id, target, waited, head_before=None, json_mode=False):
+    """等待超时前的中途状态回报（DISPATCH-139 P0）：已等 Xs、目标 HEAD 是否变化、
+    会话最近产出；不静默超时——呼应 DISPATCH-134 必有回报。"""
+    if json_mode:
+        return
+    head_now = git_head_short(target)
+    if head_before:
+        if head_now != head_before:
+            head_part = "、目标 HEAD 已变（%s → %s）" % (head_before, head_now)
+        else:
+            head_part = "、目标 HEAD 未变（%s）" % head_before
+    else:
+        head_part = "、目标 HEAD %s" % head_now
+    msgs = ""
+    row = find_session(api, session_id)
+    if row is not None:
+        records = session_records(api, row)
+        if records:
+            msgs = "、会话消息 %d 条" % len(records)
+        else:
+            seq = (row.get("projections") or {}).get("asOfSeq") or 0
+            msgs = "、会话序列推进到 %s" % seq
+    print(
+        "  … 等待超时前中途状态（已等 %ds%s%s）：任务已送达、仍在执行，不静默超时；"
+        "稍后重试/加长等待，或 GUI 查看会话进度" % (int(waited), head_part, msgs),
+        file=sys.stderr,
+    )
+
+
 def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = False,
-                  interval: float = 3.0):
+                  interval: float = 3.0, target=None, head_before=None):
     """轮询 session/list 直到会话空闲。
 
     返回：空闲的会话行；超时返回 None；会话在轮询中消失/被归档返回 SESSION_GONE。
@@ -844,6 +929,8 @@ def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = 
         if row.get("running") is False:
             return row
         if time.time() >= deadline:
+            if target is not None:
+                report_mid_status(api, session_id, target, timeout, head_before, json_mode)
             return None
         if not json_mode and time.time() - last_note > 15:
             last_note = time.time()
@@ -854,7 +941,8 @@ def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = 
         time.sleep(max(0.0, min(interval, deadline - time.time())))
 
 
-def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, json_mode: bool):
+def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int,
+                 json_mode: bool, target=None, head_before=None):
     """轮询到回合结束；返回 (会话行, 回合耗时秒) 或 (None, None)。
 
     耗时优先用首次观测到 running 的时刻；瞬时回合可能一次都没观测到 running，
@@ -888,6 +976,8 @@ def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, js
             )
             print("    Ctrl-C 保持异步，稍后在 GUI 查看会话进度即可", file=sys.stderr)
         time.sleep(3)
+    if target is not None:
+        report_mid_status(api, session_id, target, time.time() - wait_start, head_before, json_mode)
     return None, None
 
 
@@ -1465,7 +1555,7 @@ def preflight(target: Path, args, need_channel: bool):
     result = {
         "target": str(target),
         "gate": "ok",
-        "git": check_git(target, args.allow_dirty),
+        "git": check_git(target, args.allow_dirty, getattr(args, "allow_dirty_scope", "")),
         "active": check_active(target, args.allow_active),
         "workspace": None,
         "api": None,
@@ -1615,7 +1705,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                 "--queue-timeout 可调）",
                 args.json,
             )
-            outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json)
+            outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json, target=target)
             if outcome is SESSION_GONE:
                 raise DispatchError(
                     f"等待期间会话消失或被归档：{session_id}；"
@@ -1725,7 +1815,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
 
     emit("任务已受理；等待目标 agent 完成…", args.json)
     wait_started = time.time()
-    row, turn_seconds = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json)
+    row, turn_seconds = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json,
+                               target=target, head_before=initial_head)
     final_title = session_name if renamed else (session_title(row or {}) or shown_title)
     head = git_head(target)
 
@@ -2169,7 +2260,7 @@ def main(argv=None) -> int:
             "        用户自建的 <项目> · xxx 普通会话不会被复用/改名/注入；\n"
             "        不看上下文压力（上下文是开发资产，收缩交给 harness 压缩机制）；\n"
             "        复用时不新建会话，标题更新为「[awf] <目标项目>」后直接 prompt。\n"
-            "        选中的会话 running=true 时进入等待队列（--queue-timeout，默认 60s），超时报队列超时并建议 --new，\n"
+            "        选中的会话 running=true 时进入等待队列（--queue-timeout，默认 180s），超时报队列超时并建议 --new，\n"
             "        不会静默改成新建；上下文压力 ≥ 0.9 只在输出/日志里提示可考虑 --new，不自动切换。\n"
             "        没有可用会话时才新建并同样命名，作为该项目该模块后续派发的常驻会话。\n"
             "        --new 强制新建（隔离/调试）；--session <id> 直接向指定会话发送；--reuse 可显式书写（默认值）。\n"
@@ -2252,13 +2343,13 @@ def main(argv=None) -> int:
         "--idle-wait",
         type=int,
         default=DEFAULT_IDLE_WAIT,
-        help="兼容保留（DEV-126 起会话繁忙的队列等待由 --queue-timeout 控制，默认 60；本参数不再生效）",
+        help="兼容保留（DEV-126 起会话繁忙的队列等待由 --queue-timeout 控制，默认 180；本参数不再生效）",
     )
     parser.add_argument(
         "--queue-timeout",
         type=int,
         default=DEFAULT_QUEUE_TIMEOUT,
-        help="会话繁忙时的队列等待上限秒数（默认 60；超时报队列超时，建议 --new 或稍后重试）",
+        help="会话繁忙时的队列等待上限秒数（默认 180；超时前回报中途状态，建议 --new 或稍后重试）",
     )
     parser.add_argument(
         "--timeout",
@@ -2287,7 +2378,8 @@ def main(argv=None) -> int:
         help="允许复用项目里唯一的旧格式（无 [awf] 标记）空闲会话并改名为规范标题；"
         "默认只在会话消息含派发任务包标记时才迁移，用户自建的 <项目> · xxx 会话不会被复用",
     )
-    parser.add_argument("--allow-dirty", action="store_true", help="允许目标有已跟踪改动")
+    parser.add_argument("--allow-dirty", action="store_true",
+                    help="允许目标有已跟踪改动；--allow-dirty=tasks 只豁免账本自我生成物（status/README/log）")
     parser.add_argument("--allow-active", action="store_true", help="允许目标已有 active 任务")
     parser.add_argument(
         "--check-role",
@@ -2302,7 +2394,25 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--title", default="", help="完全定制会话标题（默认 [awf] [派发者] [任务名]）")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
+    # DISPATCH-139 P1：--allow-dirty[=tasks] 范围豁免——把 `--allow-dirty=<scope>` 归一为
+    # 裸 `--allow-dirty`（store_true），scope 单独记录；裸 --allow-dirty 向后兼容全豁免。
+    allow_dirty_scope = ""
+    allow_dirty_scope_given = False
+    normalized_argv = []
+    for arg in (argv if argv is not None else sys.argv[1:]):
+        if arg.startswith("--allow-dirty="):
+            allow_dirty_scope = arg.split("=", 1)[1]
+            allow_dirty_scope_given = True
+            normalized_argv.append("--allow-dirty")
+        else:
+            normalized_argv.append(arg)
+    if allow_dirty_scope_given and allow_dirty_scope != "tasks":
+        parser.error(
+            "--allow-dirty 范围仅支持 tasks（如 --allow-dirty=tasks）；裸 --allow-dirty 为全豁免"
+        )
+    argv = normalized_argv
     args = parser.parse_args(argv)
+    args.allow_dirty_scope = allow_dirty_scope
 
     if args.apply and not args.prune:
         parser.error("--apply 只能配合 --prune 使用")

@@ -36,7 +36,7 @@
 ```
 
 - 调度方按回报到达顺序汇总，不要求两个目标同时起步；
-- 同一目标同一模块仍然只能有一个写者（G3），不要为并行而绕过 `--allow-dirty` / `--allow-active`。
+- 同一目标同一模块仍然只能有一个写者（G3），不要为并行而绕过 `--allow-dirty` / `--allow-active`。DISPATCH-139：`--allow-dirty=tasks` 可只豁免账本自我生成物（tasks/status.md、tasks/*/README.md、dispatch/log.md），业务/代码改动仍拦截；G3 active 冲突给三选项（等它完 / `--allow-active` / `--new`）。
 
 ### 用法 3：有依赖（串行）
 
@@ -128,7 +128,7 @@
 
 | 门 | 检查 | 不满足时 |
 |---|---|---|
-| G1 工作流 | `AGENTS.md`、`agent-workflow/project.yaml`、`workflows/`、`check_workflow.sh`，且 `check_workflow.sh` 通过 | 先 `awf init`（需用户确认），不要向无流程仓库派发 |
+| G1 工作流 | `AGENTS.md`、`agent-workflow/project.yaml`、`workflows/`、`check_workflow.sh`，且 `check_workflow.sh` 通过 | 先 `awf init`（需用户确认），不要向无流程仓库派发。DISPATCH-139：仅「status.md 已过期」缺项时**瞬态豁免 warn 放行**（提示目标侧 `awf status`），真缺损才 FAIL |
 | G2 工作区 | 目标路径已登记为当前 harness 的工作区（DSH：GUI 工作区列表 / `workspace.json`） | 在 GUI「添加工作区」，或 `awf-dispatch --add-workspace`；否则 handoff |
 | G3 可写 | 无已跟踪改动、无其他 active 任务 | 停止并询问；不要和另一个写者并行 |
 | G4 通道 | 目标工作区能创建会话（GUI 在线、认证有效、模型可用） | 回退 headless（需用户同意）或 handoff |
@@ -160,8 +160,8 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 | `--new` | 强制新建会话（隔离/调试），不复用；与 `--reuse` 互斥 |
 | `--module <名称>` | 模块名（DEV-126 后只影响展示/票据分类，不再进标题）；默认取票据「模块：」行，都没有用「通用」 |
 | `--session <id>` | 直接向指定会话发送任务（续跑历史会话或人工指定），不会新建 |
-| `--idle-wait N` | 兼容保留（DEV-126 起会话繁忙的队列等待改由 `--queue-timeout` 控制，默认 60；本参数不再生效） |
-| `--queue-timeout N` | 会话繁忙时的**队列等待**上限秒数（DEV-126，默认 60；超时报队列超时，建议 --new 或稍后重试） |
+| `--idle-wait N` | 兼容保留（DEV-126 起会话繁忙的队列等待改由 `--queue-timeout` 控制，默认 180；本参数不再生效） |
+| `--queue-timeout N` | 会话繁忙时的**队列等待**上限秒数（DEV-126，默认 180；超时前回报**中途状态**：已等秒数 / 目标 HEAD 是否变化 / 会话产出，不静默超时；之后建议 --new 或稍后重试） |
 | `--headless` | 回退 `dsh --profile headless`（会话不可见，需用户同意；默认同样不等待） |
 | `--handoff` | 只生成交接单，不执行 |
 | `--team` | 在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议 |
@@ -170,7 +170,7 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 | `--timeout N` | 回合等待 + 落地等待总秒数，仅 `--wait` 生效（默认 600） |
 | `--no-wait` | 兼容别名：等价默认行为（只发送，不等待回合） |
 | `--force` | 允许同名会话重复派发 |
-| `--allow-dirty` / `--allow-active` | 放宽 G3（需明确知道风险） |
+| `--allow-dirty[=tasks]` / `--allow-active` | 放宽 G3（需明确知道风险）；`--allow-dirty=tasks` 只豁免账本自我生成物（status/README/log），业务改动仍拒 |
 | `--check-role` | 软校验目标 role（worker 名牌）与任务描述的关键词交集：匹配通过 / 不匹配输出警告但继续 / 目标无 role 提示但不阻塞——均不改变退出码（不做硬门禁） |
 | `--allow-role-mismatch` | 配合 `--check-role`：静默 role 不匹配警告（仍不硬拒） |
 | `--allow-legacy-reuse` | 允许复用项目里唯一的旧格式（无 `[awf]` 标记）空闲会话并改名为 `[awf] [派发者] [任务名]` 规范标题；默认只在会话消息含派发任务包标记时才迁移（RT-1，防误吞用户自建会话） |
@@ -227,7 +227,7 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 4. **不看上下文压力**：上下文增长交给 harness 自己的压缩机制，不因为压力大就自动换会话。
 
 选中后直接往这个会话 `session/prompt`（`mode=queue`），**不新建会话**，并把标题归一到
-`[awf] [派发者] [任务名]`（本次票据的任务摘要）。同项目同派发者的票据复用同一会话池（**最多 3 个**：池内空闲优先复用；都忙且池未满则新建扩充；池满都忙才进入等待队列，`--queue-timeout` 默认 60s）。任务名随派发动态更新，方便一眼看出该会话最近在处理什么；不做完成还原。
+`[awf] [派发者] [任务名]`（本次票据的任务摘要）。同项目同派发者的票据复用同一会话池（**最多 3 个**：池内空闲优先复用；都忙且池未满则新建扩充；池满都忙才进入等待队列，`--queue-timeout` 默认 180s）。任务名随派发动态更新，方便一眼看出该会话最近在处理什么；不做完成还原。
 
 标题里的 `[awf]` 是派发器的标记。`--json` 输出与 stderr 文案会打印 `reused: true/false`、`module` 和实际 sessionId，`dispatch/log.md` 记录「模块」「会话来源：复用 / 新建」。
 
@@ -274,7 +274,7 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 
 #### 会话正在运行
 
-选中的项目会话如果 `running=true`（还有一个回合没结束），默认**进入等待队列**再发送（DEV-126）：每 3 秒轮询一次 `session/list`，最多等 `--queue-timeout` 秒（默认 60；回合结束等待仍走 `--wait`/`--timeout`）。队列超时后报错并建议 `--new`（或稍后重试、加大 `--queue-timeout`），**不会静默改成新建、也不立即失败**。
+选中的项目会话如果 `running=true`（还有一个回合没结束），默认**进入等待队列**再发送（DEV-126）：每 3 秒轮询一次 `session/list`，最多等 `--queue-timeout` 秒（默认 180；等待超时前回报**中途状态**，不静默超时；回合结束等待仍走 `--wait`/`--timeout`）。队列超时后报错并建议 `--new`（或稍后重试、加大 `--queue-timeout`），**不会静默改成新建、也不立即失败**。
 
 #### 上下文压力只作提示
 
@@ -485,7 +485,7 @@ GUI 左侧切到目标工作区 → 新建会话 → 粘贴任务包。效果相
 - `writer-held` / `session/conflict`：目标会话被 GUI 占用或同目录写者冲突；切走/等待后重试。
 - `auth-required` / `connection refused`：重开 GUI URL；或 `--headless`。
 - 预检的 `session/list`（G4 探针，同时缓存给复用查找）：失败按 G4 报错；改用 `--headless` / `--handoff`，或检查 GUI / 认证。
-- 选中的会话一直在 `running`：默认排队等 `--queue-timeout` 秒（60）；超时后不要杀掉目标回合，稍后重试、加大 `--queue-timeout`，或加 `--new` 新开一个会话。
+- 选中的会话一直在 `running`：默认排队等 `--queue-timeout` 秒（180；超时前回报中途状态）；超时后不要杀掉目标回合，稍后重试、加大 `--queue-timeout`，或加 `--new` 新开一个会话。
 - 复用会话 `session/prompt` 失败：报错并建议 `--new`；原会话与已产生的上下文都保留。
 - `--session` 指定的会话不存在或目录不匹配：按错误处理，不自动换会话；确认 ID 或去掉 `--session`。
 - 回合超时（退出码 3）：会话保留，不要杀掉；在 GUI 查看进度。默认派发本身不等待（`--no-wait` 是默认行为的兼容别名），需要重派时直接重新派发并加 `--force`。
@@ -534,6 +534,7 @@ DEV-003 还验证了“在 demo02 工作区创建正式会话并执行”的流�
 - [ ] **派发生命周期（五步闭环）**：派发方账本已登记 active（目标 worker / 关联票据 / 派发时间 / 一句话目标 / 验收标准）作**兜底锚点**；完成后核验收讫再归档 done
 - [ ] 必有回报（主机制）：成功报 commit/产物/验证结果，失败报环节/错误/阻塞；需用户确认返回「阻塞：需用户确认 X」并保持会话等待（不在目标会话内提问；派发端转述决策、awf-dispatch --session 续发，多轮对话）
 - [ ] 无回报仅当会话失联：登记 active 兜底，例行扫描追问 / 重派 / 上报用户决策
+- [ ] 门禁严格度（DISPATCH-139）：`--queue-timeout` 默认 180s 且超时前回报中途状态；`--allow-dirty=tasks` 可豁免账本自我生成物；status.md 过期瞬态 warn 放行
 - [ ] 会话在目标工作区（不是 Ungrouped）
 - [ ] 目标 agent 自己写账本
 - [ ] 只本地 commit，未 push
