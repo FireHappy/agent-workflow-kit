@@ -53,3 +53,4 @@
 | DEV-143 | P2 | 补充升级未登记项目 rokid_system_components 至 v1.1.1（DISPATCH-135 扫尾） | 2026-11-04 |
 | DEV-144 | P1 | 派发契约修复：worker 需用户决策时返回派发端会话（DISPATCH-141） | 2026-11-04 |
 | DEV-145 | P1 | 版本锚点可配置：release-prep / upgrade 改读 project.yaml 的 version_file（DISPATCH-143） | 2026-11-04 |
+| DEV-146 | P1 | 发版 v1.1.2（定版：版本锚点可配置 + 派发契约修复） | 2026-11-04 |
