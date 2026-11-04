@@ -2534,57 +2534,83 @@ else
   bad "DEV-138 派发技能 SKILL.md 未同步三规则"
 fi
 
-# 30. DISPATCH-133：派发生命周期闭环（派发方账本 active → done）
-# 30.1 docs/dispatch.md 呈现五步闭环与样例字段
+# 30. DISPATCH-133/134：派发生命周期闭环（必有回报是主机制，登记 active 作兜底锚点）
+# 30.1 docs/dispatch.md 呈现五步闭环、兜底锚点与样例字段
 if grep -q '派发生命周期闭环' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '五步闭环' "$KIT_DIR/docs/dispatch.md" \
-   && grep -q '记忆锚点' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '兜底锚点' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '登记 active' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '归档 done' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DISPATCH-133 docs/dispatch.md 有派发生命周期闭环（五步 + 记忆锚点）"
+  ok "DISPATCH-133/134 docs/dispatch.md 有派发生命周期闭环（五步 + 兜底锚点）"
 else
-  bad "DISPATCH-133 docs/dispatch.md 缺派发生命周期闭环"
+  bad "DISPATCH-133/134 docs/dispatch.md 缺派发生命周期闭环"
 fi
 if grep -q '目标 worker' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '派发时间' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '验收标准' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '关联票据' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DISPATCH-133 docs/dispatch.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
+  ok "DISPATCH-133/134 docs/dispatch.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
 else
-  bad "DISPATCH-133 docs/dispatch.md 登记样例字段缺失"
+  bad "DISPATCH-133/134 docs/dispatch.md 登记样例字段缺失"
 fi
-# 30.2 失败/无回报分支：保持 active/blocked 不归档
-if grep -q '保持 active' "$KIT_DIR/docs/dispatch.md" \
-   && grep -q '不归档' "$KIT_DIR/docs/dispatch.md" \
-   && grep -q '例行扫描' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DISPATCH-133 docs/dispatch.md 写清失败/无回报分支（不归档，例行扫描）"
+# 30.2 必有回报是主机制（成功必须回报 / 失败必须回报 / 需用户确认·多轮对话）
+if grep -q '必有回报' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '成功必须回报' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '失败必须回报' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '需用户确认' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '多轮对话' "$KIT_DIR/docs/dispatch.md"; then
+  ok "DISPATCH-134 docs/dispatch.md 必有回报是主机制（成功/失败都必须回报，需用户确认+多轮对话）"
 else
-  bad "DISPATCH-133 docs/dispatch.md 缺失败/无回报分支"
+  bad "DISPATCH-134 docs/dispatch.md 缺必有回报语义"
 fi
-# 30.3 模板与工作流规范同步；与 DEV-138 三规则同文档衔接无冲突
+# 30.3 无回报仅当会话失联；登记 active 只是兜底
+if grep -q '无回报仅当会话失联' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '进程退出' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '会话关闭' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '例行扫描' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '兜底锚点' "$KIT_DIR/docs/dispatch.md"; then
+  ok "DISPATCH-134 docs/dispatch.md 无回报仅当会话失联（登记 active 是兜底锚点）"
+else
+  bad "DISPATCH-134 docs/dispatch.md 缺兜底语义"
+fi
+# 30.4 旧表述（代理 FAIL/无回报常规化 / 记忆锚点）已从三处源文本清除
+if grep -q '代理 FAIL、超时无回报' "$KIT_DIR/docs/dispatch.md" \
+   || grep -q '静默中断' "$KIT_DIR/docs/dispatch.md" \
+   || grep -q '记忆锚点' "$KIT_DIR/docs/dispatch.md" \
+   || grep -q '记忆锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   || grep -q '记忆锚点' "$KIT_DIR/templates/workflows/cross-project.md"; then
+  bad "DISPATCH-134 旧表述残留（代理 FAIL/记忆锚点/无回报常规化）"
+else
+  ok "DISPATCH-134 旧表述已清除（无回报不再是常规路径）"
+fi
+# 30.5 模板同步：AGENTS.md.tmpl / cross-project.md（双副本）与 docs 语义一致
 if grep -q '派发生命周期（DISPATCH-133）' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   && grep -q '不归档' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '必有回报是主机制' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '兜底锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q '派发生命周期（派发方账本' "$KIT_DIR/templates/workflows/cross-project.md" \
-   && grep -q '记忆锚点' "$KIT_DIR/templates/workflows/cross-project.md"; then
-  ok "DISPATCH-133 模板 AGENTS.md.tmpl 与 cross-project.md 含派发生命周期"
+   && grep -q '必有回报' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '无回报仅当会话失联' "$KIT_DIR/templates/workflows/cross-project.md"; then
+  ok "DISPATCH-134 模板 AGENTS.md.tmpl 与 cross-project.md 同步必有回报/兜底语义"
 else
-  bad "DISPATCH-133 模板缺派发生命周期"
+  bad "DISPATCH-134 模板缺必有回报/兜底语义"
 fi
+# 30.6 与 DEV-138 三规则同文档衔接；DISPATCH-134 修正标注存在
 if grep -q 'DEV-138' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DISPATCH-133' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'DISPATCH-134' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DEV-138' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q 'DISPATCH-133' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
-  ok "DISPATCH-133 与 DEV-138 三规则在同一文档/模板衔接（无冲突）"
+  ok "DISPATCH-134 与 DEV-138 三规则衔接；修正标注落盘"
 else
-  bad "DISPATCH-133 与 DEV-138 衔接断言失败"
+  bad "DISPATCH-134 衔接断言失败"
 fi
 if diff -q "$KIT_DIR/templates/AGENTS.md.tmpl" \
           "$KIT_DIR/agent-workflow/templates/AGENTS.md.tmpl" >/dev/null \
    && diff -q "$KIT_DIR/templates/workflows/cross-project.md" \
           "$KIT_DIR/agent-workflow/workflows/cross-project.md" >/dev/null; then
-  ok "DISPATCH-133 模板双副本一致（AGENTS.md.tmpl / cross-project.md）"
+  ok "DISPATCH-134 模板双副本一致（AGENTS.md.tmpl / cross-project.md）"
 else
-  bad "DISPATCH-133 模板副本漂移"
+  bad "DISPATCH-134 模板副本漂移"
 fi
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
