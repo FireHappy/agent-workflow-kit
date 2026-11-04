@@ -30,11 +30,19 @@ class TitleFormat(unittest.TestCase):
         t = awf_dispatch.awf_session_title("lead")
         self.assertEqual(t, "[awf] [lead] [未命名任务]")
 
-    def test_task_display_with_id(self):
+    def test_task_display_with_id_in_title(self):
+        # 标题自带编号：原样保留（作者写什么就显示什么）
         msg = "# UP-102 版本锚点 VERSION=1.0.0\n\n说明……"
         d = awf_dispatch.task_display(Path("up-102.md"), msg)
         self.assertTrue(d.startswith("UP-102"))
         self.assertIn("版本锚点", d)
+
+    def test_task_display_never_injects_file_id(self):
+        # DEV-136：文件名里的编号（UP-xxx 等）绝不拼进任务名段——我们没有 UP 类型
+        d = awf_dispatch.task_display(Path("up-103.md"), "# 工作流架构升级")
+        self.assertEqual(d, "工作流架构升级")
+        self.assertNotIn("UP-103", d)
+        self.assertNotIn("up-103", d)
 
     def test_task_display_no_id(self):
         d = awf_dispatch.task_display(Path("misc.md"), "# 简单任务标题")
@@ -53,8 +61,9 @@ class SenderResolve(unittest.TestCase):
     def test_ticket_line(self):
         self.assertEqual(awf_dispatch.resolve_sender("派发者：captain\n# t"), "captain")
 
-    def test_default_lead(self):
-        self.assertEqual(awf_dispatch.resolve_sender("# 任务"), "lead")
+    def test_default_dispatch_project(self):
+        # DEV-136：无 --sender/票据行时，派发者段默认 = 调度方项目名（发起派发的会话所在项目）
+        self.assertEqual(awf_dispatch.resolve_sender("# 任务"), "agent-workflow-kit")
 
     def test_ticket_sender_missing(self):
         self.assertEqual(awf_dispatch.ticket_sender("# 任务"), "")

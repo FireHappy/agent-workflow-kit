@@ -484,3 +484,93 @@
 - 目标 HEAD：11070a3 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
 - 回报节选：**UP-102 完成回报** ```dsh-ui {"title":"UP-102 回报：版本锚点","gap":12,"items":[{"type":"row","items":[{"type":"stat","label":"commit","value":"11070a3"},{"type":"stat","label":"VERSION","value":"1.0.0"},{"type":"stat","label":"check","value":"25 ok / 0 fail"}]},{"type":"keyvalue","pairs":[{"key":"commit","va…（已截断，完整回报见会话）
 
+## 2026-11-04 15:22 → pluto
+
+- 目标：/Users/chenlin/projects/Rokid-System/pluto
+- 任务：pluto · pluto 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/pluto-UP-103.md）
+- 模块：通用
+- 工作区：pluto（dc20d453-a176-4406-834f-0d5d04269864）
+- 会话：session-4724583b-4fef-4796-8f15-7801854b92f2（[awf] [lead] [UP-103 pluto 框架升级至 kit 最新DEV-133 版本锚点 +]）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：2e30a4a chore(workflow): 框架升级 DEV-133/134（UP-103）
+- 回报节选：✅ **UP-103 已完成并本地提交（未 push）**。回报如下。 ```dsh-ui {"title":"UP-103 升级回报","gap":12,"items":[{"type":"row","items":[{"type":"stat","label":"commit","value":"2e30a4a"},{"type":"stat","label":"check","value":"26 ok / 0 fail"},{"type":"stat","label":"grep 计数","value":"3"}]},{"type":"keyvalue","pairs":[{"key"…（已截断，完整回报见会话）
+
+## 2026-11-04 15:23 → im
+
+- 目标：/Users/chenlin/.dsh/im
+- 任务：im · dsh-im 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/dsh-im-UP-103.md）
+- 模块：通用
+- 工作区：im（31ca7718-0b39-4f07-9f6a-ec6ebd100193）
+- 会话：session-d58aaa2e-082f-4d6d-9cde-82c5e93a38db（[awf] [lead] [UP-103 dsh-im 框架升级至 kit 最新DEV-133 版本锚点 +]）
+- 会话来源：复用
+- 状态：完成（已落地：commit）
+- 目标 HEAD：c35bdcb chore(workflow): 框架升级 DEV-133/134（UP-103）
+- 回报节选：任务完成，已落盘（本会话保留）。 **回报 — UP-103 框架升级（kit DEV-133/134）** - **commit hash**：`c35bdcbae1436eb65fb08a644f38028428255ac4`（main，`chore(workflow): 框架升级 DEV-133/134（UP-103）`，6 files +145/−40，未 push） - **check 结果**：39 ok / 0 fail（`check_workflow.sh` 退出码 0；pre-commit 钩子在提交/amend 时均放行） - **grep 计数**：`grep -c "M…（已截断，完整回报见会话）
+
+## 2026-11-04 15:36 → naboo
+
+- 目标：/Users/chenlin/projects/UnityProjects/naboo
+- 任务：naboo · naboo 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的工作区会话执行（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/naboo-UP-103.md）
+- 模块：通用
+- 工作区：naboo（1c1f6c3a-523c-454c-8257-243e520735c4）
+- 会话：session-888941de-4d22-4fe0-8cb0-9b64bc69f2a7（[awf] [lead] [UP-103 naboo 框架升级至 kit 最新DEV-133 版本锚点 +]）
+- 会话来源：复用
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：440cfc9dd [update] 升级sdk1.7.2
+
+## 2026-11-04 15:36 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · finderpathbar 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/finderpathbar-UP-103.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-f5fc8193-5b9e-424b-a3f2-a2d4b6509b52（[awf] [lead] [UP-103 finderpathbar 框架升级至 kit 最新DEV-133]）
+- 会话来源：复用
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：23c0cbf chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+
+## 2026-11-04 15:36 → 周报
+
+- 目标：/Users/chenlin/Documents/周报
+- 任务：周报 · weekly-report 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/weekly-report-UP-103.md）
+- 模块：通用
+- 工作区：weekly report（cdfef88e-807f-4ef2-8556-de9cca1507e7）
+- 会话：session-0e9e7d7a-143e-4372-94a4-bacfd8951d23（[awf] [lead] [UP-103 weekly-report 框架升级至 kit 最新DEV-133]）
+- 会话来源：复用
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：ffa4c87 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+
+## 2026-11-04 15:36 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · dsh-settings 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的工（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/dsh-settings-UP-103.md）
+- 模块：通用
+- 工作区：dsh-settings（d6ddf210-7583-4013-bdad-3d3f07897034）
+- 会话：session-5a4d10dc-4919-4218-aa1a-1691007c7ab2（[awf] [lead] [UP-103 dsh-settings 框架升级至 kit 最新DEV-133]）
+- 会话来源：复用
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：74a9a3a chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+
+## 2026-11-04 15:36 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · openxr-uxr 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的工作区（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/openxr-uxr-UP-103.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-db34b441-cf44-47b3-a7b9-89f0c6a3247e（[awf] [lead] [UP-103 openxr-uxr 框架升级至 kit 最新DEV-133 版本]）
+- 会话来源：复用
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：d4db560 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+
+## 2026-11-04 15:36 → uxrsample
+
+- 目标：/Users/chenlin/projects/UnityProjects/uxrsample
+- 任务：uxrsample · uxrsample 框架升级至 kit 最新DEV-133 版本锚点 + DEV-134 会话命名目标项目自己的工作区会（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-up103/uxrsample-UP-103.md）
+- 模块：通用
+- 工作区：uxrsample（646d3ae9-385f-4bcf-8592-60ad4cdbddad）
+- 会话：session-a46b5d65-5879-4169-a548-ae007330f9e0（[awf] [lead] [UP-103 uxrsample 框架升级至 kit 最新DEV-133 版本锚]）
+- 会话来源：复用
+- 状态：超时（>900s，会话仍在运行）
+- 目标 HEAD：ff2a6d14 chore(workflow): 版本锚点 VERSION=1.0.0 UP-102
+

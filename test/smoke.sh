@@ -498,7 +498,7 @@ def _args(**overrides):
         idle_wait=300, queue_timeout=60, force=False, team=False, json=False, headless=False,
         handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
         allow_active=False, apply=False, prune=False, web_url="",
-        allow_legacy_reuse=False,
+        allow_legacy_reuse=False, sender="lead",
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -1665,7 +1665,7 @@ with tempfile.TemporaryDirectory() as tmp:
             idle_wait=300, queue_timeout=60, force=False, team=False, json=True, headless=False,
             handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
             allow_active=False, apply=False, prune=False, web_url="",
-            allow_legacy_reuse=allow_legacy)
+            allow_legacy_reuse=allow_legacy, sender="lead")
         text = f"任务：TEST-001 冒烟\n\n- 目标项目：{proj.name}（{proj}）\n- 模块：{module_awf}\n"
         with contextlib.redirect_stdout(io.StringIO()):
             code = module.dispatch_session(
@@ -1728,7 +1728,7 @@ with tempfile.TemporaryDirectory() as tmp:
             idle_wait=300, queue_timeout=60, force=False, team=False, json=True, headless=True,
             handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
             allow_active=False, apply=False, prune=False, web_url="",
-            allow_legacy_reuse=False)
+            allow_legacy_reuse=False, sender="lead")
         with tempfile.TemporaryDirectory() as work, \
              contextlib.redirect_stdout(io.StringIO()):
             old_cwd = os.getcwd()

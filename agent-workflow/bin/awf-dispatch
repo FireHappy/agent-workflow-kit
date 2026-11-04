@@ -12,14 +12,15 @@
 选中的会话正在运行时进入**等待队列**（默认最多等 60s，`--queue-timeout` 可调；
 回合结束等待仍走 --wait/--timeout），超时才报队列超时，不再立即失败；
 没有可用会话时才新建。随后发送任务并立即返回
-（默认异步，不等待回合）。需要本回合结果时加 --wait；需要隔离/调试时加 --new；
+（默认异步，不等待回合）。需要本回合结果时加 --wait（默认最多等 300s，--timeout 可调；
+等待超时不代表失败——任务已送达、会话继续执行，稍后在 GUI 查看即可）；需要隔离/调试时加 --new；
 也可以用 --session <id> 直接续跑某个指定会话。会话留在 GUI 里，用户可以继续提细节。
 旧格式（无 [awf] 标记）会话默认不再自动迁移，避免误吞用户
 自建会话；确认要迁移时加 --allow-legacy-reuse（有派发任务包标记的旧会话仍会自动迁移）。
 
 模块来源：`--module` > 票据「模块：」行 > 默认「通用」；模块只影响票据分类展示。
 会话标题统一为 `[awf] [派发者] [任务名]`（DEV-134）：派发者 = `--sender` > 票据
-「派发者：」行 > 默认 lead；任务名 = 当次票据的 `ID 短标题`（动态）。会话收敛：
+「派发者：」行 > 调度方项目名（默认）；任务名 = 当次票据的 `ID 短标题`（动态）。会话收敛：
 同一派发者在同一目标项目最多 3 个 [awf] 任务会话——池内空闲（running=False）
 优先复用（改名接新任务）；都忙且池未满则新建扩充；池满（>=3）都忙才排队等待
 （--queue-timeout，默认 60s；超时按队列超时报错）。
@@ -70,7 +71,7 @@ import uuid
 from pathlib import Path
 
 DEFAULT_WEB_URL = "http://127.0.0.1:51439"
-DEFAULT_TIMEOUT = 600
+DEFAULT_TIMEOUT = 300
 # 默认异步：只创建会话并发送任务，立即返回；显式 --wait 才等待回合结束。
 DEFAULT_WAIT = False
 # 默认复用目标工作区已有的常驻会话，避免每次派发都新建、会话数线性增长。
@@ -79,7 +80,8 @@ DEFAULT_REUSE = True
 PRESSURE_HINT_LIMIT = 0.9
 # 兼容保留：DEV-126 起会话繁忙的队列等待由 DEFAULT_QUEUE_TIMEOUT 控制；本常量仅保留解析/校验。
 DEFAULT_IDLE_WAIT = 300
-# DEV-134：会话标题 = [awf] [派发者] [任务名]——派发者（--sender > 票据「派发者：」> lead）
+# DEV-134：会话标题 = [awf] [派发者] [任务名]——派发者（--sender > 票据「派发者：」行 >
+# 调度方项目名（DEV-136：默认 = 发起派发的会话所在项目，如 agent-workflow-kit））
 # + 当前任务摘要（ID + 短标题，随派发动态更新）；前缀保持 [awf]（DEV-126 澄清）。
 AWF_TITLE_PREFIX = "[awf]"
 # DEV-134：同一派发者在同一目标项目的 [awf] 任务会话数量上限（并发上限）。
@@ -228,19 +230,23 @@ def ticket_sender(text: str) -> str:
 
 
 def resolve_sender(text: str, override: str = "") -> str:
-    """派发者来源：`--sender` > 票据「派发者：」行 > 默认「lead」。"""
+    """派发者来源（DEV-136）：`--sender` > 票据「派发者：」行 >
+    默认「调度方项目名」（发起派发的会话所在项目，如 agent-workflow-kit）——标题
+    `[awf] [派发者] [任务名]` 的派发者段要能看出是谁的项目派的，而不是笼统的 lead。"""
     if (override or "").strip():
         return clean_title(override)
-    return ticket_sender(text) or "lead"
+    ticket = ticket_sender(text)
+    if ticket:
+        return ticket
+    cwd = os.getcwd().rstrip("/")
+    return os.path.basename(cwd) or "lead"
 
 
 def task_display(task: Path, text: str, limit: int = SESSION_TITLE_LIMIT) -> str:
-    """当前任务摘要：`<ID> <短标题>`（供会话标题使用，随票据动态）。"""
-    tid = ticket_task_id(task.name) or ""
-    title = task_title(task, text)
-    if tid and not title.startswith(tid):
-        return clean_title(f"{tid} {title}", limit=limit)
-    return clean_title(title, limit=limit)
+    """当前任务摘要：**仅短标题**（DEV-136：会话标题的任务名段不写任务编号——
+    我们没有 UP 等编号类型；票据作者把想显示的任务名写在 `# 标题` / `任务：` 行，
+    派发者照写、截断即可）。"""
+    return clean_title(task_title(task, text), limit=limit)
 
 
 def ticket_module(text: str) -> str:
@@ -806,11 +812,14 @@ def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, js
 
     耗时优先用首次观测到 running 的时刻；瞬时回合可能一次都没观测到 running，
     此时用 prompt 发送时刻近似（因此僵尸判定阈值只用于「即时结束」）。
+    --wait 只是「想拿本轮结果」的短等待，不是无脑长等：任务已送达，超时则返回
+    （调用方按「派发成功、回合未结束」处理），不阻塞、不重发。
     """
     started = False
     started_at = None
     deadline = time.time() + timeout
     last_note = 0
+    wait_start = time.time()
     while time.time() < deadline:
         row = find_session(api, session_id)
         if row:
@@ -825,7 +834,12 @@ def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int, js
                 return row, max(0.0, time.time() - started_at)
         if not json_mode and time.time() - last_note > 15:
             last_note = time.time()
-            print("  … 等待目标 agent 完成（会话保留，Ctrl-C 不影响执行）", file=sys.stderr)
+            elapsed = int(time.time() - wait_start)
+            print(
+                f"  … 目标会话执行中（已 {elapsed}s / 上限 {timeout}s）——任务已送达，不阻塞。",
+                file=sys.stderr,
+            )
+            print("    Ctrl-C 保持异步，稍后在 GUI 查看会话进度即可", file=sys.stderr)
         time.sleep(3)
     return None, None
 
@@ -1577,6 +1591,14 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                 )
             emit("提示：目标不是 git 仓库，--wait 落地判定仅看 done.md 归档", args.json)
 
+    # 握手（DEV-136）：先在目标工作区确认会话（复用/新建/改名），把「连接成功」
+    # 明确回报出来，再派发任务——像 TCP 握手一样先建立连接、再传数据。
+    if reused:
+        emit(f"连接成功：会话 {session_id}（{session_name or shown_title}；复用）", args.json)
+    else:
+        emit(f"连接成功：会话 {session_id}（{session_name}；新建）", args.json)
+    emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
+
     prompt_ms = int(time.time() * 1000)
     try:
         api.prompt(
@@ -1592,11 +1614,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             )
         raise
 
-    if reused:
-        emit(f"复用会话：{session_id}（{source}；reused: true）", args.json)
-    else:
-        emit(f"已创建会话：{session_id}（{source}；reused: false）", args.json)
-    emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
+    emit("任务已派发（send ok）", args.json)
     # 改名成功时以新标题为准（row 是改名前的快照，不能再用它覆盖）。
     shown_title = session_name if (renamed or row is None) else (session_title(row) or session_name)
 
@@ -1642,7 +1660,13 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     head = git_head(target)
 
     if row is None:
-        status = f"超时（>{args.timeout}s，会话仍在运行）"
+        status = f"超时（>{args.timeout}s，回合未结束；任务已送达，会话仍在运行）"
+        emit(
+            "提示：--wait 超时不代表派发失败——任务已成功送达目标会话，"
+            "回合继续执行中；要等完整结果可稍后重发 --wait（同会话会排队/复用），"
+            "或直接在 GUI 打开该会话查看进度。",
+            args.json,
+        )
         entry = log_entry(target.name, target, title, session_id, final_title,
                           workspace, status, "", task,
                           reused=source, session_note=session_note, module=module)
