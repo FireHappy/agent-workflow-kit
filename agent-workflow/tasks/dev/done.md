@@ -920,3 +920,50 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无。
 | 完成日期 | 2026-11-04 |
 | DEV-123 | P1 | 修复 --check-role 过度匹配：泛词停用表（31 词）+ 中文 2/3/4-gram 混合，领域词单命中即匹配；kit↔周报回归不匹配；三 locale smoke 160/0 | 2026-11-04 |
+
+
+## [DEV-124] worker 经验/工具积累闭环（收尾沉淀钩子 + 开工读取 + tools 标准）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | templates/AGENTS.md.tmpl + agent-workflow/templates/AGENTS.md.tmpl、agent-workflow/workflows/dev.md + debug.md + templates/workflows 副本、agent-workflow/bin/awf + bin/awf（memory/tools README heredoc + check 软提示）、docs/design.md、test/smoke.sh（26 节）、agent-workflow/memory/history/经验积累闭环_2026-11-04.md（本任务沉淀实证）、AGENTS.md（bootstrap 重建） |
+| 依赖 | DEV-122 / DEV-123 |
+| 最近更新 | 2026-11-04 |
+
+### 目标与结果
+让每个 worker 在工作中持续积累经验与工具：开工读 history 同类经验、收尾沉淀可复用结论到 history、脚本按 tools 标准收录、check 软提示兜底——沉淀是流程引导，非硬门禁。
+
+### 实现方案
+- 开工顺序（AGENTS.md.tmpl）：新增第 3 条「开始前先读 memory/history/ 同类主题过往结论（修复类读修法、生成类读教训），有 INDEX.md 先读索引」。
+- 收尾沉淀（dev.md / debug.md Step 6）：可复用结论（根因/修法/决策/坑）→ history/<主题>_<日期>.md；可复用脚本/命令 → 按 tools/README 晋升三要素收录。
+- memory/README 细化（put_if_absent heredoc）：何时沉淀（归档时/解决后/反直觉时）+ 何为可复用（根因修法/技术决策/踩坑规避/可复用命令四类，不存一次性琐事）+ 内容结构（背景/结论/验证/关联任务）。
+- tools/README 晋升三要素：① 可执行文件（shebang/入口）② 用法注释（用途/参数/示例）③ 归属（重复性操作）+ 目录示意。
+- check 软提示（check_growth_hints，挂在 return 前只 say 不计数）：归档 ≥3 且 history 无沉淀 → 提示补沉淀；tools 无脚本 → 提示收录；有沉淀后提示消失。
+- docs/design.md「经验/工具积累闭环（worker 记忆）」节。
+- kit 自身补沉淀 memory/history/经验积累闭环_2026-11-04.md（验证 soft 提示消失 + 闭环实证）。
+
+### 验收标准
+- [x] 开工顺序含「先读 history 同类经验」；dev/debug 收尾含「沉淀 memory/tools」
+- [x] memory/README 含「何时沉淀 + 何为可复用 + 内容结构」；tools/README 含晋升三要素
+- [x] awf check 软提示：无沉淀+3 归档 → 提示且 rc=0；有沉淀 → 提示消失（PROJ9 实测）
+- [x] smoke 断言通过；默认 locale 与 LC_ALL=C 双路径全绿（另验 en_US）
+- [x] DEV-124 已归档，check_workflow.sh 全过，status.md 已刷新
+- [x] 只本地 commit，未 push；沉淀为流程引导非硬门禁
+
+### 验证
+- init 新项目（PROJ9）模板落地：memory/README.md 含「何时沉淀/可复用」、tools/README.md 含「shebang/用法注释」（smoke 26.3/26.4 断言）
+- 软提示实测（PROJ9）：造 3 条合法归档块 + awf status → check 输出「memory/history/ 无沉淀」rc=0；补 history 文件 → 提示消失 rc=0
+- kit 自身：bootstrap 后 check 55 ok/0 FAIL；history 软提示消失（有沉淀）；tools 提示保留（kit tools 仅 README，符合预期）
+- smoke：默认 C.UTF-8 / LC_ALL=C / en_US.UTF-8 三路径 166/0（DEV-124 断言 6/6）
+- bash -n bin/awf、agent-workflow/bin/awf、test/smoke.sh；drift 对（AGENTS.md.tmpl / dev.md / debug.md / bin/awf）diff 为空
+
+### 下一步
+无。
+| 完成日期 | 2026-11-04 |
+| DEV-124 | P2 | worker 经验/工具积累闭环：开工读 history + 收尾沉淀 memory/tools + check 软提示（不 FAIL）；三 locale smoke 166/0 | 2026-11-04 |

@@ -406,7 +406,7 @@ write_aux_files() {
 # memory 模块
 
 - `cache/`：临时证据、日志片段、待确认结论。超过 7 天应清理或转存。
-- `history/`：长期归档，存放完整修复过程与可复用结论。
+- `history/`：长期归档，存放完整修复过程与**可复用结论**。
 
 命名：
 
@@ -416,6 +416,32 @@ history/ <主题>_<YYYY-MM-DD>.md
 ```
 
 长期任务可在文件内写 `<!-- long-term: true -->` 免于过期清理。
+
+## 何时沉淀（DEV-124）
+
+- 任务收尾归档时（`done.md` 有可复用结论）
+- 问题解决后（根因明确、修法验证过）
+- 发现反直觉行为时（下次会再踩的坑）
+
+## 何为可复用（不等于过程记录）
+
+只沉淀以下四类，**不存一次性琐事**：
+
+1. **根因与修法**——「为什么坏 + 怎么修好」（修复类最有价值）
+2. **技术决策**——「选了什么 + 为什么，以及没选什么」
+3. **踩坑与规避**——「什么情况会踩 + 如何避开」
+4. **可复用命令**——「屡次手敲的命令序列」（整段命令的归宿是 `../tools/` 晋升脚本）
+
+一次性排查日志、临时输出、未验证猜测 → 留在 `cache/` 或直接删除。
+
+## 内容结构（单篇建议）
+
+```text
+- 背景：触发场景 / 关联任务 ID（如 [DEV-124]）
+- 结论：可直接引用的根因/修法/决策（一句话能说清最好）
+- 验证：怎么证明结论成立（命令 / 复现步骤）
+- 关联任务：任务 ID 与归档位置（tasks/*/done.md）
+```
 EOF
 
   put_if_absent "$root/agent-workflow/memory/cache/README.md" <<'EOF'
@@ -437,6 +463,24 @@ EOF
 
 只写经过验证、可直接执行的命令；实验记录写 `../memory/`，结论写 `../docs/`。
 
+## 脚本 → 正式工具晋升标准（DEV-124）
+
+`tools/` 中的脚本/命令是 worker 的**可复用资产**，满足以下三要素即可从
+「临时脚本」（`../memory/cache/` 或 shell 历史）晋升为正式工具：
+
+1. **可执行文件**：有 shebang/入口（`#!/usr/bin/env bash` 等），可直接 `./xxx` 运行
+2. **用法注释**：文件头写明用途、参数、示例（谁都能照注释用）
+3. **归属明确**：对应本 worker 的重复性操作（做第二次就该考虑收录）
+
+目录示意：
+
+```text
+tools/
+├── README.md
+├── verify.sh        # 构建+校验一条龙（shebang + 用法注释 + 重复性操作）
+└── release.sh        # 发版流程封装
+```
+
 替换本文件时建议保留三类内容：
 
 1. 构建与验证命令（可直接复制执行）
@@ -450,6 +494,23 @@ EOF
 exec "$(dirname "$0")/bin/awf" check "$@"
 EOF
   chmod +x "$root/agent-workflow/check_workflow.sh"
+}
+
+# DEV-124：经验/工具积累软提示（只提示不 FAIL，沉淀是流程引导不是门禁）
+check_growth_hints() {
+  local archived=0 d hfiles tfiles
+  for d in agent-workflow/tasks/*/done.md; do
+    [ -f "$d" ] || continue
+    archived=$((archived + $(grep -c '^## \[[A-Z]' "$d" || true)))
+  done
+  hfiles="$(find agent-workflow/memory/history -maxdepth 1 -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$archived" -ge 3 ] && [ "$hfiles" -eq 0 ]; then
+    say "提示：已有 $archived 条归档任务但 memory/history/ 无沉淀——建议补 <主题>_<日期>.md 沉淀可复用结论（根因/修法/决策/坑，标准见 memory/README.md）"
+  fi
+  tfiles="$(find agent-workflow/tools -maxdepth 1 -type f ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$archived" -ge 3 ] && [ "$tfiles" -eq 0 ]; then
+    say "提示：如已沉淀过可复用脚本/命令，可按 tools/README.md 晋升三要素（可执行/用法注释/归属）收录进 tools/"
+  fi
 }
 
 cmd_init() {
@@ -1027,6 +1088,8 @@ agent-workflow/tasks/docs/done.md
     say ""
     say "skip  test/smoke.sh 不存在（项目内副本无冒烟测试；kit 形态才可 --with-smoke）"
   fi
+
+  check_growth_hints   # DEV-124：经验/工具积累软提示（只提示不 FAIL）
   return "$fails"
 }
 

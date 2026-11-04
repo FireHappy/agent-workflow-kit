@@ -2248,5 +2248,90 @@ else
   bad "DEV-123 领域词场景退出码非 0"
 fi
 
+# 26. DEV-124：经验/工具积累闭环（开工读取 + 收尾沉淀 + tools 标准 + check 软提示）
+# 26.1 开工顺序含「读同类经验」
+if grep -q '过往结论' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q 'memory/history' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
+  ok "DEV-124 开工顺序含「先读 history 同类经验」"
+else
+  bad "DEV-124 开工顺序缺读同类经验步骤"
+fi
+# 26.2 dev/debug 收尾含沉淀到 memory/history 与 tools 收录
+if grep -q 'memory/history' "$KIT_DIR/agent-workflow/workflows/dev.md" \
+   && grep -q 'memory/history' "$KIT_DIR/agent-workflow/workflows/debug.md" \
+   && grep -q 'tools/README.md' "$KIT_DIR/agent-workflow/workflows/dev.md" \
+   && grep -q 'tools/README.md' "$KIT_DIR/agent-workflow/workflows/debug.md"; then
+  ok "DEV-124 dev/debug 收尾含沉淀 memory/history + tools 收录"
+else
+  bad "DEV-124 dev/debug 收尾缺沉淀步骤"
+fi
+# 26.3 init 项目 memory/README 含「可复用/何时沉淀」定义
+"$KIT_DIR/bin/awf" init "$TMP/proj9" --name "积累闭环" >/dev/null 2>&1
+if grep -q '可复用' "$TMP/proj9/agent-workflow/memory/README.md" \
+   && grep -q '何时沉淀' "$TMP/proj9/agent-workflow/memory/README.md"; then
+  ok "DEV-124 memory/README 含可复用定义与沉淀时机"
+else
+  bad "DEV-124 memory/README 缺可复用定义"
+fi
+# 26.4 init 项目 tools/README 含晋升三要素（可执行/用法注释/归属）
+if grep -q 'shebang' "$TMP/proj9/agent-workflow/tools/README.md" \
+   && grep -q '用法注释' "$TMP/proj9/agent-workflow/tools/README.md"; then
+  ok "DEV-124 tools/README 含晋升三要素"
+else
+  bad "DEV-124 tools/README 缺晋升三要素"
+fi
+# 26.5 check 软提示：无沉淀+≥3 归档 → 提示但 rc=0；补沉淀 → 无提示
+cat >> "$TMP/proj9/agent-workflow/tasks/dev/done.md" <<'PROJ9EOF'
+## [HIST-101] 造数沉淀一
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P3 |
+| 状态 | 完成 |
+| Owner | smoke |
+| 完成日期 | 2026-11-03 |
+
+造数归档。
+| HIST-101 | P3 | 造数沉淀一 | 2026-11-03 |
+
+## [HIST-102] 造数沉淀二
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P3 |
+| 状态 | 完成 |
+| Owner | smoke |
+| 完成日期 | 2026-11-03 |
+
+造数归档。
+| HIST-102 | P3 | 造数沉淀二 | 2026-11-03 |
+
+## [HIST-103] 造数沉淀三
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P3 |
+| 状态 | 完成 |
+| Owner | smoke |
+| 完成日期 | 2026-11-03 |
+
+造数归档。
+| HIST-103 | P3 | 造数沉淀三 | 2026-11-03 |
+PROJ9EOF
+( cd "$TMP/proj9" && ./agent-workflow/bin/awf status >/dev/null 2>&1 \
+  && ./agent-workflow/bin/awf check > "$TMP/proj9-check1.log" 2>&1 ); P9RC=$?
+if [ "$P9RC" -eq 0 ] && grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check1.log"; then
+  ok "DEV-124 check 软提示：无沉淀+3 归档 → 提示且 rc=0"
+else
+  bad "DEV-124 check 软提示未出现（rc=$P9RC）"
+fi
+printf '# 经验沉淀\n\n- 背景：造数验证\n- 结论：软提示工作正常\n' > "$TMP/proj9/agent-workflow/memory/history/软提示验证_2026-11-04.md"
+( cd "$TMP/proj9" && ./agent-workflow/bin/awf check > "$TMP/proj9-check2.log" 2>&1 ); P9RC2=$?
+if [ "$P9RC2" -eq 0 ] && ! grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check2.log"; then
+  ok "DEV-124 check 软提示：有沉淀 → 提示消失（rc=0）"
+else
+  bad "DEV-124 check 软提示未随沉淀消失（rc=$P9RC2）"
+fi
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

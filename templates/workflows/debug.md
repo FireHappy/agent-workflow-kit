@@ -76,7 +76,7 @@
 ## Step 6：归档
 
 1. 任务从 `current.md` 移到 `done.md`
-2. 关键排查过程写入 `../memory/history/`
+2. 有**可复用结论**（根因/修法/复现/规避）→ 追加或新建 `../memory/history/<主题>_<YYYY-MM-DD>.md`（标准见 `../memory/README.md`）；有**新写的可复用诊断/修复脚本** → 按 `../tools/README.md` 晋升三要素收录进 `tools/`
 3. 清理对应 `../memory/cache/`
 4. 运行 `./agent-workflow/check_workflow.sh` 通过
 5. 运行 `./agent-workflow/bin/awf status` 刷新摘要

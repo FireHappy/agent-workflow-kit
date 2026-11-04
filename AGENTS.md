@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:02a3fe73 -->
+<!-- awf:begin v1 digest:910ed59c -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -13,9 +13,10 @@
    - 开发完成待审（dev 子流程，随 dev 一起加载） → `agent-workflow/workflows/review.md`
    - 跨项目派发 / 交接 → `agent-workflow/workflows/cross-project.md`
    - 发版 / 版本号 / tag / CHANGELOG → `agent-workflow/workflows/release.md`
-3. 有自己名下 `active/verify/review/blocked` 的任务先恢复；没有则从 `tasks/<type>/todo.md` 认领
-4. 动手前把任务写入 `tasks/<type>/current.md`：状态、Owner、验收标准、下一步
-5. 收尾：归档 → `./agent-workflow/check_workflow.sh` 通过 → `./agent-workflow/bin/awf status` → 本地 commit
+3. 开始前先读 `agent-workflow/memory/history/` 中**同类主题的过往结论**（修复类先读过去修法、生成类先读上次教训、排查类先读已知坑）；有 INDEX.md 则先读索引
+4. 有自己名下 `active/verify/review/blocked` 的任务先恢复；没有则从 `tasks/<type>/todo.md` 认领
+5. 动手前把任务写入 `tasks/<type>/current.md`：状态、Owner、验收标准、下一步
+6. 收尾：归档（附带沉淀可复用结论到 memory/history、脚本按 tools 标准收录）→ `./agent-workflow/check_workflow.sh` 通过 → `./agent-workflow/bin/awf status` → 本地 commit
 
 ## 铁律
 
