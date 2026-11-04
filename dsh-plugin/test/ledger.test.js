@@ -1,3 +1,186 @@
+
+// ---- DEV-127：目录式账本（tasks/<type>/{todo,current,done}/<ID>.md + README 索引） ----
+
+const DIR_FIXTURE = {
+  todo: `## [DEV-300] 目录式待办
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | todo |
+| Owner | smoke |
+| 登记日期 | 2026-11-04 |
+
+### 目标
+验证目录式认领/归档。
+
+### 验收标准
+- [ ] 认领后 current/ 出现且状态 active
+- [ ] 归档后 done/ 出现且状态 done
+
+### 下一步
+跑测试。
+`,
+  current: `## [DEV-301] 目录式进行中
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | active |
+| Owner | lead |
+| 最近更新 | 2026-11-04 |
+
+### 验收标准
+- [x] 进行中块被看板列出
+
+### 下一步
+完成。
+`,
+  done: `## [DEV-302] 目录式已完成
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | done |
+| 完成日期 | 2026-11-04 |
+
+### 验收标准
+- [x] 归档后计入最近完成
+`,
+}
+
+function dirFixture(root) {
+  return {
+    root,
+    awf: root + '/agent-workflow',
+    write: async () => {
+      const { mkdir, writeFile } = await import('node:fs/promises')
+      for (const type of ['dev', 'debug', 'docs']) {
+        for (const bucket of ['todo', 'current', 'done']) {
+          await mkdir(`${root}/agent-workflow/tasks/${type}/${bucket}`, { recursive: true })
+          await writeFile(`${root}/agent-workflow/tasks/${type}/${bucket}/README.md`, `# ${bucket} 索引\n\n（空）\n`, 'utf8')
+        }
+      }
+      for (const [bucket, content] of Object.entries(DIR_FIXTURE)) {
+        await writeFile(`${root}/agent-workflow/tasks/dev/${bucket}/DEV-30${bucket === 'todo' ? '0' : bucket === 'current' ? '1' : '2'}.md`, content, 'utf8')
+      }
+    },
+  }
+}
+
+test('DEV-127 目录式 ledgerOf：current/todo/recent/fresh 全部识别', async () => {
+  const { mkdtemp } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { ledgerOf } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-dir-'))
+  try {
+    await dirFixture(root).write()
+    // status.md 缺失 → fresh=false（有账本文件时）
+    let ledger = await ledgerOf(root)
+    assert.ok(Array.isArray(ledger.current))
+    assert.equal(ledger.current.length, 1)
+    assert.equal(ledger.current[0].id, 'DEV-301')
+    assert.equal(ledger.current[0].status, 'active')
+    assert.deepEqual(ledger.todoRows.find((t) => t.type === 'dev').rows[0], {
+      id: 'DEV-300', prio: 'P2', desc: '目录式待办', date: '2026-11-04',
+    })
+    assert.deepEqual(ledger.recent.map((r) => r.id), ['DEV-302'])
+    assert.equal(ledger.status.fresh, false)
+    // 写 status.md（mtime 晚于任务文件）→ fresh=true
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(`${root}/agent-workflow/tasks/status.md`, '# global\n', 'utf8')
+    await new Promise((r) => setTimeout(r, 30))
+    ledger = await ledgerOf(root)
+    assert.equal(ledger.status.fresh, true)
+  } finally {
+    await (await import('node:fs/promises')).rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEV-127 目录式 startTask：todo/<ID>.md 认领到 current/ + 状态 active', async () => {
+  const { mkdtemp, readFile, readdir } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { startTask } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-start-'))
+  try {
+    await dirFixture(root).write()
+    const res = await startTask({ projectPath: root, type: 'dev', id: 'DEV-300' })
+    assert.equal(res.ok, true)
+    assert.deepEqual(res.task, { id: 'DEV-300', type: 'dev', title: '目录式待办', prio: 'P2', status: 'active', date: '2026-11-04' })
+    // todo/ 无该文件；current/ 有且状态 active
+    assert.deepEqual((await readdir(`${root}/agent-workflow/tasks/dev/todo`)).sort(), ['README.md'])
+    const moved = await readFile(`${root}/agent-workflow/tasks/dev/current/DEV-300.md`, 'utf8')
+    assert.match(moved, /\| 状态 \| active \|/)
+    assert.match(moved, /## \[DEV-300\] 目录式待办/)
+  } finally {
+    await (await import('node:fs/promises')).rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEV-127 目录式 todoEdit：add 新建文件 / delete 删除文件', async () => {
+  const { mkdtemp, readFile, readdir } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { todoEdit } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-todo-'))
+  try {
+    await dirFixture(root).write()
+    const add = await todoEdit({ projectPath: root, type: 'dev', action: 'add', row: { id: 'DEV-303', '优先级': 'P3', desc: '新增待办' }, date: '2026-11-04' })
+    assert.equal(add.ok, true)
+    const added = await readFile(`${root}/agent-workflow/tasks/dev/todo/DEV-303.md`, 'utf8')
+    assert.match(added, /## \[DEV-303\] 新增待办/)
+    assert.match(added, /\| 状态 \| todo \|/)
+    const del = await todoEdit({ projectPath: root, type: 'dev', action: 'delete', row: { id: 'DEV-303' } })
+    assert.equal(del.ok, true)
+    assert.deepEqual((await readdir(`${root}/agent-workflow/tasks/dev/todo`)).sort(), ['DEV-300.md', 'README.md'])
+  } finally {
+    await (await import('node:fs/promises')).rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEV-127 目录式 readSource：返回桶 README 索引；writeSource 拒绝直写', async () => {
+  const { mkdtemp } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { readSource, writeSource } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-src-'))
+  try {
+    await dirFixture(root).write()
+    const r = await readSource({ projectPath: root, type: 'dev', file: 'current' })
+    assert.equal(r.ok, true)
+    assert.ok(r.source.absPath.endsWith('/tasks/dev/current/README.md'))
+    assert.match(r.source.content, /^# current 索引/)
+    const w = await writeSource({ projectPath: root, type: 'dev', file: 'current', content: 'x' })
+    assert.equal(w.ok, false)
+    assert.equal(w.code, 'readonly')
+  } finally {
+    await (await import('node:fs/promises')).rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEV-127 skeletonFiles：目录式三桶 README + status.md 数据来源文案', async () => {
+  const { mkdtemp } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { skeletonFiles } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-skel-'))
+  try {
+    const files = skeletonFiles({ projectPath: root, name: 'demo', purpose: 'demo 项目' })
+    const paths = files.map((f) => f.path)
+    for (const bucket of ['todo', 'current', 'done']) {
+      assert.ok(paths.some((p) => p.endsWith(`/tasks/dev/${bucket}/README.md`)), `${bucket} README`)
+      assert.ok(paths.some((p) => p.endsWith(`/tasks/debug/${bucket}/README.md`)))
+      assert.ok(paths.some((p) => p.endsWith(`/tasks/docs/${bucket}/README.md`)))
+    }
+    const status = files.find((f) => f.path.endsWith('/tasks/status.md')).content
+    assert.match(status, /tasks\/<type>\/\{todo,current,done\}\/<ID>\.md/)
+  } finally {
+    await (await import('node:fs/promises')).rm(root, { recursive: true, force: true })
+  }
+})
+
 // DEV-100：parseTodoRows 4 列回归 + 5 列兼容（依赖并入 desc）单测。
 // DEV-101：parseDoneRows 4/5/6 列归档行兼容（desc = 第 3 列，完成日期 = 行内首个 YYYY-MM-DD）单测。
 // 运行：cd dsh-plugin && node --test（package.json scripts.test = node --test "test/*.test.js"）
@@ -206,12 +389,12 @@ test('块式：状态=取消 同样计入已归档记录', () => {
   assert.equal(rows[0].date, '2026-11-03')
 })
 
-test('块式：非归档状态（active/done/archived/pending）与缺日期块跳过', () => {
+test('块式：非归档状态（active/archived/pending）与缺日期块跳过；done（DEV-127 目录式归档）计入', () => {
   const md = [
     '## [DEV-200] active 块',
     '| 状态 | active |',
     '| 最近更新 | 2026-11-03 |',
-    '## [DEV-201] 旧式 done 块',
+    '## [DEV-201] 目录式 done 块',
     '| 状态 | done |',
     '| Last Updated | 2026-11-02 |',
     '## [DEV-202] 本仓库 archived 块',
@@ -224,7 +407,10 @@ test('块式：非归档状态（active/done/archived/pending）与缺日期块�
     '| 状态 | 完成 |',
     '| 最近更新 | 待更新 |',
   ].join('\n')
-  assert.deepEqual(parseDoneRows(md, 10), [])
+  // DEV-127：目录式归档文件状态字段=done（accounting 视同 完成/取消），必须计入
+  const rows = parseDoneRows(md, 10)
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rows[0], { id: 'DEV-201', prio: '', desc: '目录式 done 块', date: '2026-11-02' })
 })
 
 test('块式：日期优先级 归档日期 > 完成日期 > 最近更新/Last Updated', () => {

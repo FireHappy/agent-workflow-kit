@@ -1071,7 +1071,7 @@ window.__ModuleLoader__.load({
 
       return h('div', {
         className: 'awf-row' + (clickable ? ' awf-row-clickable' : ''),
-        title: clickable ? '点击查看/编辑源文件（' + t.id + ' → ' + (t.type || 'dev') + '/current.md）' : undefined,
+        title: clickable ? '点击查看/编辑源文件（' + t.id + ' → ' + (t.type || 'dev') + '/current/<ID>.md）' : undefined,
         onClick: clickable ? () => onOpenSource(t.type || 'dev', 'current', t) : undefined,
         style: {
           display: 'flex', flexDirection: 'column', gap: 0,
@@ -1127,7 +1127,7 @@ window.__ModuleLoader__.load({
       const clickable = typeof onOpen === 'function'
       return h('div', {
         className: 'awf-row' + (clickable ? ' awf-row-clickable' : ''),
-        title: clickable ? '点击查看/编辑源文件（' + row.id + ' → ' + (row.type || 'dev') + '/todo.md）' : undefined,
+        title: clickable ? '点击查看/编辑源文件（' + row.id + ' → ' + (row.type || 'dev') + '/todo/<ID>.md）' : undefined,
         onClick: clickable ? () => onOpen(row.type || 'dev', 'todo', row) : undefined,
         style: {
           display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px',
@@ -1692,7 +1692,7 @@ window.__ModuleLoader__.load({
               h('div', { style: { fontSize: F(12), color: C.sub, marginTop: 3, lineHeight: 1.5 } },
                 deleteReasonText(view.reason)))),
           h('div', { style: { fontSize: F(12), color: C.sub, marginTop: 10, lineHeight: 1.5 } },
-            '仍可「仅删除账本」：跳过回退，只从账本中移除该任务块（done.md 记「已撤销」）。'),
+            '仍可「仅删除账本」：跳过回退，只从账本中移除该任务文件（done/ 目录记「已撤销」）。'),
           errorLine,
           actionButtons(false))
       }
@@ -2136,7 +2136,7 @@ window.__ModuleLoader__.load({
           loadLedger()
         } catch (e) {
           if (e.code === 'not-found') {
-            setActionError('未在 todo.md 中找到该任务：' + row.id + '（可能已被移除，请刷新）')
+            setActionError('未在 todo/ 中找到该任务：' + row.id + '（可能已被移除，请刷新）')
           } else if (e.code === 'path-not-allowed') {
             setActionError('路径不在白名单，无法开始任务。')
           } else {

@@ -5,7 +5,7 @@
 //   - done.md 摘要行：`| ID | 优先级 | 描述 | 完成日期 |`；
 //   - todo.md 进度：`- [ ]` 未完成 / `- [x]` 已完成；
 //   - status.md 新鲜度：status.md mtime >= 各账本文件（current/todo/done）mtime。
-import { readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, readdir, stat, writeFile, mkdir, rm } from 'node:fs/promises'
 import { join, basename, dirname, isAbsolute, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
@@ -180,7 +180,8 @@ export function parseDoneRows(md, n) {
   const finish = () => {
     if (!cur) return
     const st = cur.fields['状态'] || cur.fields['Status'] || ''
-    if (st === '完成' || st === '取消') {
+    // DEV-127：目录式归档任务文件状态字段为 done（迁移归一/归档约定）
+    if (st === '完成' || st === '取消' || st === 'done') {
       const dateSrc = cur.fields['归档日期'] || cur.fields['完成日期'] || cur.fields['最近更新'] || cur.fields['Last Updated'] || ''
       const dm = /([0-9]{4}-[0-9]{2}-[0-9]{2})/.exec(dateSrc)
       if (dm) rows.push({ id: cur.id, prio: cur.fields['优先级'] || cur.fields['Priority'] || '', desc: cur.desc, date: dm[1], _row: cur._row })
@@ -232,6 +233,54 @@ export function parseDoneRows(md, n) {
 }
 
 // ---------------------------------------------------------------------------
+// DEV-127：目录式账本布局（tasks/<type>/{todo,current,done}/<ID>.md + README 索引）
+// ---------------------------------------------------------------------------
+
+/**
+ * 判定一个任务类型的账本布局：
+ *  - dir（DEV-127 目录式）：tasks/<type>/todo|current|done 目录存在；
+ *  - legacy：旧形态 tasks/<type>/{todo,current,done}.md 大文件。
+ * 任一桶目录存在即视为目录式（迁移完成后三桶齐全；迁移中目录式优先）。
+ * @returns {Promise<{mode: 'dir'|'legacy', base, todoDir, currentDir, doneDir, todoFile, currentFile, doneFile}>}
+ */
+async function layoutOf(projectPath, type) {
+  const base = join(projectPath, 'agent-workflow', 'tasks', type)
+  const todoDir = join(base, 'todo')
+  const currentDir = join(base, 'current')
+  const doneDir = join(base, 'done')
+  const isDir = async (d) => {
+    try { return (await stat(d)).isDirectory() } catch { return false }
+  }
+  const mode = ((await isDir(todoDir)) || (await isDir(currentDir)) || (await isDir(doneDir))) ? 'dir' : 'legacy'
+  return {
+    mode, base, todoDir, currentDir, doneDir,
+    todoFile: join(base, 'todo.md'),
+    currentFile: join(base, 'current.md'),
+    doneFile: join(base, 'done.md'),
+  }
+}
+
+/** 目录式桶内任务文件（绝对路径；排除 README.md 与 status.md 之外的杂物 md）。 */
+async function dirTaskFiles(dir) {
+  try {
+    const names = await readdir(dir)
+    return names
+      .filter((n) => n.endsWith('.md') && n !== 'README.md' && n !== 'status.md')
+      .map((n) => join(dir, n))
+  } catch {
+    return []
+  }
+}
+
+/** 双击：状态字段行替换（认领 todo→active / 退回 active→todo）。 */
+function replaceStatusRow(md, next) {
+  return String(md).split('\n').map((line) => {
+    if (/^\|\s*状态\s*\|/.test(line)) return `| 状态 | ${next} |`
+    return line
+  }).join('\n')
+}
+
+// ---------------------------------------------------------------------------
 // 项目账本汇总
 // ---------------------------------------------------------------------------
 
@@ -256,14 +305,25 @@ export async function ledgerOf(projectPath) {
   }
 
   const tasksDir = join(awf, 'tasks')
+  // DEV-127：文件集 = 目录式任务文件（todo/current/done 下 <ID>.md，排除 README）或旧形态大文件
   const ledgerFiles = []
+  const currentBuckets = [] // {type, file, legacy}
+  const todoBuckets = []    // {type, file, legacy}
+  const doneBuckets = []    // {type, file, legacy}
   for (const type of TASK_TYPES) {
-    try {
-      const names = await readdir(join(tasksDir, type))
-      for (const f of ['todo.md', 'current.md', 'done.md']) {
-        if (names.includes(f)) ledgerFiles.push(join(tasksDir, type, f))
+    const lay = await layoutOf(projectPath, type)
+    if (lay.mode === 'dir') {
+      for (const f of await dirTaskFiles(lay.todoDir)) { ledgerFiles.push(f); todoBuckets.push({ type, file: f }) }
+      for (const f of await dirTaskFiles(lay.currentDir)) { ledgerFiles.push(f); currentBuckets.push({ type, file: f }) }
+      for (const f of await dirTaskFiles(lay.doneDir)) { ledgerFiles.push(f); doneBuckets.push({ type, file: f }) }
+    } else {
+      for (const f of [lay.todoFile, lay.currentFile, lay.doneFile]) {
+        try { await stat(f); ledgerFiles.push(f) } catch { /* 缺文件跳过 */ }
       }
-    } catch { /* 缺目录则跳过 */ }
+      try { await stat(lay.currentFile); currentBuckets.push({ type, file: lay.currentFile, legacy: true }) } catch {}
+      try { await stat(lay.todoFile); todoBuckets.push({ type, file: lay.todoFile, legacy: true }) } catch {}
+      try { await stat(lay.doneFile); doneBuckets.push({ type, file: lay.doneFile, legacy: true }) } catch {}
+    }
   }
   const statusFile = join(tasksDir, 'status.md')
 
@@ -288,25 +348,33 @@ export async function ledgerOf(projectPath) {
     fileContent.status = await readFile(statusFile, 'utf8')
   } catch { /* status.md 缺失：新鲜度判 false */ }
 
-  for (const type of TASK_TYPES) {
-    const dir = join(tasksDir, type)
-    const cur = fileContent[join(dir, 'current.md')]
-    if (cur !== undefined) {
-      for (const b of parseBlocks(cur)) {
-        current.push({ type, ...b, checkItems: parseCheckItems(findBlock(cur, b.id)) })
-      }
+  for (const { type, file } of currentBuckets) {
+    const md = fileContent[file]
+    if (md === undefined) continue
+    for (const b of parseBlocks(md)) {
+      current.push({ type, ...b, checkItems: parseCheckItems(findBlock(md, b.id)) })
     }
-    const td = fileContent[join(dir, 'todo.md')]
-    if (td !== undefined) {
-      todo.push({ type, ...countTodo(td) })
-      // 结构化待办行（前端「开始任务」渲染用；todo.md 只含未开始行，startTask 会删行迁移）
-      todoRows.push({ type, rows: parseTodoRows(td) })
+  }
+  for (const { type, file } of todoBuckets) {
+    const md = fileContent[file]
+    if (md === undefined) continue
+    if (file.endsWith('todo.md')) {
+      // 旧形态：todo.md 表格行 + checkbox 进度
+      todo.push({ type, ...countTodo(md) })
+      todoRows.push({ type, rows: parseTodoRows(md) })
+    } else {
+      // 目录式：每个待办任务文件一个块（进度取验收标准 checkbox；结构化行取 ID/优先级/标题/登记日期）
+      const map = parseBlockFieldMap(md)
+      const title = blockTitle(md) || idOf(md)
+      todo.push({ type, ...countTodo(md) })
+      todoRows.push({ type, rows: [{ id: idOf(md), prio: map['优先级'] || 'P2', desc: title, date: map['登记日期'] || '' }] })
     }
-    const dn = fileContent[join(dir, 'done.md')]
-    if (dn !== undefined) {
-      // DEV-102：全量收集行式+块式记录（不截断），聚合末尾统一全局排序取前 8
-      for (const r of parseDoneRows(dn, Number.MAX_SAFE_INTEGER)) recent.push({ type, ...r })
-    }
+  }
+  for (const { type, file } of doneBuckets) {
+    const md = fileContent[file]
+    if (md === undefined) continue
+    // DEV-102：全量收集行式+块式记录（不截断），聚合末尾统一全局排序取前 8
+    for (const r of parseDoneRows(md, Number.MAX_SAFE_INTEGER)) recent.push({ type, ...r })
   }
 
   // status.md 新鲜度：status mtime 不低于任一账本文件 mtime（500ms 容差）
@@ -323,6 +391,12 @@ export async function ledgerOf(projectPath) {
     // 同日期依赖 V8 稳定排序，保持各类型内部顺序（dev→debug→docs）。
     recent: recent.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8),
   }
+}
+
+/** 目录式任务文件的 ID（文件名 DEV-xxx.md → DEV-xxx）。 */
+function idOf(md) {
+  const m = /^## \[([A-Z]+-[0-9]+)\]/.exec(String(md) || '')
+  return m ? m[1] : ''
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +546,38 @@ const DONE_MD = {
   docs: '# 已完成\n\n| 任务ID | 优先级 | 文档主题 | 完成日期 |\n|--------|--------|----------|----------|\n',
 }
 
+// DEV-127：目录式检索索引模板（与 awf render_ledger_readmes 的头部一致）
+const TYPE_LABEL = { dev: '待开发', debug: '待调试', docs: '待撰写' }
+const README_TMPL = {
+  todo: (label) => [
+    `# ${label}（todo）目录 索引`,
+    '',
+    '> 由 `awf status` 生成，请勿手改；任务事实以本目录下 `<ID>.md` 文件为准。',
+    '',
+    '| ID | 优先级 | 标题 | 登记日期 |',
+    '|----|--------|------|----------|',
+    '',
+  ].join('\n'),
+  current: (label) => [
+    `# ${label}（current）目录 索引`,
+    '',
+    '> 由 `awf status` 生成，请勿手改；任务事实以本目录下 `<ID>.md` 文件为准。',
+    '',
+    '| ID | 优先级 | 状态 | Owner | 标题 |',
+    '|----|--------|------|-------|------|',
+    '',
+  ].join('\n'),
+  done: (label) => [
+    `# ${label}（done）目录 索引`,
+    '',
+    '> 由 `awf status` 生成，请勿手改；任务事实以本目录下 `<ID>.md` 文件为准。',
+    '',
+    '| ID | 优先级 | 标题 | 完成日期 |',
+    '|----|--------|------|----------|',
+    '',
+  ].join('\n'),
+}
+
 const CURRENT_MD = {
   dev: [
     '# 正在开发',
@@ -531,7 +637,7 @@ function renderStatusMd(date) {
     '',
     '<!-- awf:status:begin -->',
     '> 本区块由 `agent-workflow/bin/awf status` 生成，请勿手改。',
-    '> 数据来源：`tasks/*/current.md`、`tasks/*/todo.md`、`tasks/*/done.md`。',
+    '> 数据来源：`tasks/<type>/{todo,current,done}/<ID>.md`（目录式单任务文件）。',
     '',
     '## 当前进行中',
     '',
@@ -571,10 +677,15 @@ export function skeletonFiles(o) {
     path: join(o.projectPath, 'agent-workflow', 'project.yaml'),
     content: renderProjectYaml({ id, name, purpose, aliases, stack }),
   })
+  // DEV-127：目录式三桶（todo/current/done），每桶一个 README 检索索引（由 awf status 重生成）
   for (const type of TASK_TYPES) {
-    files.push({ path: join(o.projectPath, 'agent-workflow', 'tasks', type, 'todo.md'), content: TODO_MD[type] })
-    files.push({ path: join(o.projectPath, 'agent-workflow', 'tasks', type, 'current.md'), content: CURRENT_MD[type] })
-    files.push({ path: join(o.projectPath, 'agent-workflow', 'tasks', type, 'done.md'), content: DONE_MD[type] })
+    const label = TYPE_LABEL[type] || type
+    for (const bucket of ['todo', 'current', 'done']) {
+      files.push({
+        path: join(o.projectPath, 'agent-workflow', 'tasks', type, bucket, 'README.md'),
+        content: README_TMPL[bucket](label),
+      })
+    }
   }
   files.push({ path: join(o.projectPath, 'agent-workflow', 'tasks', 'status.md'), content: renderStatusMd(date) })
   return files
@@ -623,9 +734,33 @@ export async function startTask(o) {
   const { projectPath, type, id, date } = o
   if (!TASK_TYPES.includes(type)) return { ok: false, code: 'bad-type' }
   if (!/^[A-Z]+-[0-9]+$/.test(String(id))) return { ok: false, code: 'bad-id' }
-  const dir = join(projectPath, 'agent-workflow', 'tasks', type)
-  const todoFile = join(dir, 'todo.md')
-  const currentFile = join(dir, 'current.md')
+  const lay = await layoutOf(projectPath, type)
+
+  // DEV-127 目录式：认领 = todo/<ID>.md 状态 todo→active 后移入 current/
+  if (lay.mode === 'dir') {
+    const src = join(lay.todoDir, `${id}.md`)
+    let md
+    try {
+      md = await readFile(src, 'utf8')
+    } catch {
+      return { ok: false, code: 'not-found' }
+    }
+    const map = parseBlockFieldMap(md)
+    const title = blockTitle(md) || id
+    const prio = map['优先级'] || 'P2'
+    const dateUsed = date || map['登记日期'] || todayLocal()
+    await mkdir(lay.currentDir, { recursive: true })
+    await writeFile(join(lay.currentDir, `${id}.md`), replaceStatusRow(md, 'active'), 'utf8')
+    await rm(src, { force: true })
+    return {
+      ok: true,
+      task: { id, type, title, prio, status: 'active', date: dateUsed },
+    }
+  }
+
+  const dir = lay.base
+  const todoFile = lay.todoFile
+  const currentFile = lay.currentFile
 
   let todoMd
   try {
@@ -685,9 +820,21 @@ export async function archiveTask(o) {
   const { projectPath, id } = o
   if (!/^[A-Z]+-[0-9]+$/.test(String(id))) return { ok: false, code: 'bad-id' }
   for (const type of TASK_TYPES) {
+    const lay = await layoutOf(projectPath, type)
+    if (lay.mode === 'dir') {
+      // 目录式：归档任务文件 = done/<ID>.md（含完整块），直接返回
+      try {
+        const md = await readFile(join(lay.doneDir, `${id}.md`), 'utf8')
+        const row = parseDoneRows(md, Number.MAX_SAFE_INTEGER).find((r) => r.id === id)
+        if (!row) return { ok: false, code: 'not-found' }
+        return { ok: true, done: { type, row, block: md } }
+      } catch {
+        continue
+      }
+    }
     let md
     try {
-      md = await readFile(join(projectPath, 'agent-workflow', 'tasks', type, 'done.md'), 'utf8')
+      md = await readFile(lay.doneFile, 'utf8')
     } catch {
       continue
     }
@@ -799,7 +946,50 @@ export async function todoEdit(o) {
   const { projectPath, type, action, row, date } = o
   if (!TASK_TYPES.includes(type)) return { ok: false, code: 'bad-type' }
   if (!['add', 'update', 'delete'].includes(action)) return { ok: false, code: 'bad-action' }
-  const file = join(projectPath, 'agent-workflow', 'tasks', type, 'todo.md')
+  const lay = await layoutOf(projectPath, type)
+
+  // DEV-127 目录式：todo 任务 = todo/<ID>.md 单文件；add=新建文件、update=字段替换、delete=删除文件
+  if (lay.mode === 'dir') {
+    const id = safeCell(row.id)
+    if (!ID_RE.test(id)) return { ok: false, code: 'invalid-id' }
+    if (action === 'add') {
+      let prio = safeCell(row['优先级'] ?? row.prio)
+      if (prio === '') prio = 'P2'
+      if (!PRIO_RE.test(prio)) return { ok: false, code: 'invalid-prio' }
+      const desc = safeCell(row['描述'] ?? row.desc) || id
+      const target = join(lay.todoDir, `${id}.md`)
+      try {
+        await readFile(target)
+        return { ok: false, code: 'duplicate' }
+      } catch { /* 可新建 */ }
+      await mkdir(lay.todoDir, { recursive: true })
+      await writeFile(target, renderTaskBlock({ id, title: desc, prio, status: 'todo', date: date || todayLocal() }), 'utf8')
+      return { ok: true, action, type, rows: [{ id, prio, desc, date: date || todayLocal() }] }
+    }
+    const target = join(lay.todoDir, `${id}.md`)
+    let md
+    try {
+      md = await readFile(target, 'utf8')
+    } catch {
+      return { ok: false, code: 'not-found' }
+    }
+    if (action === 'delete') {
+      await rm(target, { force: true })
+      return { ok: true, action, type, rows: [] }
+    }
+    // update：标题/优先级/登记日期 字段替换
+    const fields = {}
+    const prio = safeCell(row['优先级'] ?? row.prio)
+    if (row['描述'] != null && safeCell(row['描述']) !== '') fields.title = safeCell(row['描述'])
+    if (prio !== '') fields['优先级'] = prio
+    if (row.date) fields['登记日期'] = safeCell(row.date)
+    const res = updateTaskFields(md, { id, fields })
+    if (!res.ok) return res
+    await writeFile(target, res.md, 'utf8')
+    return { ok: true, action, type, rows: [{ id, prio: res.fields['优先级'] || 'P2', desc: res.fields.title || id, date: res.fields['登记日期'] || '' }] }
+  }
+
+  const file = lay.todoFile
   let md = null
   try {
     md = await readFile(file, 'utf8')
@@ -1021,9 +1211,11 @@ export async function gitChangedFiles(o) {
  */
 export async function deleteTask(o) {
   const { projectPath, type, id, revert = false, dryRun = false, date, runGit = defaultRunGit } = o
-  const dir = join(projectPath, 'agent-workflow', 'tasks', type)
-  const currentFile = join(dir, 'current.md')
-  const doneFile = join(dir, 'done.md')
+  const lay = await layoutOf(projectPath, type)
+  const dir = lay.base
+  // DEV-127 目录式：删除目标 = current/<ID>.md 单文件；撤销记录写入 done/<ID>.md
+  const currentFile = lay.mode === 'dir' ? join(lay.currentDir, `${id}.md`) : lay.currentFile
+  const doneFile = lay.mode === 'dir' ? join(lay.doneDir, `${id}.md`) : lay.doneFile
   const day = date || todayLocal()
 
   let currentMd
@@ -1067,6 +1259,22 @@ export async function deleteTask(o) {
     const rst = await runGit(['restore', '--', ...restorePaths], projectPath)
     if (!rst.ok) return { ok: false, code: rst.code || 'git-error', stderr: rst.stderr }
     reverted.push(...restorable)
+  }
+
+  if (lay.mode === 'dir') {
+    // 目录式：移除 current/<ID>.md；撤销记录写 done/<ID>.md（任务文件形态）
+    await rm(currentFile, { force: true })
+    if (revert) {
+      await mkdir(lay.doneDir, { recursive: true })
+      const rev = renderTaskBlock({ id, title: `[已撤销] ${safeCell(title) || id}`, prio, status: 'done', date: day })
+        + `| 完成日期 | ${day} |\n`
+      await writeFile(doneFile, rev, 'utf8')
+    }
+    return {
+      ok: true,
+      task: { id, type, removed: true },
+      revert: revert ? { files: reverted.map((c) => ({ path: c.path, status: c.status })) } : undefined,
+    }
   }
 
   // 从 current.md 移除任务块
@@ -1145,7 +1353,9 @@ export async function taskEdit(o) {
     return returnTaskToTodo({ projectPath, type, id, date })
   }
   if (!['update', 'pause', 'resume'].includes(action)) return { ok: false, code: 'bad-action' }
-  const currentFile = join(projectPath, 'agent-workflow', 'tasks', type, 'current.md')
+  const lay = await layoutOf(projectPath, type)
+  let currentFile = lay.currentFile
+  if (lay.mode === 'dir') currentFile = join(lay.currentDir, `${id}.md`)
   let currentMd
   try {
     currentMd = await readFile(currentFile, 'utf8')
@@ -1186,9 +1396,30 @@ export async function returnTaskToTodo(o) {
   const { projectPath, type, id, date } = o
   if (!TASK_TYPES.includes(type)) return { ok: false, code: 'bad-type' }
   if (!ID_RE.test(String(id))) return { ok: false, code: 'bad-id' }
-  const dir = join(projectPath, 'agent-workflow', 'tasks', type)
-  const todoFile = join(dir, 'todo.md')
-  const currentFile = join(dir, 'current.md')
+  const lay = await layoutOf(projectPath, type)
+
+  // DEV-127 目录式：退回 = current/<ID>.md 状态 active→todo 后移回 todo/
+  if (lay.mode === 'dir') {
+    const src = join(lay.currentDir, `${id}.md`)
+    let md
+    try {
+      md = await readFile(src, 'utf8')
+    } catch {
+      return { ok: false, code: 'not-found' }
+    }
+    const map = parseBlockFieldMap(md)
+    const title = blockTitle(md) || id
+    const prio = map['优先级'] || 'P2'
+    const dateUsed = date || map['最近更新'] || todayLocal()
+    await mkdir(lay.todoDir, { recursive: true })
+    await writeFile(join(lay.todoDir, `${id}.md`), replaceStatusRow(md, 'todo'), 'utf8')
+    await rm(src, { force: true })
+    return { ok: true, task: { id, type, prio, desc: title, date: dateUsed } }
+  }
+
+  const dir = lay.base
+  const todoFile = lay.todoFile
+  const currentFile = lay.currentFile
 
   // a) 从 current.md 移除任务块并解析字段
   let currentMd
@@ -1253,7 +1484,11 @@ export async function readSource(o) {
   const { projectPath, type, file } = o
   if (!TASK_TYPES.includes(type)) return { ok: false, code: 'bad-type' }
   if (!SOURCE_FILES.includes(file)) return { ok: false, code: 'bad-file' }
-  const absPath = join(projectPath, 'agent-workflow', 'tasks', type, `${file}.md`)
+  const lay = await layoutOf(projectPath, type)
+  // DEV-127 目录式：桶的"源文件"视图 = 目录 README 检索索引（由 awf status 生成）
+  const absPath = lay.mode === 'dir'
+    ? join(lay[`${file}Dir`], 'README.md')
+    : join(projectPath, 'agent-workflow', 'tasks', type, `${file}.md`)
   let content
   try {
     content = await readFile(absPath, 'utf8')
@@ -1277,6 +1512,11 @@ export async function writeSource(o) {
   if (!TASK_TYPES.includes(type)) return { ok: false, code: 'bad-type' }
   if (!SOURCE_FILES.includes(file)) return { ok: false, code: 'bad-file' }
   if (typeof content !== 'string') return { ok: false, code: 'bad-content' }
+  const lay = await layoutOf(projectPath, type)
+  if (lay.mode === 'dir') {
+    // 目录式：README 检索索引由 awf status 生成（请勿手改），禁止直写；请用任务级编辑接口
+    return { ok: false, code: 'readonly' }
+  }
   const absPath = join(projectPath, 'agent-workflow', 'tasks', type, `${file}.md`)
   // 只允许写回已存在的账本文件，不创建新文件（防止误写路径）
   try {

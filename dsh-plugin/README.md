@@ -104,6 +104,13 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.3.0（DEV-127）**：看板账本目录式适配（tasks/<type>/{todo,current,done}/<ID>.md + README 检索索引）
+  - 读路径 `ledgerOf` 目录式优先：current 桶任务文件 → 逐个块；todo 桶文件 → 验收 checkbox 进度 + ID/优先级/标题/登记日期；done 桶文件 → 块式归档（`parseDoneRows` 归档白名单加入 `done`——目录式归档任务文件的状态字段）；status.md 新鲜度按目录文件集 mtime 比较；旧形态大文件（todo.md/current.md/done.md）兼容回退，过渡期不坏
+  - 写路径目录式：`startTask` 认领= todo/<ID>.md 状态改 active 后移入 current/；`returnTaskToTodo` 反向移回；`todoEdit` add/update/delete = 建/改/删任务文件；`deleteTask` 删除 = 移除 current/<ID>.md，撤销记录写 done/<ID>.md（任务文件形态）；`taskEdit` 编辑 current/<ID>.md
+  - `readSource` 目录式返回桶的 README 检索索引；`writeSource` 目录式拒绝直写（索引由 `awf status` 生成，防手改）
+  - `initSkeleton` 生成目录式三桶 README 骨架（与 awf render_ledger_readmes 头部一致）；status.md 数据来源文案更新
+  - 测试 31/31 全绿（新增 5 个 DEV-127 目录式用例：ledgerOf / startTask / todoEdit / readSource / skeletonFiles）
+
 - **0.2.5（DEBUG-001）**：修复 md 表格渲染重叠（长摘要列溢出覆盖相邻列）
   - 渲染层（`lib/client.js` `mdToHtml`）：表格 td 此前仅第 3 列（任务描述）允许换行，其余列一律 `white-space:nowrap`——`实现方案摘要` 列的超长文本（无空格长串：包路径 / commit hash / JSON 片段）在 `table-layout:fixed` 下不换行直接绘出单元格边界，横向覆盖 `完成日期`/`状态` 列、纵向压贴下一行（6 列归档表复现）
   - 修复：全部 td 统一 `word-break:break-word;overflow-wrap:anywhere`（去除 nowrap）；colgroup 列宽按比例归一化合计 100%（旧值 18+12+52+18+16+16=132% 溢出）；4 列 docs 型表格宽度不变（回归）
