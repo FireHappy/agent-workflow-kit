@@ -732,3 +732,58 @@ GUI 验证：任务行点击弹源文件面板 → 编辑保存 → 账本刷新
 无。各项目已生成的旧 project.yaml（含空 role: 行）由方案 B 自动兼容，无需改动。
 | 完成日期 | 2026-11-04 |
 | DEV-119 | P1 | 修复 role 名牌不生效：模板移除空 role 键（方案 A）+ yaml_get 跳过空值键行（方案 B）；旧模板项目实测后填 role 立即带出；三 locale smoke 144/0 | 2026-11-04 |
+
+
+## [DEV-120] 全局升级至 DEV-119 + 同步写入各项目 role（worker 特长名牌）
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P1 |
+| 状态 | archived |
+| Owner | 用户派发（lead 执行） |
+| 协作模式 | single |
+| 来源任务 | 用户直接触发 |
+| 工作流 | dev |
+| 修改范围 | 7 个目标项目 agent-workflow/ 框架文件（awf upgrade 覆盖生成物）、各目标项目 project.yaml（role 行）、AGENTS.md 受控区块（bootstrap 重建）；不碰业务代码/tasks**/memory**/tools**/全局索引结构 |
+| 依赖 | DEV-116 / DEV-117 / DEV-118 / DEV-119 |
+| 最近更新 | 2026-11-04 |
+
+### 目标与结果
+把 kit 当前版本（含 DEV-115 激活式路由 / DEV-117 locale 修复+门禁 / DEV-118 worker 名牌 / DEV-119 role 修复）通过 awf upgrade 同步到 7 个待升级项目，并为每个项目写入 role（worker 特长名牌），使全网 worker 信息（id/aliases/path/role）完整、可被 router 检索。
+
+### 逐项目明细
+| 项目 | 升级 | role 写入 | commit | check |
+|---|---|---|---|---|
+| 周报 | 完成 | 擅长收集 DSH 会话历史与 git 提交，归纳生成日报/周报 | f5e7328 | rc=0 全过 |
+| uxrsample | 跳过（已跟踪改动 RKImage.db 非收尾） | 擅长 Rokid UXR SDK 的 Unity 示例开发与真机联调测试 | 5749d4f2 | rc=0 全过 |
+| OpenXR-UXR | 跳过（DEBUG-001 verify 在途） | 擅长 OpenXR UXR 代码库（runtime/loader/Unity 插件/SDK）开发排查 | be55965 | rc=0 全过 |
+| pluto | 升级落地（框架被项目 .gitignore 排除，无 commit 材料） | 擅长 Rokid AR 系统镜像定制：预置 APK/native 库、分区产物、工厂固件 | N/A | rc=0 全过 |
+| dsh-settings | 跳过（DEV-013 active + DEV-012 verify 在途） | 擅长 DSH 设置同步：profiles/skills 从 ~/.dsh 同步管理 | 82bb806 | rc=0 全过 |
+| FinderPathBar | 完成 | 擅长 macOS Swift 开发：访达/文件对话框路径栏工具 | f68358d | rc=0 全过 |
+| naboo | 跳过（已跟踪改动 + 旧框架无 bin/） | 擅长 Naboo 数字人 Avatar 工程：Unity 场景/动画、Android 集成、SDK 升级 | N/A（agent-workflow 未纳入 git） | 框架不完整无 check |
+
+### 实现方案
+- 预检门禁：git status 已跟踪改动 / current.md active 任务 → 跳过升级并记录原因，不强推（遵循 G3）。
+- 升级项目：<kit>/bin/awf upgrade → 写 role（无 role 行则追加）→ 项目内 bootstrap（project.yaml 变更须刷新 digest）→ check_workflow.sh 全过 → 本地 commit（信息含 DEV-120，禁 push）。
+- 跳过项目：仍写 role 行 + bootstrap + 精确 add project.yaml/AGENTS.md 本地 commit；naboo 因 agent-workflow 未纳入 git 无 commit 材料。
+- role 写入幂等：已有 role 行则跳过；写入均为追加一行（不触碰其他键）。
+
+### 验收标准
+- [x] 7 个目标项目逐个处理（3 升级完成 + 4 跳过并注明原因；role 全部写入）
+- [x] 已升级项目 check_workflow.sh 全过（周报/FinderPathBar/pluto）；awf find <id> 全部带出 role（9 项目 7 个有特长）
+- [x] 成功处理项目本地 commit（信息含 DEV-120，未 push）；pluto/naboo 无 commit 材料已注明
+- [x] awf projects 角色列显示各项目特长（全局索引可见，role 实时读 yaml）
+- [x] 无业务代码/账本历史/memory 被破坏（project.yaml 仅新增 role 行；业务 dirty 文件原样保留）
+- [x] kit 账本 DEV-120 已归档，kit check 全过
+- [x] 只本地 commit，未 push
+
+### 验证
+- 逐项目 check：周报/FinderPathBar/pluto/uxrsample/OpenXR-UXR/dsh-settings 均 rc=0 全部通过；naboo 无 check_workflow.sh（旧框架）
+- <kit>/bin/awf find 7 个 id 全部带出对应 role；awf projects 角色列完整
+- git：各项目 commit 精确到 project.yaml/AGENTS.md/框架文件；业务 dirty（uxrsample RKImage.db、naboo Unity 资产）原样未动
+- kit：awf status 刷新；check_workflow.sh 全过
+
+### 下一步
+无。dsh-im / agent-workflow-kit 的 role 名牌由各自会话自行补写（不在本次范围）。
+| 完成日期 | 2026-11-04 |
+| DEV-120 | P1 | 全局升级至 DEV-119 + 同步 role 名牌：周报/FinderPathBar 升级提交，pluto 升级落地（gitignore）；4 项目按规则跳过但 role 全写入（2 提交，pluto/naboo 无 commit 材料）；find/projects 带出全部角色 | 2026-11-04 |
