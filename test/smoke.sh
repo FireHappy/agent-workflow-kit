@@ -2448,5 +2448,91 @@ fi
 rm -f "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
 ( cd "$PROJ" && ./agent-workflow/bin/awf status >/dev/null )
 
+# 29. DEV-138：派发三规则（默认异步 / 派发即子代理不建队 / 票据瘦身+分析归 worker）
+# 29.1 docs/dispatch.md 呈现三条规则
+if grep -q '派发三规则' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '主会话不被钉住' "$KIT_DIR/docs/dispatch.md" \
+   && grep -qE '显式(加 )?`--wait`' "$KIT_DIR/docs/dispatch.md"; then
+  ok "DEV-138 docs/dispatch.md 写清默认异步（主会话不被钉住，--wait 为显式开关）"
+else
+  bad "DEV-138 docs/dispatch.md 缺默认异步规则"
+fi
+if grep -q '不启用智能体团队承载派发' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '启动一个子代理会话' "$KIT_DIR/docs/dispatch.md"; then
+  ok "DEV-138 docs/dispatch.md 写清派发即启动子代理（不建团队承载）"
+else
+  bad "DEV-138 docs/dispatch.md 缺派发即子代理规则"
+fi
+if grep -q '票据瘦身' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '用户意图 / 硬约束 / 验收标准 / 路由裁决' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '前置分析' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '返回 router' "$KIT_DIR/docs/dispatch.md"; then
+  ok "DEV-138 docs/dispatch.md 写清票据瘦身 + 分析归 worker（有问题返回决策）"
+else
+  bad "DEV-138 docs/dispatch.md 缺票据瘦身/分析归 worker 表述"
+fi
+# 29.2 模板与工作流规范同步三规则
+if grep -q '派发三规则' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '默认异步' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '不启用智能体团队承载派发' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '票据瘦身' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '返回 router' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
+  ok "DEV-138 模板 AGENTS.md.tmpl 路由段含派发三规则"
+else
+  bad "DEV-138 模板 AGENTS.md.tmpl 缺派发三规则"
+fi
+if grep -q '派发三规则（DEV-138）' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '分析归属' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '前置侦察' "$KIT_DIR/templates/workflows/cross-project.md"; then
+  ok "DEV-138 templates/workflows/cross-project.md 含派发三规则与票据瘦身清单"
+else
+  bad "DEV-138 templates/workflows/cross-project.md 缺派发三规则"
+fi
+if diff -q "$KIT_DIR/templates/workflows/cross-project.md" \
+          "$KIT_DIR/agent-workflow/workflows/cross-project.md" >/dev/null; then
+  ok "DEV-138 两份 cross-project 工作流副本一致（无漂移）"
+else
+  bad "DEV-138 agent-workflow/workflows/cross-project.md 与模板漂移"
+fi
+if grep -q '派发协议三规则' "$KIT_DIR/docs/design.md" \
+   && grep -q '不启用智能体团队承载派发' "$KIT_DIR/docs/design.md"; then
+  ok "DEV-138 docs/design.md 含派发协议三规则小节"
+else
+  bad "DEV-138 docs/design.md 缺派发协议三规则"
+fi
+if grep -q '派发：跨项目（cross-project，不建队承载）' "$KIT_DIR/docs/team-flow.md" \
+   && grep -q '启动一个子代理会话' "$KIT_DIR/docs/team-flow.md"; then
+  ok "DEV-138 docs/team-flow.md 派发章节改为不建队承载"
+else
+  bad "DEV-138 docs/team-flow.md 未改为不建队承载"
+fi
+if grep -q '不启用智能体团队承载派发' "$KIT_DIR/AGENTS.md" \
+   && ! grep -q '跨项目派发默认建队' "$KIT_DIR/AGENTS.md"; then
+  ok "DEV-138 根 AGENTS.md 协作约定同步三规则（无默认建队残留）"
+else
+  bad "DEV-138 根 AGENTS.md 协作约定未同步"
+fi
+# 29.3 旧语义清除：不再有「团队派发模式（默认」「--wait 是团队模式默认」「每个目标一个 dispatcher」
+stale_ok=1
+for f in "$KIT_DIR/docs/dispatch.md" "$KIT_DIR/templates/AGENTS.md.tmpl" \
+         "$KIT_DIR/templates/workflows/cross-project.md" "$KIT_DIR/agent-workflow/workflows/cross-project.md"; do
+  if grep -q '团队派发模式（默认\|每个目标一个 dispatcher\|--wait 是团队模式' "$f"; then
+    stale_ok=0
+    bad "DEV-138 旧派发语义残留：$f"
+  fi
+done
+if [ "$stale_ok" -eq 1 ]; then
+  ok "DEV-138 派发文档/模板无旧团队派发语义残留"
+fi
+# 29.4 派发技能（skills/cross-project-dispatch）同步三规则
+if grep -q '派发三规则' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q '不启用智能体团队承载派发' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q '票据瘦身' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && ! grep -q '派发即建队\|captain 最小操作序列\|dispatcher 最小操作序列' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+  ok "DEV-138 派发技能 SKILL.md 同步三规则（无 captain/dispatcher 成员层）"
+else
+  bad "DEV-138 派发技能 SKILL.md 未同步三规则"
+fi
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
