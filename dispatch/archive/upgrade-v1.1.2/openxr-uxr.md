@@ -1,0 +1,21 @@
+# 工作流架构升级 v1.1.2
+
+- 目标项目：openxr-uxr（/Users/chenlin/projects/OpenXR-UXR）
+- 任务编号：（由目标按自身账本体系自排，如 DEV-xxx；禁止 UP-xxx 类编号）
+- 来源：用户
+- 路由裁决：目标=openxr-uxr；通道=目标工作区会话；理由=把 kit v1.1.2（版本锚点可配置 version_file / 派发契约修复）发布升级到全部登记项目
+
+## 任务（全程在目标项目自己的工作区会话执行，禁止改其他项目）
+
+1. 执行：/Users/chenlin/Documents/GitHub/agent-workflow-kit/bin/awf upgrade "/Users/chenlin/projects/OpenXR-UXR"（框架文件同步为 kit v1.1.2；版本锚点按 project.yaml 的 version_file 写入 1.1.2，默认根 VERSION）
+2. 校验：cd "/Users/chenlin/projects/OpenXR-UXR" && ./agent-workflow/check_workflow.sh（必须 0 FAIL）
+3. 确认锚点：cat "/Users/chenlin/projects/OpenXR-UXR/VERSION"（应为 1.1.2；若项目配置了自定义 version_file 则以该文件为准）
+4. 本地 commit（禁止 push）：commit 消息建议「chore(workflow): 框架升级至 v1.1.2」，可附目标项目自己的合法任务编号（如 DEV-xxx），**禁止 UP-xxx 类编号**
+5. 回报：commit hash、check 结果、锚点值
+
+## 验收
+
+- [ ] 版本锚点 = 1.1.2
+- [ ] check_workflow.sh 0 FAIL
+- [ ] agent-workflow/ 框架 = kit v1.1.2（含 version_file 可配置、destination 派发契约修复）
+- [ ] 本地 commit 落盘且消息不含自造任务编号（禁止 push）
