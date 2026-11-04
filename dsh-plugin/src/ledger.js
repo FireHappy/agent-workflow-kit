@@ -27,6 +27,12 @@ function secondField(line) {
   return parts.length >= 3 ? trim(parts[1]) : ''
 }
 
+/** 任务 ID 的数值后缀（DEV-134 → 134；无后缀 → 0）。顺序发号的任务系统里数值越大 ≈ 越晚登记/完成。 */
+function numId(id) {
+  const m = /^[A-Z]+-([0-9]+)$/.exec(String(id || ''))
+  return m ? parseInt(m[1], 10) : 0
+}
+
 // ---------------------------------------------------------------------------
 // 全局项目索引（~/.agents/AGENTS.md 的受控区块表格）
 // ---------------------------------------------------------------------------
@@ -387,9 +393,12 @@ export async function ledgerOf(projectPath) {
     todo,
     todoRows,
     // DEV-102：recent 全局按日期倒序（跨类型混合、最新在前），再取前 8——修复 DEV-101 遗留
-    // （旧逻辑 dev→debug→docs 各取 8 再拼接 slice(0,8)，dev 行多时独占全部槽位）；
-    // 同日期依赖 V8 稳定排序，保持各类型内部顺序（dev→debug→docs）。
-    recent: recent.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8),
+    // （旧逻辑 dev→debug→docs 各取 8 再拼接 slice(0,8)，dev 行多时独占全部槽位）。
+    // DEBUG-002：同日增补「任务 ID 数值倒序」次键——目录式下同日期记录按 readdir（字母序）
+    // 收集，仅有日期键时退化为字母序（DEV-115…122 排前、最新 DEV-129…134 被切掉）；
+    // legacy 下同日行序为「表顶插入（最新在前）」与解析层行号序相反。顺序发号的项目里
+    // ID 数值递增 ≈ 完成先后，作为同日稳定次序（跨类型同日保留 dev→debug→docs 收集序）。
+    recent: recent.sort((a, b) => b.date.localeCompare(a.date) || numId(b.id) - numId(a.id)).slice(0, 8),
   }
 }
 

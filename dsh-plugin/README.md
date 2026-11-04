@@ -104,6 +104,12 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.3.3（DEBUG-002）**：最近完成同日排序修正（最新完成任务排第一）
+  - 解析层（`src/ledger.js` `ledgerOf`）：recent 排序由「仅完成日期倒序」改为「**日期倒序 + 任务 ID 数值倒序**」（DEV-134 → 134）。
+  - 背景：目录式账本（DEV-127）同日记录按 readdir **字母序**收集，仅有日期键时退化为字母序——kit 同日批次 DEV-115…122 排前、最新完成的 DEV-129…134 被 `slice(0,8)` 切掉，面板「最近完成」看起来全是旧任务；legacy 表格行顶部插入（最新在最小行号），解析层行号序与之相反，同日组内顺序反转。
+  - 顺序发号的任务系统里 ID 数值递增 ≈ 完成先后，作为同日稳定次键（跨类型同日保留 dev→debug→docs 收集序）；`recent` 输出结构与数量不变，前端无需改动。
+  - 新增 2 组单测（目录式同日 ID 倒序、legacy 同日 ID 倒序）；真实数据三项目验证（kit DEV-134 打头、uxrsample DEV-074 打头、rokid_system_components DEV-029 打头）；`cd dsh-plugin && node --test` 35/35 全绿
+
 - **0.3.2（DEV-133）**：版本徽章显示具体发布版（v1.0.0）+ 版本判定/锚点修正 + 拷贝按钮与徽章对比度加强
   - 版本显示：项目卡版本徽章优先读「项目根 VERSION 文件」（对外发布版，如 v1.0.0），不再只显示 awf 框架代次整数（v1）；缺 VERSION 文件回退 v{代次}（旧行为兼容）
   - 版本判定：`versionStatus` 优先按「项目根 VERSION vs kit VERSION」semver 比对（与显示一致），无 VERSION 回退 AWF 代次、再回退 scaffold_version；`awf upgrade` 新增版本锚点——把 kit 的 VERSION 文件同步到目标项目根（无 VERSION 或落后时更新）

@@ -551,3 +551,63 @@ test('ledgerOf recent 全局按日期倒序、跨类型混合（修复 dev 独�
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// ---- DEBUG-002：recent 同日次键改为「任务 ID 数值倒序」（目录式不再字母序/legacy 不再行序反转） ----
+
+test('DEBUG-002 目录式 recent：同日按任务 ID 数值倒序（字母序不再污染）', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { ledgerOf } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-dbg2-'))
+  try {
+    // 目录式三桶 + done 桶 6 个同日归档、2 个跨日（日期倒序在前）
+    const mkDirFile = async (type, bucket, rel, content) => {
+      const dir = join(root, 'agent-workflow', 'tasks', type, bucket)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, rel), content, 'utf8')
+    }
+    for (const bucket of ['todo', 'current', 'done']) await mkDirFile('dev', bucket, 'README.md', `# ${bucket} 索引\n\n（空）\n`)
+    const block = (id, date) => `## [${id}] 任务 ${id}\n\n| 字段 | 值 |\n|---|---|\n| 状态 | done |\n| 完成日期 | ${date} |\n`
+    // 同日 2026-11-04 六个：字母序 115/116/…/134 → 期望按数值倒序 134/133/132/131/130/129
+    for (const id of ['DEV-115', 'DEV-116', 'DEV-129', 'DEV-130', 'DEV-133', 'DEV-134']) {
+      await mkDirFile('dev', 'done', id + '.md', block(id, '2026-11-04'))
+    }
+    await mkDirFile('dev', 'done', 'DEV-113.md', block('DEV-113', '2026-11-03')) // 更早日期排最后
+    const ledger = await ledgerOf(root)
+    assert.deepEqual(ledger.recent.map((r) => r.id), ['DEV-134', 'DEV-133', 'DEV-130', 'DEV-129', 'DEV-116', 'DEV-115', 'DEV-113'])
+    // 最新完成的 DEV-134 必须排第一（用户观测：字母序下被 DEV-115 顶掉）
+    assert.equal(ledger.recent[0].id, 'DEV-134')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEBUG-002 legacy recent：同日按任务 ID 数值倒序（表顶=最新，不再反转）', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { ledgerOf } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-dbg2l-'))
+  try {
+    const mk = async (type, doneMd) => {
+      const dir = join(root, 'agent-workflow', 'tasks', type)
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'done.md'), doneMd + '\n')
+    }
+    // legacy 归档表：顶部插入最新（DEV-029 行号最小 = 最新完成）
+    await mk('dev', [
+      '| DEV-029 | P1 | 当日最新 | 2026-11-04 |',
+      '| DEV-028 | P1 | 当日中间 | 2026-11-04 |',
+      '| DEV-026 | P1 | 当日最早 | 2026-11-04 |',
+      '| DEV-030 | P1 | 前一日 | 2026-10-30 |',
+    ].join('\n'))
+    await mk('debug', '| DEBUG-001 | P0 | 调试 | 2026-11-05 |')
+    const ledger = await ledgerOf(root)
+    // 跨类型日期倒序：DEBUG-001(11-05) 最先；同日 dev 三条约束为 ID 数值倒序 029/028/026
+    assert.deepEqual(ledger.recent.map((r) => r.id), ['DEBUG-001', 'DEV-029', 'DEV-028', 'DEV-026', 'DEV-030'])
+    assert.equal(ledger.recent[1].id, 'DEV-029') // 最新完成的当日任务排第二（跨类型之后第一个）
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
