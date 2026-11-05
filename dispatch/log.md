@@ -1008,3 +1008,133 @@
 - 目标 HEAD：c8273c9 chore(workflow): archive DEV-053 — 打包 openxr-runtime inProcessStation3Release APK（链路测试，DISPATCH-152）
 - 回到会话：在 GUI 的 `openxr-uxr` 工作区打开「[awf] [agent-workflow-kit] [打包 openxr-runtime链路测试]」（会话 session-c3b43b23-9c50-45b1-8ed4-655187866ac5）继续提细节。
 
+## 2026-11-05 11:57 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · 提交 agent-workflow 框架升级改动openxr-uxr（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/uxr-commit-upgrade.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-c3b43b23-9c50-45b1-8ed4-655187866ac5（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动openxr-uxr]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：93673d1 chore(workflow): archive DEV-054 — 打包 openxr-runtime inProcessStation3Release APK（链路测试重复派发）
+- 回到会话：在 GUI 的 `openxr-uxr` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动openxr-uxr]」（会话 session-c3b43b23-9c50-45b1-8ed4-655187866ac5）继续提细节。
+
+## 2026-11-05 11:58 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · 打包 openxr-runtime链路测试（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/openxr-runtime.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-c3b43b23-9c50-45b1-8ed4-655187866ac5（[awf] [agent-workflow-kit] [打包 openxr-runtime链路测试]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：9a949ae chore(workflow): 框架升级（kit 最新：回报投递头/回报条款）（DEV-055）
+- 回到会话：在 GUI 的 `openxr-uxr` 工作区打开「[awf] [agent-workflow-kit] [打包 openxr-runtime链路测试]」（会话 session-c3b43b23-9c50-45b1-8ed4-655187866ac5）继续提细节。
+
+## 2026-11-05 12:01 → 周报
+
+- 目标：/Users/chenlin/Documents/周报
+- 任务：周报 · 提交 agent-workflow 框架升级改动weekly-report（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-weekly-report.md）
+- 模块：通用
+- 工作区：weekly report（cdfef88e-807f-4ef2-8556-de9cca1507e7）
+- 会话：session-255d9713-0e22-4aa5-9f47-ba8f91f437bd（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动weekly-report]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：1e98e7f chore(workflow): 框架升级至 v1.1.3
+- 回到会话：在 GUI 的 `weekly report` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动weekly-report]」（会话 session-255d9713-0e22-4aa5-9f47-ba8f91f437bd）继续提细节。
+
+## 2026-11-05 12:01 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · 提交 agent-workflow 框架升级改动finderpathbar（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-finderpathbar.md）
+- 模块：通用
+- 工作区：finderpathbar（5a151890-5033-4a71-9784-5735e722c22e）
+- 会话：session-c22e5456-9f4a-42f5-bc81-8a0a050b3c0d（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动finderpathbar]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：fdd5f3b chore(workflow): 框架升级至 v1.1.3（DEV-008）
+- 回到会话：在 GUI 的 `finderpathbar` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动finderpathbar]」（会话 session-c22e5456-9f4a-42f5-bc81-8a0a050b3c0d）继续提细节。
+
+## 2026-11-05 12:01 → im
+
+- 目标：/Users/chenlin/.dsh/im
+- 任务：im · 提交 agent-workflow 框架升级改动dsh-im（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-dsh-im.md）
+- 模块：通用
+- 工作区：im（31ca7718-0b39-4f07-9f6a-ec6ebd100193）
+- 会话：session-bdc5ddc5-87b9-4e1e-aef6-e7146010e4b5（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动dsh-im]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：d8af9fb docs(dispatch): DISPATCH-152 续发指正（DEV-159 占用冲突 → 改用 DEV-160，回报措辞对齐 DEV-158）
+- 回到会话：在 GUI 的 `im` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动dsh-im]」（会话 session-bdc5ddc5-87b9-4e1e-aef6-e7146010e4b5）继续提细节。
+
+## 2026-11-05 12:01 → pluto
+
+- 目标：/Users/chenlin/projects/Rokid-System/pluto
+- 任务：pluto · 提交 agent-workflow 框架升级改动pluto（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-pluto.md）
+- 模块：通用
+- 工作区：pluto（dc20d453-a176-4406-834f-0d5d04269864）
+- 会话：session-d80df268-d8e1-46cf-9462-725aa433df96（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动pluto]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：0eae864 chore(workflow): 框架升级至 v1.1.3（DEV-102）
+- 回到会话：在 GUI 的 `pluto` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动pluto]」（会话 session-d80df268-d8e1-46cf-9462-725aa433df96）继续提细节。
+
+## 2026-11-05 12:01 → uxrsample
+
+- 目标：/Users/chenlin/projects/UnityProjects/uxrsample
+- 任务：uxrsample · 提交 agent-workflow 框架升级改动uxrsample（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-uxrsample.md）
+- 模块：通用
+- 工作区：uxrsample（646d3ae9-385f-4bcf-8592-60ad4cdbddad）
+- 会话：session-8a4195bf-9484-4ff2-a385-4c466576d568（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动uxrsample]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：01925981 chore(workflow): 框架升级至 v1.1.3 DEV-079
+- 回到会话：在 GUI 的 `uxrsample` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动uxrsample]」（会话 session-8a4195bf-9484-4ff2-a385-4c466576d568）继续提细节。
+
+## 2026-11-05 12:01 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · 提交 agent-workflow 框架升级改动dsh-settings（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-dsh-settings.md）
+- 模块：通用
+- 工作区：dsh-settings（d6ddf210-7583-4013-bdad-3d3f07897034）
+- 会话：session-32ffddc2-fcc7-4287-876d-5fd07519ca9c（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动dsh-settings]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：f8444b3 chore: 清理 daily-sync 空差异输出噪音（无差异时不打印空清单）
+- 回到会话：在 GUI 的 `dsh-settings` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动dsh-settings]」（会话 session-32ffddc2-fcc7-4287-876d-5fd07519ca9c）继续提细节。
+
+## 2026-11-05 12:01 → naboo
+
+- 目标：/Users/chenlin/projects/UnityProjects/naboo
+- 任务：naboo · 提交 agent-workflow 框架升级改动naboo（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-naboo.md）
+- 模块：通用
+- 工作区：naboo（1c1f6c3a-523c-454c-8257-243e520735c4）
+- 会话：session-d0a4c082-c0ec-434a-94ab-166190963665（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动naboo]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：4a13f9f28 chore(workflow): 框架升级至 v1.1.3 DEV-102
+- 回到会话：在 GUI 的 `naboo` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动naboo]」（会话 session-d0a4c082-c0ec-434a-94ab-166190963665）继续提细节。
+
+## 2026-11-05 12:01 → rokid_system_components
+
+- 目标：/Users/chenlin/Documents/GitHub/rokid_system_components
+- 任务：rokid_system_components · 提交 agent-workflow 框架升级改动rokid-system-components（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/pack-test/commit-upgrade-rokid-system-components.md）
+- 模块：通用
+- 工作区：rokid_system_components（3fdbbe7c-90af-425e-9916-e3c42e6494a0）
+- 会话：session-89b66bdb-4133-4a2a-82f9-16b64f9c217f（[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动rokid-system-com]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：复用
+- 状态：已发送，未等待回合
+- 目标 HEAD：ceb52159 Merge branch 'main' of gitlab.rokid-inc.com:pluto/sxr2/rokid_system_components
+- 回到会话：在 GUI 的 `rokid_system_components` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动rokid-system-com]」（会话 session-89b66bdb-4133-4a2a-82f9-16b64f9c217f）继续提细节。
+
