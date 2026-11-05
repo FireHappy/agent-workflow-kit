@@ -2987,7 +2987,7 @@ fi
 # 30.13b DISPATCH-146：--report --dry-run 渲染回报消息（不依赖 GUI，本地可复现；含标记/来源/派发单）
 if "$KIT_DIR/bin/awf-dispatch" --report "必报点 3 里程碑完成：DEV-156 已实现回报通道" \
      --to session-demo-0001 --from session-demo-0002 --ticket DISPATCH-146 --dry-run 2>&1 \
-   | grep -q '【回报投递】'; then
+   | grep -q '【回执请求】'; then
   ok "DISPATCH-146 --report --dry-run 渲染回报消息（不联网）"
 else
   bad "DISPATCH-146 --report --dry-run 未渲染回报消息"
@@ -3069,7 +3069,7 @@ msg = module.render_report_message(
     target_label=module.session_display_label(api, "s-2"))
 assert "- 来源：OpenXR-UXR「[awf] [agent-workflow-kit] [打包测试]」" in msg, msg
 assert "- 派发方：naked" in msg, msg
-assert "- 派发单：D-1" in msg and "【回报投递】" in msg and "正文" in msg
+assert "- 派发单：D-1" in msg and "【回执请求】" in msg and "正文" in msg
 old = module.render_report_message("s-1", "s-2", "D-1", "正文")
 assert "- 来源：s-1" in old and "- 派发方：s-2" in old, old
 PY
