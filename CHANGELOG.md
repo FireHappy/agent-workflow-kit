@@ -1,3 +1,18 @@
+## [1.1.4] - 2026-11-05
+
+### Added
+- **回报投递头「项目名＋会话名」（DEV-165，DISPATCH-146 升级）**：`awf-dispatch --report` 投递头字段「来源会话/派发方会话」→「来源/派发方」，值由 `session_display_label` 解析为「项目名（cwd basename）＋会话标题」（查不到/离线回退原 ID）——剔除裸 UUID，用户一眼可读；smoke 新增 §30.15
+- **转达用户回执三态模板（DEV-160/162/163，DISPATCH-152 定稿）**：派发方收回报核验后转达用户按固定回执（✅ 完成 / ⏳ 阻塞进行中 / ❌ 失败·核验不过），字段含发送者/执行内容/改动范围/验证/问题·风险/我的处理（「无需你操作」收尾）；完整可照抄样例与三态用法见 docs/dispatch.md「转达用户回执格式」
+- **回报正文排版（DEV-168，DISPATCH-153）**：回报正文用 markdown 结构化骨架（`## ✅ 完成回报（编号 · 任务名）` + 状态/执行内容/改动范围/commit/验证/遗留·风险 列表），禁止 ①②③④ 整段长文本；docs/cross-project/SKILL/AGENTS 模板同步（digest a971603d）
+- **框架同步升级 9 项目（DEV-166/167）**：openxr-uxr 试点（含打包回归 DEV-056 通过）→ 全量 8 项目 upgrade + 目标本地提交（weekly-report de58bd6 / naboo 14bad768a / finderpathbar f260788 / uxrsample a7a36b83 / dsh-settings 303ea09 / dsh-im c4d22ee / pluto e5aec99 / rokid-system-components 5f6df373，check 全 0 且禁 push 遵守）；rokid .gitignore 增补遗留待用户决策
+
+### Changed
+- 无破坏性变更；DISPATCH-153 新增回报格式约束（向后兼容：旧格式回报仍可读）
+
+### Fixed
+- 回报投递头裸会话 UUID 可读性问题（DEV-165）
+- 回报正文整段长文本可读性问题（DEV-168）
+
 ## [1.1.3] - 2026-11-05
 
 ### Added
