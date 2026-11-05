@@ -32,7 +32,7 @@
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流
-  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --sender lead
+  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --sender agent-workflow-kit
   ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx
   ./agent-workflow/bin/awf-dispatch demo02 task.md --headless
   ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
@@ -247,7 +247,7 @@ def awf_session_title(sender: str, task_name: str = "",
                       limit: int = SESSION_TITLE_LIMIT) -> str:
     """会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者标识 + 当前任务摘要；
     任务名随派发动态更新；同项目一个常驻会话（复用/排队），不因任务增多新建会话。"""
-    sender_clean = clean_title(sender, limit=20) if (sender or "").strip() else "lead"
+    sender_clean = clean_title(sender, limit=20) if (sender or "").strip() else clean_title(os.path.basename(os.getcwd().rstrip("/")) or "project", limit=20)
     task_clean = clean_title(task_name, limit=limit) if (task_name or "").strip() else "未命名任务"
     return (f"{AWF_TITLE_PREFIX} [{sender_clean}] "
             f"[{task_clean}]")
@@ -272,7 +272,7 @@ def resolve_sender(text: str, override: str = "") -> str:
     if ticket:
         return ticket
     cwd = os.getcwd().rstrip("/")
-    return os.path.basename(cwd) or "lead"
+    return os.path.basename(cwd) or "project"
 
 
 def task_display(task: Path, text: str, limit: int = SESSION_TITLE_LIMIT) -> str:
