@@ -2936,6 +2936,26 @@ if grep -q '子代理\|主代理' "$KIT_DIR/bin/awf-dispatch" 2>/dev/null; then
 else
   ok "DISPATCH-145 注入文本沿用「派发方/目标会话」表述，未引入子代理/主代理新词"
 fi
+# 30.12 DISPATCH-145 追加：转派链卡点必报（回报链跟随派发链 / 转派不断链 / 卡点必报 / 静默=违规）
+if grep -q '转派链卡点必报' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '适用于链条每一跳' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '转派不断链' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '已转派 C 处理，C 回报 X' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '卡点类型 + 原因 + 已尝试 + 解除条件 + 预计' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '≤5 分钟' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '静默等待 = 违规' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '处分记档' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q 'CONVENTION.md 决策汇聚' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '转派链卡点必报' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '静默等待 = 违规' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '转派链卡点必报' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q '转派链卡点必报' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q '转派链卡点必报' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q '转派链卡点必报' "$KIT_DIR/AGENTS.md"; then
+  ok "DISPATCH-145 转派链卡点必报（每一跳必报点/转派不断链/卡点必报/静默=违规）注入文本与文档/模板同步"
+else
+  bad "DISPATCH-145 转派链卡点必报条款缺失或未同步"
+fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '用户在目标会话内直接回复' "$KIT_DIR/docs/dispatch.md" \
