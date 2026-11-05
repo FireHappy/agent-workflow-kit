@@ -1138,3 +1138,21 @@
 - 目标 HEAD：ceb52159 Merge branch 'main' of gitlab.rokid-inc.com:pluto/sxr2/rokid_system_components
 - 回到会话：在 GUI 的 `rokid_system_components` 工作区打开「[awf] [agent-workflow-kit] [提交 agent-workflow 框架升级改动rokid-system-com]」（会话 session-89b66bdb-4133-4a2a-82f9-16b64f9c217f）继续提细节。
 
+## 2026-11-05 20:15 → OpenXR-UXR
+
+- 目标：/Users/chenlin/projects/OpenXR-UXR
+- 任务：OpenXR-UXR · runtime APK 安装测试派发链路测试（/private/tmp/runtime-apk-install-task.md）
+- 模块：通用
+- 工作区：openxr-uxr（11c39656-f700-47fc-b186-d002012407bd）
+- 会话：session-10dc9439-e527-410e-9708-be50bf3abeb9（[awf] [agent-workflow-kit] [runtime APK 安装测试派发链路测试]）
+- 回报通道：派发方会话 session-a326d6a9-4802-421d-a9cb-e0511955cb46（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：45d6ba6 DEV-057 archive: SpatialMesh two-stage room save (runtime + SDK commits 665b77e13 / 26870b28)
+- 回到会话：在 GUI 的 `openxr-uxr` 工作区打开「[awf] [agent-workflow-kit] [runtime APK 安装测试派发链路测试]」（会话 session-10dc9439-e527-410e-9708-be50bf3abeb9）继续提细节。
+
+
+## 2026-11-05 20:20 链路测试闭环（runtime APK 安装测试，session-10dc9439）
+- 派发方核验：✅ 完成回报（DEV-057）内容全部核验通过——设备 md5 9846ec49b4529e2ec2ecc4d9d43c3ffe 与构建产物逐字节一致；logcat 0 FATAL；客户端 PID 3327 存活；源码零改动
+- 链路全环节：票据 M1 校验（缺头部拒→补全过）→ G1-G4 前置门 → G3 多写者（--new --allow-active）→ 会话上限（--force）→ 异步派发 → 必报点1+2受理 → 必报点10完成+收尾句 → 核验通过 → 归档
+- 注意：本派发方会话超 3 上限（4 个 [awf] 会话）——可 --prune 清理

@@ -111,7 +111,7 @@ DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli
 # DISPATCH-146：回报投递通道——目标会话回报推送进派发方会话收件箱（RPC 主通道，
 # inbox 自动触发其回合处理，派发方无需轮询）；RPC 不可达 / 未注入派发方会话时
 # 降级写收件箱文件（默认目录相对派发方/目标侧 cwd）。回报内容仍按必报点表组织。
-REPORT_MARKER = "【回报投递】"
+REPORT_MARKER = "【回执请求】"
 REPORT_INBOX_DIR = "dispatch/reports/inbox"
 
 
@@ -818,6 +818,46 @@ def session_display_label(api, session_id: str) -> str:
     return session_id
 
 
+
+def report_status_of(body: str) -> str:
+    """从回报正文解析状态徽章（DISPATCH-153 格式：`状态：完成` 等）。"""
+    m = re.search(r"状态[:：]\s*(完成|阻塞|失败|进行中|review|待复审)", body or "")
+    return m.group(1) if m else ""
+
+
+def report_json_path(cwd: Path, ticket: str) -> Path:
+    """回报 JSON 落盘路径（DEV-170 架构调整：数据与渲染分离，AgentTeams 式）。"""
+    safe = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", (ticket or "回报").strip()) or "回报"
+    safe = safe[:60]
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Path(cwd) / "dispatch" / "reports" / ("%s-%s.json" % (safe, ts))
+
+
+def write_report_json(cwd, *, ticket: str, source: str, target_session: str, body: str,
+                      source_label: str = "", target_label: str = "") -> Path:
+    """把回报落盘为结构化 JSON（目标项目 dispatch/reports/，供插件面板渲染）。
+
+    纯函数（时间戳当次生成），供 --report 与 smoke 断言。不改业务文件。
+    """
+    data = {
+        "kind": "awf-report",
+        "version": 1,
+        "ticket": (ticket or "").strip(),
+        "time": datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
+        "source": source_label or source or "未知",
+        "dispatcher": target_label or target_session or "",
+        "status": report_status_of(body),
+        "body": (body or "").strip(),
+        "reportedAt": int(time.time() * 1000),
+        "fromSession": source or "",
+        "toSession": target_session or "",
+    }
+    path = report_json_path(cwd, ticket)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def render_report_message(source: str, target_session: str, ticket: str, body: str,
                           source_label: str = "", target_label: str = "") -> str:
     """组装回报投递消息：标记行 + 时间戳 + 来源/派发方/派发单 + 回报正文。
@@ -936,16 +976,26 @@ def run_report(args) -> int:
     if target_session:
         try:
             DshApi().prompt(target_session, message, str(uuid.uuid4()))
+            report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                            target_session=target_session, body=text,
+                                            source_label=source_label, target_label=target_label)
+            emit("回报已落盘：%s（DEV-170 数据与渲染分离）" % report_path, args.json)
         except DispatchError as error:
             emit("RPC 投递到 %s 失败，降级写收件箱文件：%s" % (target_session, error), args.json)
             append_inbox(source, ticket, text, fallback_note=str(error))
-            emit("已写入收件箱文件：%s（派发方可查）" % inbox_path_for(source, ticket), args.json)
+            report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                            target_session=target_session, body=text,
+                                            source_label=source_label, target_label=target_label)
+            emit("已写入收件箱文件：%s（派发方可查）；回报已落盘 %s" % (inbox_path_for(source, ticket), report_path), args.json)
             return 0
         emit("已投递到派发方会话 %s 收件箱（inbox；触发其回合处理，派发方无需轮询即可收到）"
              % target_session, args.json)
         return 0
     path = append_inbox(source, ticket, text, fallback_note="未注入派发方会话（--to 缺失）")
-    emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）" % path, args.json)
+    report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                    target_session=target_session, body=text,
+                                    source_label=source_label, target_label=target_label)
+    emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）；回报已落盘 %s" % (path, report_path), args.json)
     return 0
 
 

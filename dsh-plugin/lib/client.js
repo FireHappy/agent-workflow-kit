@@ -2936,9 +2936,208 @@ window.__ModuleLoader__.load({
 
     const inject = [
       'slots',
+      'uiConversation',
     ]
 
+
+
+    // ---- DEV-170 回报面板（数据与渲染分离，AgentTeams 式：读 /awf/reports 聚合渲染）------
+
+    function ReportHeaderCard(props) {
+      var reports = useState(null)
+      var setReports = reports[1]
+      var open = useState(false)
+      var setOpen = open[1]
+      var load = useCallback(function () {
+        getJson('/awf/reports').then(function (r) { setReports((r && r.reports) || []) }).catch(function () { setReports([]) })
+      }, [])
+      useEffect(function () { load(); var t = setInterval(load, 15000); return function () { clearInterval(t) } }, [load])
+      var rows = reports[0] || []
+      var F = function (n) { return Math.round(n * (HOST_FONT_SCALE || 1)) }
+      var latest = rows[0]
+      function statusColor(st) {
+        if (st === '完成') return '#2e9e63'
+        if (st === '阻塞') return '#c98a1b'
+        if (st === '失败') return '#d64550'
+        return 'var(--dsw-alias-label-tertiary)'
+      }
+      if (!latest) return null
+      var detail = open[0] ? h('div', { style: { fontSize: F(11), color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', borderTop: '1px solid var(--dsw-alias-border-l2)', paddingTop: 6, marginTop: 6, maxHeight: 200, overflow: 'auto', minWidth: 260 } }, latest.body || '') : null
+      return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'stretch', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-2)', padding: '6px 10px', margin: '0 8px 4px', cursor: 'pointer' }, onClick: function () { setOpen(!open[0]) }, title: '点击展开/收起回报正文' },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: F(12) } },
+          h('span', null, '📮 回报 ' + rows.length),
+          h('span', { style: { flex: 'none', fontWeight: 600, color: statusColor(latest.status), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, latest.ticket || ''),
+          h('span', { style: { flex: 'none', color: 'var(--dsw-alias-label-tertiary)' } }, latest.time || '')),
+        detail)
+    }
+    function ReportsPanel(p) {
+      var reports = useState(null)
+      var setReports = reports[1]
+      var openFile = useState(null)
+      var setOpenFile = openFile[1]
+      var load = useCallback(function () {
+        getJson('/awf/reports').then(function (r) { setReports((r && r.reports) || []) }).catch(function () { setReports([]) })
+      }, [])
+      useEffect(function () { load(); var t = setInterval(load, 15000); return function () { clearInterval(t) } }, [load])
+      var F = function (n) { return Math.round(n * (HOST_FONT_SCALE || 1)) }
+      function statusColor(st) {
+        if (st === '完成') return { color: '#2e9e63', bg: 'rgba(46,158,99,.12)' }
+        if (st === '阻塞') return { color: '#c98a1b', bg: 'rgba(201,138,27,.12)' }
+        if (st === '失败') return { color: '#d64550', bg: 'rgba(214,69,80,.12)' }
+        return { color: 'var(--dsw-alias-label-tertiary)', bg: 'transparent' }
+      }
+      function row(r) {
+        var sc = statusColor(r.status)
+        var open = openFile[0] === r.file
+        var head = h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+          h('span', { style: { fontSize: F(11), fontWeight: 700, color: 'var(--dsw-alias-label-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, r.ticket || r.file),
+          r.status ? h('span', { style: { flex: 'none', fontSize: F(10), fontWeight: 600, color: sc.color, background: sc.bg, borderRadius: 4, padding: '1px 6px' } }, r.status) : null)
+        var meta = h('div', { style: { display: 'flex', gap: 8, fontSize: F(11), color: 'var(--dsw-alias-label-tertiary)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          r.time ? h('span', null, r.time) : null,
+          r.source ? h('span', null, r.source) : null,
+          r.dispatcher ? h('span', null, '→ ' + r.dispatcher) : null)
+        var body = open ? h('div', { style: { fontSize: F(11), color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', marginTop: 6, borderTop: '1px solid var(--dsw-alias-border-l2)', paddingTop: 6, maxHeight: 300, overflow: 'auto' } }, r.body || '') : null
+        return h('div', { key: r.file, style: { borderBottom: '1px solid var(--dsw-alias-border-l2)', padding: '8px 10px', cursor: 'pointer' }, onClick: function () { setOpenFile(open ? null : r.file) } }, head, meta, body)
+      }
+      var rows = reports[0] || []
+      try {
+      return h('div', { style: { padding: '8px 4px', display: 'flex', flexDirection: 'column' } },
+        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 8px 6px' } },
+          h('span', { style: { fontSize: F(12), fontWeight: 700, color: 'var(--dsw-alias-label-primary)' } }, '回报 ' + rows.length),
+          h('button', { onClick: load, style: { fontSize: F(11), cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary)', padding: '2px 8px' } }, '刷新')),
+        rows.length === 0
+          ? h('div', { style: { fontSize: F(11), color: 'var(--dsw-alias-label-tertiary)', padding: '16px 8px' } }, reports[0] === null ? '加载中…' : '暂无回报（目标项目运行 --report 后出现）')
+          : h('div', null, rows.map(row)))
+      } catch (e) {
+        return h('div', { style: { padding: 8, fontSize: 11, color: '#d64550' } }, '[awf-reports 渲染错误] ' + String(e && e.message || e))
+      }
+    }
+    function ReportsTabTitle() {
+      return h('span', null, '回报')
+    }
+
+    // ---- DEV-170 回报卡片 v3（聊天框渲染：chat.node 折叠节点，照抄 agent-teams）------
+    function reportTextOfEvent(event) {
+      var d = event && event.data
+      if (!d) return ''
+      if (typeof d.text === 'string') return d.text
+      var c = d.content
+      if (typeof c === 'string') return c
+      if (Array.isArray(c)) return c.map(function (b) { return b && typeof b.text === 'string' ? b.text : '' }).join('\n')
+      if (typeof d.message === 'string') return d.message
+      if (d.message && Array.isArray(d.message.content)) return d.message.content.map(function (b) { return b && typeof b.text === 'string' ? b.text : '' }).join('\n')
+      return ''
+    }
+    function parseReportMessage(text) {
+      if (!text || (text.indexOf('【回执请求】') === -1 && text.indexOf('【回报投递】') === -1)) return null
+      var out = { time: '', source: '', dispatcher: '', ticket: '', body: '' }
+      var inBody = false
+      var body = []
+      var lines = String(text).split('\n')
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i]
+        var t = line.replace(/^[-*]\s*/, '').trim()
+        if (t.indexOf('时间：') === 0) { out.time = t.slice(3).trim(); continue }
+        if (t.indexOf('来源：') === 0) { out.source = t.slice(3).trim(); continue }
+        if (t.indexOf('派发方：') === 0) { out.dispatcher = t.slice(4).trim(); continue }
+        if (t.indexOf('派发单：') === 0) { out.ticket = t.slice(4).trim(); continue }
+        if (t === '【回执请求】' || t === '【回报投递】') { inBody = true; continue }
+        if (inBody && t !== '') body.push(line)
+      }
+      out.body = body.join('\n').trim()
+      return out
+    }
+
+    function ReportTurnCard(props) {
+      var turn = props && props.turn
+      var useChat = props && props.useChat
+      try {
+        var info = { invoked: true, propsKeys: props ? Object.keys(props).join(',') : null, status: turn && turn.status, turnId: turn && turn.turn }
+        if (!turn || turn.status !== 'closed') { window.__reportTurnCard = info; return null }
+        var nodes = useChat ? useChat(function (snapshot) { return snapshot && snapshot.nodes }) : null
+        info.nodesType = nodes && nodes.values ? 'iterable' : typeof nodes
+        var cards = []
+        if (nodes && typeof nodes.values === 'function') {
+          var it = nodes.values()
+          for (var n = it.next(); n && !n.done; n = it.next()) {
+            var node = n.value
+            if (node && node.kind === 'dispatch-report' && node.location &&
+                (node.location.kind === 'turn' || node.location.kind === 'step') &&
+                node.location.turn && node.location.turn.turn === turn.turn) {
+              cards.push(node)
+            }
+          }
+        }
+        info.cardsLen = cards.length
+        info.first = cards[0] ? { loc: cards[0].location && cards[0].location.kind, locTurn: cards[0].location && cards[0].location.turn && cards[0].location.turn.turn } : null
+        window.__reportTurnCard = info
+        if (cards.length === 0) return null
+        return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, margin: '2px 0' } },
+          cards.map(function (node) { return h(ReportCard, { key: node.key, node: node, data: node.data }) }))
+      } catch (e) { return null }
+    }
+    var dispatchReportCardDefinition = {
+      kind: 'dispatch-report',
+      target: 'chat',
+      match: function (event) {
+        if (!event || event.type !== 'user/message') return null
+        var text = reportTextOfEvent(event)
+        if (text.indexOf('【回报投递】') === -1) return null
+        try { console.warn('[dispatch-report] MATCH hit seq=' + String(event.seq) + ' keys=' + (event.data ? Object.keys(event.data).join(',') : 'null')) } catch (e) {}
+        var id = event.data && (event.data.messageId || event.data.id)
+        return { id: String(id || event.seq || Date.now()), role: 'start' }
+      },
+      start: function (_context, match) {
+        var st = parseReportMessage(reportTextOfEvent(match.event)) || { empty: true }
+        try { console.warn('[dispatch-report] START time=' + String(st.time) + ' source=' + String(st.source) + ' ticket=' + String(st.ticket)) } catch (e) {}
+        return st
+      },
+      buildViewNode: function (context) {
+        if (!context.start || !context.state || context.state.empty) {
+          try { console.warn('[dispatch-report] buildViewNode SKIP start=' + String(!!context.start) + ' state=' + String(!!context.state)) } catch (e) {}
+          return null
+        }
+        try { console.warn('[dispatch-report] buildViewNode PRODUCE loc=' + String(context.start.location ? context.start.location.kind : 'undefined') + ' seq=' + String(context.start.event.seq)) } catch (e) {}
+        var st = context.state
+        return {
+          key: context.key, kind: 'dispatch-report', id: context.id, target: 'chat',
+          anchorSeq: context.start.event.seq, location: context.start.location,
+          visibility: 'visible',
+          data: { time: st.time, source: st.source, dispatcher: st.dispatcher, ticket: st.ticket, body: st.body },
+        }
+      },
+    }
+    function ReportCard(props) {
+      var data = (props && props.data) || (props && props.node && props.node.data)
+      try { window.__reportCardData = { invoked: true, time: data && data.time, source: data && data.source, ticket: data && data.ticket, keys: data ? Object.keys(data) : null, nodeKind: props && props.node && props.node.kind } } catch (e) {}
+      try { console.warn('[dispatch-report] ReportCard invoked data=' + JSON.stringify(data ? { time: data.time, source: data.source, ticket: data.ticket } : null)) } catch (e) {}
+      if (!data || (!data.time && !data.source && !data.body)) return null
+      var F = function (n) { return Math.round(n * (HOST_FONT_SCALE || 1)) }
+      function fieldRow(label, value) {
+        if (!value) return null
+        return h('div', { style: { display: 'flex', gap: 8, fontSize: F(12), color: 'var(--dsw-alias-label-secondary)', lineHeight: '20px' } },
+          h('span', { style: { flex: 'none', color: 'var(--dsw-alias-label-tertiary)' } }, label),
+          h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, value))
+      }
+      return h('div', { style: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-2)', padding: '10px 12px', margin: '4px 0', display: 'flex', flexDirection: 'column', gap: 4 } },
+        h('div', { style: { fontSize: F(13), fontWeight: 700, color: 'var(--dsw-alias-label-primary)' } }, '📮 回报投递'),
+        fieldRow('时间', data.time),
+        fieldRow('来源', data.source),
+        fieldRow('派发方', data.dispatcher),
+        fieldRow('派发单', data.ticket),
+        data.body ? h('div', { style: { fontSize: F(12), color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', borderTop: '1px solid var(--dsw-alias-border-l2)', paddingTop: 6, marginTop: 4 } }, data.body) : null)
+    }
     function apply(ctx) {
+      try {
+        if (ctx.uiConversation && ctx.uiConversation.events && typeof ctx.uiConversation.events.register === 'function') {
+          ctx.uiConversation.events.register(dispatchReportCardDefinition)
+          console.warn('[dispatch-report] events.register OK')
+        } else { console.warn('[dispatch-report] uiConversation MISSING') }
+      } catch (e) { console.warn('[dispatch-report] register failed', String(e && e.message || e)) }
+      ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+        name: 'conversation.chat.node',
+        key: 'dispatch-report',
+      }, ReportCard))
       ctx.effect(() => {
         const disposers = []
         // 通道 1：宿主原生 rightbar（未装 better-sidebar 的环境可见）。
@@ -2955,7 +3154,17 @@ window.__ModuleLoader__.load({
           key: 'awf-dashboard',
           inject: (sessionId) => ({ sessionId }),
         }, TabTitle)))
-
+        // DEV-170 v2：会话头部回报入口已移除（用户弃用）——回报仅走边栏「回报数据」页签（通道 2 awf-reports）
+        // 通道 1d（DEV-170）：回合尾部回报卡片——turnTail（照抄 agent-teams：注册进 sidebarRight 服务范围）
+        disposers.push(ctx.inject(['sidebarRight', 'sidebarRightTabs'], function (native) {
+          if (!native || !native.slots || typeof native.slots.inject !== 'function') return function () {}
+          return native.slots.inject('conversation.chat.turnTail', function () {
+            return native.slots.register({
+              name: 'conversation.chat.turnTail',
+              id: 'dispatch-report-summary',
+            }, ReportTurnCard)
+          })
+        }))
         // 通道 2：better-sidebar 接管右侧边栏时（本 profile 已装），把页签注册进它的
         // registerTab 服务，用户才看得到。注意必须用 ctx.inject(['betterSidebar'], cb)
         // **动态注入**，而不是 apply 时 ctx.get('betterSidebar')：ctx.get 是**非响应式**
@@ -2969,14 +3178,25 @@ window.__ModuleLoader__.load({
           const better = injected.get('betterSidebar')
           if (!better || typeof better.registerTab !== 'function') return () => {}
           try {
-            const end = better.registerTab({
+            const ends = []
+            const end1 = better.registerTab({
               id: 'awf-dashboard',
               title: 'Agent Workflow',
               description: 'agent-workflow 账本看板：当前任务 / todo 进度 / 最近完成 / 初始化引导 / 开始任务 / 归档查看',
               single: true,
               component: (tabProps) => h(Dashboard, tabProps || {}),
             })
-            return () => { try { end() } catch { /* 忽略 */ } }
+            ends.push(end1)
+            // DEV-170：回报数据面板（/awf/reports），与 agent-teams「团队协作」页签同模式
+            const end2 = better.registerTab({
+              id: 'awf-reports',
+              title: '回报数据',
+              description: 'agent-workflow 回报面板：来源/派发方/票据/状态/正文（/awf/reports 聚合）',
+              single: true,
+              component: (tabProps) => h(ReportsPanel, tabProps || {}),
+            })
+            ends.push(end2)
+            return () => { ends.forEach((end) => { try { end() } catch { /* 忽略 */ } }) }
           } catch { return () => {} }
         }))
 

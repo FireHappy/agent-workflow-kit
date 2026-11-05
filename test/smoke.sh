@@ -2973,7 +2973,7 @@ if grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '回报经通道投递派发方' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q 'dispatch/reports/inbox' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q 'DSH_SESSION_ID' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '【回报投递】' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '【回执请求】' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/templates/workflows/cross-project.md" \
    && grep -q '回报经通道投递派发方' "$KIT_DIR/templates/workflows/cross-project.md" \
    && grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \

@@ -46,7 +46,7 @@
 //         或等于客户端上报的当前工作区根 workspaceRoot。
 import { join, isAbsolute, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { readFile, stat, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, stat, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
@@ -685,6 +685,52 @@ export function apply(ctx) {
       }
     },
   }), 'dsh-awf-dashboard: /awf/projects route')
+
+  // DEV-170：回报聚合路由（数据与渲染分离，AgentTeams 式）——读所有登记项目的 dispatch/reports/*.json
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/awf/reports',
+    handler: async (req, res) => {
+      try {
+        if (!fence(req)) {
+          forbidden(res)
+          return
+        }
+        if (req.method !== 'GET') {
+          writeError(res, 405, 'method-error', 'method not allowed')
+          return
+        }
+        const projects = await readIndex(AGENTS_HOME)
+        const reports = []
+        const seen = new Set()
+        for (const p of projects) {
+          if (!p || typeof p.path !== 'string' || !p.path) continue
+          const dir = join(p.path, 'dispatch', 'reports')
+          let names = []
+          try { names = await readdir(dir) } catch (e) { continue }
+          for (const name of names) {
+            if (!name.endsWith('.json')) continue
+            const abs = join(dir, name)
+            try {
+              const raw = await readFile(abs, 'utf-8')
+              const data = JSON.parse(raw)
+              if (!data || data.kind !== 'awf-report') continue
+              data.file = name
+              data.projectPath = p.path
+              const key = data.reportedAt + '|' + abs
+              if (!seen.has(key)) { seen.add(key); reports.push(data) }
+            } catch (e) { /* 单条回报损坏不影响聚合 */ }
+          }
+        }
+        reports.sort((a, b) => (b.reportedAt || 0) - (a.reportedAt || 0))
+        writeJson(res, 200, { ok: true, reports })
+      } catch (error) {
+        writeError(res, 500, 'internal', error instanceof Error ? error.message : String(error))
+      }
+    },
+  }), 'dsh-awf-dashboard: /awf/reports route')
+
+
 
   // DEV-033 块 B：账本变更 SSE 事件流（GET，认证后挂起）。
   // 前端 EventSource 订阅；账本文件变化（任何写者）→ 广播 → UI 立即刷新。
