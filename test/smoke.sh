@@ -2910,6 +2910,32 @@ if grep -rn '等待最终成功才回报\|闷头执行到最终成功' "$KIT_DIR
 else
   ok "DISPATCH-144 无「等待最终成功才回报/闷头执行」旧表述（状态转换即回报）"
 fi
+# 30.11 DISPATCH-145：回报规则必报点总表（10 必报点 + 时限/字段/违约全量化；133/141/143/144 并入）
+if grep -q '回报规则总表（DISPATCH-145' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '1 受理任务（会话打开）' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '10 完成（最终）' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '每 5-10 分钟回报一次中途状态' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '回报字段（固定' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '违约后果（定死）' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '追问无果登记滞留' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '回报规则总表（DISPATCH-145' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '1 受理任务（会话打开）' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '10 完成（最终）' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q 'DISPATCH-145' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'DISPATCH-145' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q 'DISPATCH-145' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q 'DISPATCH-145' "$KIT_DIR/AGENTS.md" \
+   && grep -q '回报规则必报点总表（DISPATCH-145' "$KIT_DIR/AGENTS.md"; then
+  ok "DISPATCH-145 回报规则必报点总表（10 必报点 + 时限/字段/违约）注入文本与文档/模板同步"
+else
+  bad "DISPATCH-145 必报点总表缺失或未同步"
+fi
+# 只查注入文本（新条款载体）——仓库既有 DEV-138「派发即启动子代理会话」等契约词属既有表述，不算本条款引入
+if grep -q '子代理\|主代理' "$KIT_DIR/bin/awf-dispatch" 2>/dev/null; then
+  bad "DISPATCH-145 注入文本引入「子代理/主代理」新词，应沿用「派发方/目标会话」"
+else
+  ok "DISPATCH-145 注入文本沿用「派发方/目标会话」表述，未引入子代理/主代理新词"
+fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '用户在目标会话内直接回复' "$KIT_DIR/docs/dispatch.md" \
