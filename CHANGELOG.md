@@ -1,3 +1,21 @@
+## [1.1.5] - 2026-11-05
+
+### Added
+- **项目级技能（DEV-17x）**：AGENTS 开工顺序新增第 3 条「项目级技能」声明 + 跨项目路由引用——`skills/cross-project-dispatch/SKILL.md` 相应情况可直接加载/阅读，不依赖全局技能目录；跨项目派发细则**内联** `agent-workflow/workflows/cross-project.md`（权威自包含：四道门 / 三规则 / 必报点 / 回执请求 / 转达回执）
+- **回报数据边栏面板（DEV-170 定型）**：better-sidebar「回报数据」页签 + `/awf/reports` 数据层（JSON 落盘，数据与渲染分离）
+
+### Changed
+- **回报消息标题【回报投递】→【回执请求】**（接收者视角；客户端 matcher 兼容新旧标题；docs/SKILL/smoke 同步）
+- **install.sh 移除 cross-project-dispatch 全局技能安装**（细则已内联工作流）；全局技能目录撤销
+- AGENTS 模板调整：开工顺序编号顺延（项目级技能占第 3 条）
+
+### Removed
+- DEV-170 失败尝试清理：chat.node 折叠节点 / turnTail 回合尾部卡片 / 会话头部入口 / 诊断标记（宿主不渲染，净删 164 行）
+
+### Fixed
+- templates/ 与 agent-workflow/ 生成副本漂移（bootstrap digest 91b6f5cb）
+- smoke 断言标题同步 2 处（回执请求）
+
 ## [1.1.4] - 2026-11-05
 
 ### Added
