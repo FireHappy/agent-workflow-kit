@@ -80,3 +80,4 @@
 | DEV-170 | P1 | 回报消息卡片渲染（DSH client 插件 chat.node 模块） | 2026-11-05 |
 | DEV-171 | P1 | release-prep 1.1.5 | 2026-11-05 |
 | DEV-172 | P1 | release-prep 1.1.6 | 2026-11-05 |
+| DEV-174 | P1 | kit 锚点迁移至 agent-workflow/VERSION + upgrade 源版本读取适配 | 2026-11-06 |

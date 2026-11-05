@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:91b6f5cb -->
+<!-- awf:begin v1 digest:589b629f -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）

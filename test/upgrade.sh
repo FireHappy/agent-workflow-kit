@@ -204,15 +204,30 @@ sed -i '' 's|^version_file: VERSION$|version_file: agent-workflow/VERSION|' "$PE
   || sed -i 's|^version_file: VERSION$|version_file: agent-workflow/VERSION|' "$PE/agent-workflow/project.yaml"
 grep -q '^version_file: agent-workflow/VERSION$' "$PE/agent-workflow/project.yaml" \
   || fail "E project.yaml 未写入 version_file 定向"
+# kit 自身源版本：读 kit 的 version_file（DISPATCH-155 起为 agent-workflow/VERSION），根 VERSION 兜底
+KIT_VF="$KIT/agent-workflow/VERSION"
+[ -f "$KIT_VF" ] || KIT_VF="$KIT/VERSION"
+[ -f "$KIT_VF" ] || fail "E kit 自身版本锚点缺失：$KIT_VF"
 printf '9.9.9\n' > "$PE/VERSION"   # 根 VERSION 旧值：不应被 upgrade 改写
 dry_e="$("$AWF" upgrade "$PE" --dry-run)"
 grep -q '版本锚点' <<<"$dry_e" || fail "E dry-run 未打印版本锚点文案：$dry_e"
 grep -q 'agent-workflow/VERSION' <<<"$dry_e" || fail "E dry-run 未按 version_file 显示锚点路径：$dry_e"
 "$AWF" upgrade "$PE" >/dev/null 2>&1 || fail "E upgrade 失败"
-[ "$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)" = "$(cat "$KIT/VERSION")" ] \
-  || fail "E 锚点未写到 version_file 路径（agent-workflow/VERSION=[$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)]，kit=[$(cat "$KIT/VERSION")]）"
+[ "$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)" = "$(cat "$KIT_VF")" ] \
+  || fail "E 锚点未写到 version_file 路径（agent-workflow/VERSION=[$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)]，kit=[$(cat "$KIT_VF")]）"
 [ "$(cat "$PE/VERSION")" = "9.9.9" ] || fail "E 根 VERSION 被 upgrade 误改写：$(cat "$PE/VERSION")"
-ok "E upgrade 版本锚点写 project.yaml 的 version_file（根 VERSION 不动）"
+ok "E upgrade 版本锚点按目标 version_file 写（源读 kit 自身 version_file，根 VERSION 不动）"
+
+# ---------- F. 默认目标（未配置 version_file）：upgrade 写目标根 VERSION（DISPATCH-155 回归） ----------
+PF="$WORK/projF"
+"$AWF" init "$PF" --name "默认锚点" --no-register >/dev/null || fail "F init projF 失败"
+grep -q '^version_file: VERSION$' "$PF/agent-workflow/project.yaml" \
+  || fail "F 默认 project.yaml 应 version_file: VERSION"
+rm -f "$PF/VERSION"   # 模拟尚无根 VERSION；upgrade 应写入 kit 发布版
+"$AWF" upgrade "$PF" >/dev/null 2>&1 || fail "F upgrade 失败"
+[ "$(cat "$PF/VERSION" 2>/dev/null)" = "$(cat "$KIT_VF")" ] \
+  || fail "F 默认目标根 VERSION 未写入 kit 发布版（VERSION=[$(cat "$PF/VERSION" 2>/dev/null)]，kit=[$(cat "$KIT_VF")]）"
+ok "F 默认目标 upgrade 写根 VERSION（未配置 version_file 行为不变）"
 
 # 边界：非项目目标拒绝 / 项目内副本拒绝 / help 可读
 mkdir -p "$WORK/notproj"

@@ -1645,13 +1645,16 @@ cmd_upgrade() {
   fi
 
   # 版本锚点路径在 dry-run 与执行两处共用（DEV-145）：读目标 project.yaml 的 version_file，
-  # 默认仓库根 VERSION；锚点不得放进 clang 头文件搜索路径（macOS IL2CPP 撞名，见 project_version_file）
-  local VF
+  # 默认仓库根 VERSION；锚点不得放进 clang 头文件搜索路径（macOS IL2CPP 撞名，见 project_version_file）。
+  # 源版本读取（DISPATCH-155）：kit 自身锚点已迁移到 version_file 指向（agent-workflow/VERSION），
+  # 从 kit 自身 version_file 动态读取（KVF），不再硬编码根目录的 VERSION 路径。
+  local VF KVF
   VF="$(project_version_file "$target")"
+  KVF="$(project_version_file "$KIT_DIR")"
 
   if [ "$dry_run" -eq 1 ]; then
     say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
-    [ -f "$KIT_DIR/VERSION" ] && say "  将写版本锚点 $VF = $(cat "$KIT_DIR/VERSION")（对外发布版；路径 = 目标 project.yaml 的 version_file）"
+    [ -f "$KVF" ] && say "  将写版本锚点 $VF = $(cat "$KVF")（对外发布版；路径 = 目标 project.yaml 的 version_file）"
     say "  将运行：$awf_dir/bin/awf bootstrap（刷新 AGENTS.md 入口）"
     say "  将运行：$awf_dir/bin/awf check（校验；退出码 = 失败项数量）"
     return 0
@@ -1661,14 +1664,17 @@ cmd_upgrade() {
   say "保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
   say ""
 
-  # DEV-133/DEV-145：版本锚点——把 kit 的对外发布版（VERSION 文件）同步到目标的 version_file 路径；
-  # 看板按它显示 v1.0.0 这类具体版本。路径读目标 project.yaml 的 version_file（默认仓库根 VERSION），
-  # 避免在 macOS 大小写不敏感 FS 上把锚点放进 clang 头文件搜索路径（-I"."）导致 IL2CPP 编译撞名。
+  # DEV-133/DEV-145：版本锚点——把 kit 的对外发布版（自身 version_file 指向的锚点文件，
+  # DISPATCH-155 起为 agent-workflow/VERSION）同步到目标的 version_file 路径；
+  # 看板按它显示 v1.2.3 这类具体版本。源路径读 kit 自身 project.yaml 的 version_file（KVF，
+  # 默认仓库根 VERSION），不再硬编码根 VERSION；目标写入路径读目标 project.yaml 的
+  # version_file（VF，默认仓库根 VERSION），避免在 macOS 大小写不敏感 FS 上把锚点放进
+  # clang 头文件搜索路径（-I"."）导致 IL2CPP 编译撞名。
   local cur_ver=""
   [ -f "$VF" ] && cur_ver="$(cat "$VF")"
-  if [ -f "$KIT_DIR/VERSION" ] && [ "$cur_ver" != "$(cat "$KIT_DIR/VERSION")" ]; then
-    cp "$KIT_DIR/VERSION" "$VF"
-    say "已写版本锚点 ${VF} = $(cat "$KIT_DIR/VERSION")"
+  if [ -f "$KVF" ] && [ "$cur_ver" != "$(cat "$KVF")" ]; then
+    cp "$KVF" "$VF"
+    say "已写版本锚点 ${VF} = $(cat "$KVF")"
   fi
 
   ( cd "$target" && "$awf_dir/bin/awf" bootstrap ) || die "bootstrap 失败：$target"
