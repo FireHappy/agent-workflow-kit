@@ -38,7 +38,7 @@ install_skill() {
 }
 
 install_skill "agent-workflow-scaffold" "$REPO"
-install_skill "cross-project-dispatch" "$REPO/skills/cross-project-dispatch"
+# 跨项目派发细则已内联进 workflow（templates/workflows/cross-project.md），不再全局装技能（2026-11-05 用户决定）
 
 chmod +x "$REPO/bin/awf" "$REPO/bin/awf-dispatch" "$REPO/test/smoke.sh" 2>/dev/null || true
 chmod +x "$SKILLS/agent-workflow-scaffold/bin/awf" \
