@@ -1871,8 +1871,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     # 会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者 + 动态任务摘要；
     # 模块只影响展示/票据分类（--module 已解析）；--title 完全定制时优先。
     module = resolve_module(text, args.module)
-    session_name = args.title or awf_session_title(
-        resolve_sender(text, getattr(args, "sender", "")), task_display(task, text))
+    sender = resolve_sender(text, getattr(args, "sender", ""))
+    session_name = args.title or awf_session_title(sender, task_display(task, text))
     # G4 探针已在 preflight 拉过 session/list，这里直接复用，避免重复调用。
     rows = state.get("sessions") or []
     row = None
@@ -1936,6 +1936,22 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             source = "复用"
 
     if session_id is None:
+        # 数量上限（DEV-159）：同一派发者在同一项目的 [awf] 会话不超过
+        # MAX_SENDER_SESSIONS（3）——--new 同样受约束（用户语义：数量不超 3）；
+        # 显式 --force 为逃生口（旧会话坏掉/阻塞需强制新建时）。
+        if not args.force:
+            sender_key = clean_title(sender, limit=20) if sender else "lead"
+            pool_count = sum(
+                1 for row in rows
+                if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
+                and row_sender_key(session_title(row)) == sender_key
+            )
+            if pool_count >= MAX_SENDER_SESSIONS:
+                raise DispatchError(
+                    f"该派发者「{sender_key}」在 {target.name} 已有 {pool_count} 个 [awf] 会话"
+                    f"（上限 {MAX_SENDER_SESSIONS}）——达到数量上限：请复用空闲会话、"
+                    "或清理（--prune / GUI 归档）后重试；确需强制新建加 --force"
+                )
         # 新建路径：--new 直接建会话，不碰 session/list；自动新建时才做同名保护。
         # 显式 --new 跳过复用检查与同名保护（用户已明确要新会话）。
         if args.reuse:

@@ -516,7 +516,7 @@ def _args(**overrides):
         idle_wait=300, queue_timeout=60, force=False, team=False, json=False, headless=False,
         handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
         allow_active=False, apply=False, prune=False, web_url="",
-        allow_legacy_reuse=False, sender="lead",
+        allow_legacy_reuse=False, sender="lead", new=False,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -524,7 +524,7 @@ def _args(**overrides):
 
 def run_dispatch(api, task_module, idle_wait=300, queue_timeout=60, force=False, reuse=True,
                  json_mode=False, expect_error=False, sessions_in_preflight=True,
-                 allow_legacy=False, session=""):
+                 allow_legacy=False, session="", new=False):
     logs = []
     output = io.StringIO()
     original = (module.preflight, module.append_log, module.emit)
@@ -537,8 +537,8 @@ def run_dispatch(api, task_module, idle_wait=300, queue_timeout=60, force=False,
         f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n"
         f"- 模块：{task_module}\n"
     )
-    args = _args(reuse=reuse, idle_wait=idle_wait, queue_timeout=queue_timeout, force=force,
-                 json=json_mode, allow_legacy_reuse=allow_legacy, session=session)
+    args = _args(reuse=reuse and not new, idle_wait=idle_wait, queue_timeout=queue_timeout, force=force,
+                 json=json_mode, allow_legacy_reuse=allow_legacy, session=session, new=new)
     try:
         with contextlib.redirect_stdout(output):
             try:
@@ -860,6 +860,17 @@ logs, _ = run_dispatch(running_api, "工作流")
 assert running_api.created == [], running_api.created
 assert running_api.prompts and running_api.prompts[0][0] == "s-r3", running_api.prompts
 assert any("等待队列" in m for m in running_api.emitted), running_api.emitted
+
+# DEV-159 数量上限：同一派发者同项目 [awf] 会话不超过 3——--new 同样受约束（拒绝新建，--force 逃生）
+pool3_api = FakeDispatchApi([
+    row("s-p1", title=module.awf_session_title("lead", "TEST-310 甲")),
+    row("s-p2", title=module.awf_session_title("lead", "TEST-311 乙")),
+    row("s-p3", title=module.awf_session_title("lead", "TEST-312 丙")),
+])
+pool3_err = run_dispatch(pool3_api, "通用", new=True, expect_error=True)
+assert "已有 3 个" in pool3_err and "上限 3" in pool3_err, pool3_err
+run_dispatch(pool3_api, "通用", new=True, force=True)
+assert pool3_api.created == ["s-created-1"], "超限时 --force 可强制新建（逃生口）"
 
 # --new 不碰 session/list：mock sessions() 抛错也应成功（不应报 G4 / 复用检查失败）
 new_api = NoListApi([row("s-same", title=title)])
