@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """awf-dispatch — 跨项目派发器（DSH 会话适配）。
 
 先在调度方项目里做四道前置检查：
@@ -107,6 +108,11 @@ EXIT_TIMEOUT = 3
 EXIT_ZOMBIE = 4
 EXIT_HEADLESS_FAIL = 5
 DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+# DISPATCH-146：回报投递通道——目标会话回报推送进派发方会话收件箱（RPC 主通道，
+# inbox 自动触发其回合处理，派发方无需轮询）；RPC 不可达 / 未注入派发方会话时
+# 降级写收件箱文件（默认目录相对派发方/目标侧 cwd）。回报内容仍按必报点表组织。
+REPORT_MARKER = "【回报投递】"
+REPORT_INBOX_DIR = "dispatch/reports/inbox"
 
 
 class DispatchError(Exception):
@@ -776,6 +782,122 @@ def detect_screen_state() -> str:
     return state if state in ("on", "off") else "unknown"
 
 
+# ---------------------------------------------------------------- 回报投递通道（DISPATCH-146）
+
+
+def dispatcher_session_env() -> str:
+    """返回当前进程所在会话的 DSH_SESSION_ID（若有）。
+
+    派发方运行 awf-dispatch 时 = 派发方会话 ID（注入文本告知目标回报投递目标）；
+    目标会话运行 --report 时 = 目标会话 ID（作为 --from 默认来源）。"""
+    return (os.environ.get("DSH_SESSION_ID") or "").strip()
+
+
+def sanitize_filepart(value: str) -> str:
+    """收件箱文件名安全化：会话 ID / 派发单号只留 [A-Za-z0-9_.-]。"""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", value or "") or "unknown"
+
+
+def render_report_message(source: str, target_session: str, ticket: str, body: str) -> str:
+    """组装回报投递消息：标记行 + 时间戳 + 来源/派发方/派发单 + 回报正文。
+
+    纯函数（时间戳当次生成），供 --report --dry-run 渲染与 smoke 断言。
+    """
+    lines = [
+        REPORT_MARKER,
+        "- 时间：%s" % datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
+        "- 来源会话：%s" % (source or "未知"),
+    ]
+    if target_session:
+        lines.append("- 派发方会话：%s" % target_session)
+    if ticket:
+        lines.append("- 派发单：%s" % ticket)
+    lines.append("")
+    lines.append((body or "").strip())
+    return "\n".join(lines)
+
+
+def inbox_path_for(source: str, ticket: str = "") -> Path:
+    """收件箱文件路径（降级通道）：<cwd>/dispatch/reports/inbox/<来源会话ID>[-<派发单>].md。"""
+    name = sanitize_filepart(source)
+    if ticket:
+        name = "%s-%s" % (name, sanitize_filepart(ticket))
+    return Path.cwd() / REPORT_INBOX_DIR / ("%s.md" % name)
+
+
+def append_inbox(source: str, ticket: str, body: str, fallback_note: str = "") -> Path:
+    """把回报追加进收件箱文件（RPC 不可达 / 未注入派发方会话时的降级通道）。"""
+    path = inbox_path_for(source, ticket)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(render_report_message(source, "", ticket, body) + "\n")
+        if fallback_note:
+            handle.write("- 降级原因：%s\n" % fallback_note)
+        handle.write("\n")
+    return path
+
+
+def report_channel_section(dispatcher_session: str = "") -> str:
+    """build_prompt 补充约定的「回报投递通道（DISPATCH-146）」小节。
+
+    派发方会话已知 → 注入 --to 命令示例；未知（派发方环境无 DSH_SESSION_ID，
+    如人工终端调用）→ 目标自动降级写收件箱文件。回报「说什么」仍走必报点表。
+    """
+    if dispatcher_session:
+        target_part = "本任务派发方会话：%s；" % dispatcher_session
+        cmd = ("`awf-dispatch --report --to %s \"<回报文本>\"`"
+               "（--from 默认取当前会话 env DSH_SESSION_ID，--ticket 可带派发单号）" % dispatcher_session)
+    else:
+        target_part = "本任务未注入派发方会话（派发方环境无 DSH_SESSION_ID）；"
+        cmd = ("`awf-dispatch --report \"<回报文本>\"`"
+               "（将自动降级写收件箱文件 `dispatch/reports/inbox/<来源会话ID>.md`）")
+    return (
+        "- **回报投递通道（DISPATCH-146）**：本任务的回报经通道投递派发方，非仅写会话回复文本"
+        "（无通道＝有规则没送达，DISPATCH-144/145 实证）。" + target_part
+        + "任一必报点（1-10）或中途状态回报时运行 " + cmd
+        + "——命令把「回报投递」消息推送到派发方会话收件箱（inbox）并触发其回合处理（繁忙时排队），"
+          "派发方无需轮询即可收到；RPC 不可达（GUI 关闭 / 无凭证 / 未注入派发方会话）时自动降级写入"
+          "收件箱文件 `dispatch/reports/inbox/<来源会话ID>.md`（派发方可查）。"
+          "回报内容仍按必报点表组织（说什么不变，通道负责怎么送达）。\n"
+    )
+
+
+def run_report(args) -> int:
+    """--report 模式：把回报文本投递到派发方会话收件箱（RPC 主通道），
+    失败 / 无目标时降级写收件箱文件。不派发任务、不改目标仓库业务文件。"""
+    text = (args.text or "").strip()
+    if not text:
+        # 第一个位置参数即回报文本（与 `--report "<回报文本>"` 的宣传形式一致）
+        text = (args.target or "").strip()
+    if not text and not sys.stdin.isatty():
+        text = sys.stdin.read().strip()
+    if not text:
+        raise DispatchError("--report 需要回报文本：用 --text / 第一个位置参数提供，或经 stdin 管道传入")
+    source = (args.from_id or dispatcher_session_env() or "").strip()
+    target_session = (args.to or "").strip()
+    ticket = (args.ticket or "").strip()
+    message = render_report_message(source, target_session, ticket, text)
+    if args.dry_run:
+        emit("dry-run：回报投递通道（DISPATCH-146），未实际发送", args.json)
+        emit("投递目标：%s" % (target_session or "未指定（将降级写收件箱文件）"), args.json)
+        print(message)
+        return 0
+    if target_session:
+        try:
+            DshApi().prompt(target_session, message, str(uuid.uuid4()))
+        except DispatchError as error:
+            emit("RPC 投递到 %s 失败，降级写收件箱文件：%s" % (target_session, error), args.json)
+            append_inbox(source, ticket, text, fallback_note=str(error))
+            emit("已写入收件箱文件：%s（派发方可查）" % inbox_path_for(source, ticket), args.json)
+            return 0
+        emit("已投递到派发方会话 %s 收件箱（inbox；触发其回合处理，派发方无需轮询即可收到）"
+             % target_session, args.json)
+        return 0
+    path = append_inbox(source, ticket, text, fallback_note="未注入派发方会话（--to 缺失）")
+    emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）" % path, args.json)
+    return 0
+
+
 # ---------------------------------------------------------------- 任务包与等待
 
 
@@ -791,7 +913,8 @@ TEAM_SECTION = (
 )
 
 
-def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = False) -> str:
+def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = False,
+                 dispatcher_session: str = "") -> str:
     prompt = (
         f"请在本会话中执行下面的跨项目任务。目标仓库：{target}。\n"
         f"必须遵守本仓库 AGENTS.md 与 agent-workflow/workflows/{kind}.md。\n\n"
@@ -840,6 +963,9 @@ def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = Fa
         "复审通过或再次不通过 / 归档完成 + 最终回报）均落上述必报点 4-7/10；回报时机不得晚于状态转换后一回合内，"
         "异步派发同样适用（DISPATCH-148 的 mid-status 只覆盖 `--wait` 等待超时前，本条款覆盖异步派发全程状态转换）；"
         "派发方收回报后按远程办公状态（remote，DISPATCH-143）判定是否经 IM 主动通知用户。\n"
+    )
+    prompt += report_channel_section(dispatcher_session)
+    prompt += (
         "- 完成后按任务文件要求的回报格式回复，并保留本会话（多轮续跑）；"
         "用户后续细节与决策经派发端转达（`awf-dispatch --session <会话ID>` 续发）。\n"
     )
@@ -1329,7 +1455,7 @@ def commit_range_has_id(target: Path, task_id: str, since_sha) -> bool:
 def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
               workspace: dict, status: str, final_text: str, task: Path,
               next_step: str = "", reused=None, session_note: str = "",
-              module: str = "") -> str:
+              module: str = "", report_to: str = "") -> str:
     flat = re.sub(r"\s+", " ", final_text or "").strip()
     excerpt = flat[:300] + ("…（已截断，完整回报见会话）" if len(flat) > 300 else "")
     workspace_title = (workspace or {}).get("title", "未知工作区")
@@ -1345,6 +1471,8 @@ def log_entry(alias: str, target: Path, title: str, session_id: str, session_tit
         + (f"- 模块：{module}\n" if module else "")
         + f"- 工作区：{workspace_title}（{workspace_id}）\n"
         f"- 会话：{session_id}（{session_title_value or title}）\n"
+        + (f"- 回报通道：派发方会话 {report_to}（目标回报经 `awf-dispatch --report` 投递该会话收件箱）\n"
+           if report_to else "")
         + (f"- 会话来源：{source}\n" if reused is not None else "")
         + (f"- 会话提示：{session_note}\n" if session_note else "")
         + f"- 状态：{status}\n"
@@ -1871,10 +1999,14 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
 
     prompt_ms = int(time.time() * 1000)
+    # DISPATCH-146：派发方会话 = 派发方运行本命令时所在会话（env DSH_SESSION_ID），
+    # 注入目标提示（目标回报经 --report 投递回该会话），同时写入 dispatch/log.md 供审计。
+    dispatcher = dispatcher_session_env()
     try:
         api.prompt(
             session_id,
-            build_prompt(target, title, kind, text, team=args.team),
+            build_prompt(target, title, kind, text, team=args.team,
+                         dispatcher_session=dispatcher),
             str(uuid.uuid4()),
         )
     except DispatchError as error:
@@ -1901,6 +2033,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             reused=source,
             session_note=session_note,
             module=module,
+            report_to=dispatcher,
         )
         log_path = append_log(entry)
         payload = {
@@ -1941,7 +2074,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         )
         entry = log_entry(target.name, target, title, session_id, final_title,
                           workspace, status, "", task,
-                          reused=source, session_note=session_note, module=module)
+                          reused=source, session_note=session_note, module=module, report_to=dispatcher)
         log_path = append_log(entry)
         payload = {
             "ok": False,
@@ -1986,7 +2119,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         message = "会话疑似僵尸（回合即时结束且零输出），请用 --new 重派或在 GUI 重开会话"
         entry = log_entry(target.name, target, title, session_id, final_title,
                           workspace, status, "", task,
-                          reused=source, session_note=session_note, module=module)
+                          reused=source, session_note=session_note, module=module, report_to=dispatcher)
         log_path = append_log(entry)
         payload = {
             "ok": False,
@@ -2029,7 +2162,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         )
         entry = log_entry(target.name, target, title, session_id, final_title,
                           workspace, status, final_text or "", task,
-                          reused=source, session_note=session_note, module=module)
+                          reused=source, session_note=session_note, module=module, report_to=dispatcher)
         log_path = append_log(entry)
         payload = {
             "ok": False,
@@ -2065,7 +2198,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     status = "完成（已落地：commit）" if landed == "commit" else "完成（已落地：归档）"
     entry = log_entry(target.name, target, title, session_id, final_title,
                       workspace, status, final_text or "", task,
-                      reused=source, session_note=session_note, module=module)
+                      reused=source, session_note=session_note, module=module, report_to=dispatcher)
     log_path = append_log(entry)
 
     payload = {
@@ -2392,7 +2525,15 @@ def main(argv=None) -> int:
             "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
             "        先拆 2–3 个可并行子任务、声明依赖、队长汇总；插件不可用时目标 agent\n"
             "        忽略该节，按普通会话完成。缺省不追加，任务包与旧版一致。\n"
-            "\n退出码：0 成功（--wait 时回合已结束且已落地；未等待时表示已发送）；\n"
+            "\n--report（DISPATCH-146 回报投递通道）：目标会话在任一必报点/中途状态回报时，把回报文本\n"
+            "        投递到派发方会话收件箱——`awf-dispatch --report --to <派发方会话ID> \"<回报文本>\"`\n"
+            "        （--from 默认取当前会话 env DSH_SESSION_ID，--ticket 可带派发单号；--dry-run 只渲染不发送）；\n"
+            "        经 RPC 推送进派发方会话 inbox 并触发其回合处理，派发方无需轮询即可收到；\n"
+            "        RPC 不可达（GUI 关闭 / 无凭证）或未指定 --to 时降级写收件箱文件\n"
+            "        dispatch/reports/inbox/<来源会话ID>.md（派发方可查）。不派发任务、不加账本、不改目标仓库。\n"
+            "\n--screen-state（DISPATCH-143）：只查询本机显示器状态并退出（on/off/locked/unknown），\n"
+            "        不派发；off/locked＝远程办公状态（remote），需用户确认的决策由派发端经 IM 即时通知用户。\n"
+            "\n退出码：0 成功（--wait 时回合已结束且已落地；未等待时表示已发送；--report 表示已投递/已落收件箱）；\n"
             "        2 前置门或派发失败；3 --wait 超时（回合未结束、或已结束但未落地）；\n"
             "        4 疑似僵尸会话（回合即时结束且零输出）；5 headless 子进程非零退出；\n"
             "        1 未预期异常。\n"
@@ -2512,6 +2653,21 @@ def main(argv=None) -> int:
              "locked 锁屏 / unknown 未知（DISPATCH-143：off/locked＝远程办公状态（remote），"
              "决策经 IM 即时通知；失败保守 unknown）",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="回报投递模式（DISPATCH-146）：把回报文本经通道投递到派发方会话收件箱"
+             "（RPC 推送，派发方无需轮询即可收到），RPC 不可达 / 未指定 --to 时降级写"
+             "收件箱文件 dispatch/reports/inbox/；不派发任务",
+    )
+    parser.add_argument("--text", default="",
+                        help="--report 模式的回报文本（缺省取第一个位置参数，或经 stdin 读取）")
+    parser.add_argument("--to", default="",
+                        help="--report 模式：派发方会话 ID（投递目标；缺省则降级写收件箱文件）")
+    parser.add_argument("--from", dest="from_id", default="",
+                        help="--report 模式：来源会话 ID（默认取 env DSH_SESSION_ID）")
+    parser.add_argument("--ticket", default="",
+                        help="--report 模式：关联派发单/任务编号（写入回报消息便于派发方归因）")
     # DISPATCH-139 P1：--allow-dirty[=tasks] 范围豁免——把 `--allow-dirty=<scope>` 归一为
     # 裸 `--allow-dirty`（store_true），scope 单独记录；裸 --allow-dirty 向后兼容全豁免。
     allow_dirty_scope = ""
@@ -2542,6 +2698,16 @@ def main(argv=None) -> int:
         )
     if args.apply and not args.prune:
         parser.error("--apply 只能配合 --prune 使用")
+    # DISPATCH-146：--report 与其它模式互斥（回报投递独立于派发）。第一个位置
+    # 参数即回报文本（与 `--report "<回报文本>"` 命令形式一致）；第二个位置参数
+    # （task）仍不允许。
+    if args.report and (args.prune or args.session or args.headless or args.handoff
+                        or args.wait or args.task):
+        parser.error(
+            "--report 只用于回报投递（DISPATCH-146 回报投递通道），不能与 --prune/--session/"
+            "--headless/--handoff/--wait 或第二个位置参数（task）同用；回报投递示例："
+            "awf-dispatch --report --to <派发方会话ID> \"<回报文本>\""
+        )
     if args.session and not args.reuse:
         parser.error("--session 与 --new 互斥：指定会话时不会再新建")
     if args.session and (args.headless or args.handoff):
@@ -2561,6 +2727,12 @@ def main(argv=None) -> int:
         else:
             print(state)
         return 0
+    if args.report:
+        try:
+            return run_report(args)
+        except DispatchError as error:
+            print(error, file=sys.stderr)
+            return EXIT_FAIL
     if not args.target or not args.task:
         parser.error("缺少参数：需要 target 与 task（或用 --prune 归档票据）")
 

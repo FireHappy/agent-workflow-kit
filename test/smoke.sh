@@ -2956,6 +2956,47 @@ if grep -q '转派链卡点必报' "$KIT_DIR/bin/awf-dispatch" \
 else
   bad "DISPATCH-145 转派链卡点必报条款缺失或未同步"
 fi
+# 30.13 DISPATCH-146：回报投递通道（回报经通道投递派发方 / --report 推送派发方会话 inbox / 收件箱降级 / 双副本同步）
+if grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q -- '--report' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '回报经通道投递派发方' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q 'dispatch/reports/inbox' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q 'DSH_SESSION_ID' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '【回报投递】' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '回报经通道投递派发方' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q 'DISPATCH-146' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'DISPATCH-146' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q 'DISPATCH-146' "$KIT_DIR/AGENTS.md"; then
+  ok "DISPATCH-146 回报投递通道（--report 推送派发方会话 inbox / 收件箱降级 / 非仅写会话）注入文本与文档/模板同步"
+else
+  bad "DISPATCH-146 回报投递通道缺失或未同步"
+fi
+# 30.13b DISPATCH-146：--report --dry-run 渲染回报消息（不依赖 GUI，本地可复现；含标记/来源/派发单）
+if "$KIT_DIR/bin/awf-dispatch" --report "必报点 3 里程碑完成：DEV-156 已实现回报通道" \
+     --to session-demo-0001 --from session-demo-0002 --ticket DISPATCH-146 --dry-run 2>&1 \
+   | grep -q '【回报投递】'; then
+  ok "DISPATCH-146 --report --dry-run 渲染回报消息（不联网）"
+else
+  bad "DISPATCH-146 --report --dry-run 未渲染回报消息"
+fi
+# 30.13c DISPATCH-146：--report 与派发参数互斥（第一个位置参数=回报文本，第二个=非法）
+if "$KIT_DIR/bin/awf-dispatch" --report "x" demo02 2>&1 | grep -q '不能与'; then
+  ok "DISPATCH-146 --report 与第二个位置参数互斥（第一个位置参数=回报文本；既有调用方式不变）"
+else
+  bad "DISPATCH-146 --report 互斥校验缺失"
+fi
+# 30.13d DISPATCH-146：--report 缺文本 → 干净报错 + 退出码 2（不抛 traceback）
+if "$KIT_DIR/bin/awf-dispatch" --report >/tmp/awf-report-notext.out 2>&1; then
+  bad "DISPATCH-146 --report 缺文本应退出码 2"
+elif grep -q 'Traceback' /tmp/awf-report-notext.out; then
+  bad "DISPATCH-146 --report 缺文本不应抛 traceback"
+elif grep -q '需要回报文本' /tmp/awf-report-notext.out; then
+  ok "DISPATCH-146 --report 缺文本干净报错 + 退出码 2"
+else
+  bad "DISPATCH-146 --report 缺文本报错信息缺失"
+fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '用户在目标会话内直接回复' "$KIT_DIR/docs/dispatch.md" \
