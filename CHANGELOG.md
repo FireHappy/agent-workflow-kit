@@ -1,3 +1,7 @@
+## [1.1.6] - 2026-11-05
+
+### Fixed
+- **`awf-dispatch --screen-state` CoreGraphics 探针段错误（DISPATCH-143 锁屏判定）**：`CFDictionaryGetValue` 的 key 由 `c_char_p` 裸指针改为 `CFStringCreateWithCString`（kCFStringEncodingUTF8）构造 CFStringRef——CFEqual 不再裸指针崩溃（macOS 弹出崩溃报告噪声；探针本已子进程隔离 + pmset 兜底，主流程不崩）；3 次运行验证无崩
 ## [1.1.5] - 2026-11-05
 
 ### Added
