@@ -1156,3 +1156,8 @@
 - 派发方核验：✅ 完成回报（DEV-057）内容全部核验通过——设备 md5 9846ec49b4529e2ec2ecc4d9d43c3ffe 与构建产物逐字节一致；logcat 0 FATAL；客户端 PID 3327 存活；源码零改动
 - 链路全环节：票据 M1 校验（缺头部拒→补全过）→ G1-G4 前置门 → G3 多写者（--new --allow-active）→ 会话上限（--force）→ 异步派发 → 必报点1+2受理 → 必报点10完成+收尾句 → 核验通过 → 归档
 - 注意：本派发方会话超 3 上限（4 个 [awf] 会话）——可 --prune 清理
+
+## 2026-11-05 20:50 崩溃修复：CoreGraphics 探针 CFString key（派发流程 --screen-state）
+- 根因：awf-dispatch `_session_locked_cg` CoreGraphics ctypes 探针用 c_char_p 裸指针传 key 给 CFDictionaryGetValue（期望 CFStringRef），CFEqual 比较段错误（macOS 弹崩溃报告噪音）；子进程隔离已保证主流程不崩、pmset 兜底
+- 修复：CFStringCreateWithCString(kCFStringEncodingUTF8) 构造 key；3 次运行 rc=0 无崩溃
+- 用户怀疑正确：派发流程 --screen-state 触发
