@@ -3033,6 +3033,51 @@ if "$KIT_DIR/bin/awf-dispatch" --report "任务完成，会话空闲，可续发
 else
   bad "DISPATCH-147 收尾句未走 --report 通道"
 fi
+
+# 30.15 DEV-165：回报投递头用「项目名＋会话名」，查不到回退会话 ID
+if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+import importlib.machinery
+import importlib.util
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_reuse_under_test", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+
+class _FakeSessionsApi:
+    def sessions(self):
+        return [
+            {"sessionId": "s-1", "cwd": "/Users/chenlin/projects/OpenXR-UXR",
+             "projections": {"values": {"title": "[awf] [agent-workflow-kit] [打包测试]"}}},
+            {"sessionId": "s-2", "cwd": "/tmp/naked", "projections": {"values": {}}},
+        ]
+
+
+api = _FakeSessionsApi()
+assert module.session_display_label(api, "s-1") == "OpenXR-UXR「[awf] [agent-workflow-kit] [打包测试]」", \
+    module.session_display_label(api, "s-1")
+assert module.session_display_label(api, "s-2") == "naked", module.session_display_label(api, "s-2")
+assert module.session_display_label(api, "s-miss") == "s-miss"
+assert module.session_display_label(None, "") == "未知"
+msg = module.render_report_message(
+    "s-1", "s-2", "D-1", "正文",
+    source_label=module.session_display_label(api, "s-1"),
+    target_label=module.session_display_label(api, "s-2"))
+assert "- 来源：OpenXR-UXR「[awf] [agent-workflow-kit] [打包测试]」" in msg, msg
+assert "- 派发方：naked" in msg, msg
+assert "- 派发单：D-1" in msg and "【回报投递】" in msg and "正文" in msg
+old = module.render_report_message("s-1", "s-2", "D-1", "正文")
+assert "- 来源：s-1" in old and "- 派发方：s-2" in old, old
+PY
+then
+  ok "DEV-165 回报投递头=项目名＋会话名（查不到回退会话 ID）"
+else
+  bad "DEV-165 回报投递头改造未通过"
+fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '用户在目标会话内直接回复' "$KIT_DIR/docs/dispatch.md" \

@@ -798,18 +798,41 @@ def sanitize_filepart(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", value or "") or "unknown"
 
 
-def render_report_message(source: str, target_session: str, ticket: str, body: str) -> str:
+def session_display_label(api, session_id: str) -> str:
+    """把会话 ID 渲染成「项目名（cwd basename）＋会话标题」的人类可读标签；
+    查不到 / API 不可达时回退原始 ID（投递头不再显示无意义的裸 UUID，DEV-165）。"""
+    if not session_id:
+        return "未知"
+    if api is not None:
+        try:
+            for row in api.sessions():
+                if row.get("sessionId") == session_id:
+                    cwd = row.get("cwd") or ""
+                    project = os.path.basename(os.path.normpath(cwd)) if cwd else ""
+                    values = (row.get("projections") or {}).get("values") or {}
+                    title = values.get("title") or ""
+                    label = (project + ("「%s」" % title)) if (project and title) else (project or title)
+                    return label or session_id
+        except Exception:
+            pass
+    return session_id
+
+
+def render_report_message(source: str, target_session: str, ticket: str, body: str,
+                          source_label: str = "", target_label: str = "") -> str:
     """组装回报投递消息：标记行 + 时间戳 + 来源/派发方/派发单 + 回报正文。
 
     纯函数（时间戳当次生成），供 --report --dry-run 渲染与 smoke 断言。
+    source_label / target_label 传入时投递头显示「项目名＋会话名」（人类可读，DEV-165），
+    否则回退会话 ID（无 API 的降级/离线场景）。
     """
     lines = [
         REPORT_MARKER,
         "- 时间：%s" % datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
-        "- 来源会话：%s" % (source or "未知"),
+        "- 来源：%s" % (source_label or source or "未知"),
     ]
     if target_session:
-        lines.append("- 派发方会话：%s" % target_session)
+        lines.append("- 派发方：%s" % (target_label or target_session))
     if ticket:
         lines.append("- 派发单：%s" % ticket)
     lines.append("")
@@ -897,7 +920,14 @@ def run_report(args) -> int:
     source = (args.from_id or dispatcher_session_env() or "").strip()
     target_session = (args.to or "").strip()
     ticket = (args.ticket or "").strip()
-    message = render_report_message(source, target_session, ticket, text)
+    try:
+        _label_api = DshApi()
+        source_label = session_display_label(_label_api, source) if source else ""
+        target_label = session_display_label(_label_api, target_session) if target_session else ""
+    except Exception:
+        source_label, target_label = "", ""
+    message = render_report_message(source, target_session, ticket, text,
+                                    source_label=source_label, target_label=target_label)
     if args.dry_run:
         emit("dry-run：回报投递通道（DISPATCH-146），未实际发送", args.json)
         emit("投递目标：%s" % (target_session or "未指定（将降级写收件箱文件）"), args.json)
