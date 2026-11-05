@@ -2997,6 +2997,31 @@ elif grep -q '需要回报文本' /tmp/awf-report-notext.out; then
 else
   bad "DISPATCH-146 --report 缺文本报错信息缺失"
 fi
+# 30.14 DISPATCH-147：空闲/收尾/自检报平安（无任务发生也报平安，复用 --report 通道，追加式进总表）
+if grep -q '空闲/收尾/自检（DISPATCH-147' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '11 空闲/收尾（DISPATCH-147 追加' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '任务完成，会话空闲，可续发（来源会话：<会话ID>）' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '空闲+仍在线+上次动作时间+无卡死声明' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '空闲也要报' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '自检状态' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q 'DISPATCH-147' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q '任务完成，会话空闲，可续发' "$KIT_DIR/templates/workflows/cross-project.md" \
+   && grep -q 'DISPATCH-147' "$KIT_DIR/docs/dispatch.md" \
+   && grep -q 'DISPATCH-147' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   && grep -q 'DISPATCH-147' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+   && grep -q 'DISPATCH-147' "$KIT_DIR/AGENTS.md"; then
+  ok "DISPATCH-147 空闲/收尾/自检报平安（收尾句/空闲心跳/自检状态，追加式进总表 11）注入文本与文档/模板同步"
+else
+  bad "DISPATCH-147 空闲/收尾/自检报平安条款缺失或未同步"
+fi
+# 30.14b DISPATCH-147：收尾句可经 --report 通道渲染投递（复用 DEV-156 通道，不新造）
+if "$KIT_DIR/bin/awf-dispatch" --report "任务完成，会话空闲，可续发（来源会话：session-demo）" \
+     --to session-demo-0001 --from session-demo-0002 --ticket DISPATCH-147 --dry-run 2>&1 \
+   | grep -q '任务完成，会话空闲，可续发'; then
+  ok "DISPATCH-147 收尾报平安可经 --report 通道渲染（复用通道，不新造）"
+else
+  bad "DISPATCH-147 收尾句未走 --report 通道"
+fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '用户在目标会话内直接回复' "$KIT_DIR/docs/dispatch.md" \
