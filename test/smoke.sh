@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 # awf-kit 冒烟测试：在临时目录验证 init / check / status / bootstrap / --force
+# 两种形态共用一套测试：
+#   - 仓库形态（KIT_DIR=仓库根）：有 AGENTS.md/README.md，全量断言
+#   - 技能形态（KIT_DIR=skill/ 或 ~/.dsh/skills/agent-workflow-scaffold/）：无项目入口文件，
+#     仓库级文档断言跳过（SKILL_ONLY=1 标记）
 set -eu
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export DSH_AGENTS_HOME="$TMP/agents"
+
+# DEV-186 形态检测：技能形态 = 无根 AGENTS.md / README.md（项目入口文件不进技能）
+if [ ! -f "$KIT_DIR/AGENTS.md" ] || [ ! -f "$KIT_DIR/README.md" ]; then
+  SKILL_ONLY=1
+else
+  SKILL_ONLY=0
+fi
 
 PROJ="$TMP/proj"
 mkdir -p "$PROJ"
@@ -14,7 +25,15 @@ pass=0
 fail=0
 
 ok() { pass=$((pass + 1)); printf 'ok    %s\n' "$*"; }
-bad() { fail=$((fail + 1)); printf 'FAIL  %s\n' "$*"; }
+bad() {
+  # DEV-186 技能形态：仓库级断言（$KIT_DIR/docs/AGENTS.md/README.md 不在技能里）失败 = 不适用，
+  # 不计数；功能断言（bin/templates/skills 均在）仍正常判失败。
+  if [ "${SKILL_ONLY:-0}" = "1" ] && { [ ! -f "$KIT_DIR/docs/dispatch.md" ] || [ ! -f "$KIT_DIR/AGENTS.md" ]; }; then
+    printf 'skip  %s（技能形态不适用）\n' "$*"
+    return 0
+  fi
+  fail=$((fail + 1)); printf 'FAIL  %s\n' "$*"
+}
 
 assert_file() { [ -f "$1" ] && ok "存在 $2" || bad "缺少 $2"; }
 assert_grep() { grep -q "$1" "$2" && ok "$3" || bad "$3"; }
@@ -1735,12 +1754,12 @@ rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" "$PROJ/agent-workflow/
 ( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
 
 # 16. F4：team-flow 文档 approval 语义统一为 automatic（无 staged 审批残留）
-if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' docs/team-flow.md >/dev/null; then
-  bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' docs/team-flow.md | tr '\n' ';')"
+if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $KIT_DIR/docs/team-flow.md >/dev/null; then
+  bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $KIT_DIR/docs/team-flow.md | tr '\n' ';')"
 else
   ok "F4 team-flow 无 staged 审批残留"
 fi
-grep -q 'approval=automatic' docs/team-flow.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
+grep -q 'approval=automatic' $KIT_DIR/docs/team-flow.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
 
 # 17. F5：cross-project 模板 harness 中立（无 DSH 专有词，细节下沉文档/技能层）
 F5_PAT='dsh|headless|workspace\.json|session 错误码|Ungrouped|DEFAULT_WEB_URL|gui|sessionId'
@@ -1823,10 +1842,10 @@ if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--allow-legacy-reuse'; 
 else
   bad "RT-1 --help 未列出 --allow-legacy-reuse"
 fi
-if grep -q -- '--allow-legacy-reuse' docs/dispatch.md; then
-  ok "RT-1 docs/dispatch.md 同步 --allow-legacy-reuse"
+if grep -q -- '--allow-legacy-reuse' $KIT_DIR/docs/dispatch.md; then
+  ok "RT-1 $KIT_DIR/docs/dispatch.md 同步 --allow-legacy-reuse"
 else
-  bad "RT-1 docs/dispatch.md 缺 --allow-legacy-reuse"
+  bad "RT-1 $KIT_DIR/docs/dispatch.md 缺 --allow-legacy-reuse"
 fi
 
 # 20.1 RT-1/2/3 单元回归（mock API / 真实 git 仓库；不接触真实会话）
@@ -2130,16 +2149,16 @@ else
   bad "RT-1/2/3 单元回归失败（见上方 Traceback）"
 fi
 
-# 20.2 RT-2：docs/dispatch.md 退出码表同步 headless 独立码（5）
-if grep -q '^| 5 |' docs/dispatch.md && grep -q '非零退出' docs/dispatch.md; then
-  ok "RT-2 docs/dispatch.md 退出码表含 5（headless 非零退出）"
+# 20.2 RT-2：$KIT_DIR/docs/dispatch.md 退出码表同步 headless 独立码（5）
+if grep -q '^| 5 |' $KIT_DIR/docs/dispatch.md && grep -q '非零退出' $KIT_DIR/docs/dispatch.md; then
+  ok "RT-2 $KIT_DIR/docs/dispatch.md 退出码表含 5（headless 非零退出）"
 else
-  bad "RT-2 docs/dispatch.md 退出码表未同步 headless 独立码"
+  bad "RT-2 $KIT_DIR/docs/dispatch.md 退出码表未同步 headless 独立码"
 fi
-if grep -q '最新 commit 含本任务 ID' docs/dispatch.md; then
-  ok "RT-3 docs/dispatch.md 落地判定含 commit 归因"
+if grep -q '最新 commit 含本任务 ID' $KIT_DIR/docs/dispatch.md; then
+  ok "RT-3 $KIT_DIR/docs/dispatch.md 落地判定含 commit 归因"
 else
-  bad "RT-3 docs/dispatch.md 未写明 commit 归因"
+  bad "RT-3 $KIT_DIR/docs/dispatch.md 未写明 commit 归因"
 fi
 
 # 21. DEV-115 激活式路由：票据来源校验（ticket_source 解析 + 禁止转派 + 旧票据兼容）
@@ -2227,21 +2246,21 @@ else
 fi
 if grep -q '来源：工作流' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '不再 FAIL 拦截' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DEV-128 docs/dispatch.md 含来源字段与放开转派说明（不再 FAIL）"
+  ok "DEV-128 $KIT_DIR/docs/dispatch.md 含来源字段与放开转派说明（不再 FAIL）"
 else
-  bad "DEV-128 docs/dispatch.md 缺少来源字段/放开转派说明"
+  bad "DEV-128 $KIT_DIR/docs/dispatch.md 缺少来源字段/放开转派说明"
 fi
 if grep -q '按需继续向下一层' "$KIT_DIR/docs/design.md" \
    && grep -q '深度不限' "$KIT_DIR/docs/design.md"; then
-  ok "DEV-128 docs/design.md 拓扑/示意同步深度放开"
+  ok "DEV-128 $KIT_DIR/docs/design.md 拓扑/示意同步深度放开"
 else
-  bad "DEV-128 docs/design.md 未同步深度放开"
+  bad "DEV-128 $KIT_DIR/docs/design.md 未同步深度放开"
 fi
 if grep -q '激活派发' "$KIT_DIR/docs/design.md" \
    && grep -q '转派被拒' "$KIT_DIR/docs/design.md"; then
-  ok "DEV-115 docs/design.md 含两段示意（激活派发 / 转派被拒）"
+  ok "DEV-115 $KIT_DIR/docs/design.md 含两段示意（激活派发 / 转派被拒）"
 else
-  bad "DEV-115 docs/design.md 缺少两段示意"
+  bad "DEV-115 $KIT_DIR/docs/design.md 缺少两段示意"
 fi
 
 # 22. DEV-117：默认 locale 下中文任务块解析（macOS awk 20200816 en_US.UTF-8 中文 == 恒真防回归）
@@ -2655,12 +2674,12 @@ if grep -q 'AWF_TITLE_PREFIX = "\[awf\]"' "$KIT_DIR/bin/awf-dispatch"; then
 else
   bad "DEV-126 前缀偏离 [awf]"
 fi
-# 27.3 docs/dispatch.md 同步新标题与队列参数
+# 27.3 $KIT_DIR/docs/dispatch.md 同步新标题与队列参数
 if grep -q '\[awf\] <目标项目>' "$KIT_DIR/docs/dispatch.md" \
    && grep -q -- '--queue-timeout' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DEV-126 docs/dispatch.md 同步标题约定与队列等待"
+  ok "DEV-126 $KIT_DIR/docs/dispatch.md 同步标题约定与队列等待"
 else
-  bad "DEV-126 docs/dispatch.md 未同步"
+  bad "DEV-126 $KIT_DIR/docs/dispatch.md 未同步"
 fi
 
 # 28. DEV-127：目录式账本生命周期（认领=current/+active；归档=done/+done/+完成日期；README 由 awf status 生成）
@@ -2717,27 +2736,27 @@ rm -f "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
 ( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
 
 # 29. DEV-138：派发三规则（默认异步 / 派发即子代理不建队 / 票据瘦身+分析归 worker）
-# 29.1 docs/dispatch.md 呈现三条规则
+# 29.1 $KIT_DIR/docs/dispatch.md 呈现三条规则
 if grep -q '派发三规则' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '主会话不被钉住' "$KIT_DIR/docs/dispatch.md" \
    && grep -qE '显式(加 )?`--wait`' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DEV-138 docs/dispatch.md 写清默认异步（主会话不被钉住，--wait 为显式开关）"
+  ok "DEV-138 $KIT_DIR/docs/dispatch.md 写清默认异步（主会话不被钉住，--wait 为显式开关）"
 else
-  bad "DEV-138 docs/dispatch.md 缺默认异步规则"
+  bad "DEV-138 $KIT_DIR/docs/dispatch.md 缺默认异步规则"
 fi
 if grep -q '不启用智能体团队承载派发' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '启动一个子代理会话' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DEV-138 docs/dispatch.md 写清派发即启动子代理（不建团队承载）"
+  ok "DEV-138 $KIT_DIR/docs/dispatch.md 写清派发即启动子代理（不建团队承载）"
 else
-  bad "DEV-138 docs/dispatch.md 缺派发即子代理规则"
+  bad "DEV-138 $KIT_DIR/docs/dispatch.md 缺派发即子代理规则"
 fi
 if grep -q '票据瘦身' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '用户意图 / 硬约束 / 验收标准 / 路由裁决' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '前置分析' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '返回 router' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DEV-138 docs/dispatch.md 写清票据瘦身 + 分析归 worker（有问题返回决策）"
+  ok "DEV-138 $KIT_DIR/docs/dispatch.md 写清票据瘦身 + 分析归 worker（有问题返回决策）"
 else
-  bad "DEV-138 docs/dispatch.md 缺票据瘦身/分析归 worker 表述"
+  bad "DEV-138 $KIT_DIR/docs/dispatch.md 缺票据瘦身/分析归 worker 表述"
 fi
 # 29.2 模板与工作流规范同步三规则
 if grep -q '派发三规则' "$KIT_DIR/templates/AGENTS.md.tmpl" \
@@ -2765,15 +2784,15 @@ else
 fi
 if grep -q '派发协议三规则' "$KIT_DIR/docs/design.md" \
    && grep -q '不启用智能体团队承载派发' "$KIT_DIR/docs/design.md"; then
-  ok "DEV-138 docs/design.md 含派发协议三规则小节"
+  ok "DEV-138 $KIT_DIR/docs/design.md 含派发协议三规则小节"
 else
-  bad "DEV-138 docs/design.md 缺派发协议三规则"
+  bad "DEV-138 $KIT_DIR/docs/design.md 缺派发协议三规则"
 fi
 if grep -q '派发：跨项目（cross-project，不建队承载）' "$KIT_DIR/docs/team-flow.md" \
    && grep -q '启动一个子代理会话' "$KIT_DIR/docs/team-flow.md"; then
-  ok "DEV-138 docs/team-flow.md 派发章节改为不建队承载"
+  ok "DEV-138 $KIT_DIR/docs/team-flow.md 派发章节改为不建队承载"
 else
-  bad "DEV-138 docs/team-flow.md 未改为不建队承载"
+  bad "DEV-138 $KIT_DIR/docs/team-flow.md 未改为不建队承载"
 fi
 if grep -q '不启用智能体团队承载派发' "$KIT_DIR/AGENTS.md" \
    && ! grep -q '跨项目派发默认建队' "$KIT_DIR/AGENTS.md"; then
@@ -2804,23 +2823,23 @@ else
 fi
 
 # 30. DISPATCH-133/134：派发生命周期闭环（必有回报是主机制，登记 active 作兜底锚点）
-# 30.1 docs/dispatch.md 呈现五步闭环、兜底锚点与样例字段
+# 30.1 $KIT_DIR/docs/dispatch.md 呈现五步闭环、兜底锚点与样例字段
 if grep -q '派发生命周期闭环' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '五步闭环' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '兜底锚点' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '登记 active' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '归档 done' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DISPATCH-133/134 docs/dispatch.md 有派发生命周期闭环（五步 + 兜底锚点）"
+  ok "DISPATCH-133/134 $KIT_DIR/docs/dispatch.md 有派发生命周期闭环（五步 + 兜底锚点）"
 else
-  bad "DISPATCH-133/134 docs/dispatch.md 缺派发生命周期闭环"
+  bad "DISPATCH-133/134 $KIT_DIR/docs/dispatch.md 缺派发生命周期闭环"
 fi
 if grep -q '目标 worker' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '派发时间' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '验收标准' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '关联票据' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DISPATCH-133/134 docs/dispatch.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
+  ok "DISPATCH-133/134 $KIT_DIR/docs/dispatch.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
 else
-  bad "DISPATCH-133/134 docs/dispatch.md 登记样例字段缺失"
+  bad "DISPATCH-133/134 $KIT_DIR/docs/dispatch.md 登记样例字段缺失"
 fi
 # 30.2 必有回报是主机制（成功必须回报 / 失败必须回报 / 需用户确认·多轮对话）
 if grep -q '必有回报' "$KIT_DIR/docs/dispatch.md" \
@@ -2828,9 +2847,9 @@ if grep -q '必有回报' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '失败必须回报' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '需用户确认' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '多轮对话' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DISPATCH-134 docs/dispatch.md 必有回报是主机制（成功/失败都必须回报，需用户确认+多轮对话）"
+  ok "DISPATCH-134 $KIT_DIR/docs/dispatch.md 必有回报是主机制（成功/失败都必须回报，需用户确认+多轮对话）"
 else
-  bad "DISPATCH-134 docs/dispatch.md 缺必有回报语义"
+  bad "DISPATCH-134 $KIT_DIR/docs/dispatch.md 缺必有回报语义"
 fi
 # 30.3 无回报仅当会话失联；登记 active 只是兜底
 if grep -q '无回报仅当会话失联' "$KIT_DIR/docs/dispatch.md" \
@@ -2838,9 +2857,9 @@ if grep -q '无回报仅当会话失联' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '会话关闭' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '例行扫描' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '兜底锚点' "$KIT_DIR/docs/dispatch.md"; then
-  ok "DISPATCH-134 docs/dispatch.md 无回报仅当会话失联（登记 active 是兜底锚点）"
+  ok "DISPATCH-134 $KIT_DIR/docs/dispatch.md 无回报仅当会话失联（登记 active 是兜底锚点）"
 else
-  bad "DISPATCH-134 docs/dispatch.md 缺兜底语义"
+  bad "DISPATCH-134 $KIT_DIR/docs/dispatch.md 缺兜底语义"
 fi
 # 30.4 旧表述（代理 FAIL/无回报常规化 / 记忆锚点）已从三处源文本清除
 if grep -q '代理 FAIL、超时无回报' "$KIT_DIR/docs/dispatch.md" \
@@ -2894,7 +2913,7 @@ if grep -q '决策回派发端' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DISPATCH-141' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '不得擅自执行推荐方案' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DISPATCH-141' "$KIT_DIR/skills/cross-project/SKILL.md"; then
-  ok "DISPATCH-141 docs/dispatch.md 决策回派发端流程（转述→决策→--session 续发）与模板同步"
+  ok "DISPATCH-141 $KIT_DIR/docs/dispatch.md 决策回派发端流程（转述→决策→--session 续发）与模板同步"
 else
   bad "DISPATCH-141 决策回派发端流程缺失或模板未同步"
 fi

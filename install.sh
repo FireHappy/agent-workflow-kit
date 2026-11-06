@@ -35,13 +35,15 @@ install_skill() {
     ln -s "$src" "$dest"
     echo "已安装（link）：${dest}"
   else
-    # 实体化：只复制技能内容（SKILL.md + skills/ + bin/ + templates/ + test/），不包含项目本体
+    # 实体化：只复制技能内容（SKILL.md + skills/ + bin/ + templates/ + test/ + docs/），
+    # 不包含项目本体（AGENTS.md/README.md 是 kit 项目自己的入口，不进技能）
     mkdir -p "$dest"
     cp "$src/SKILL.md" "$dest/SKILL.md"
     cp -R "$src/skills" "$dest/skills"
     cp -R "$src/bin" "$dest/bin"
     cp -R "$src/templates" "$dest/templates"
     cp -R "$src/test" "$dest/test"
+    [ -d "$src/docs" ] && cp -R "$src/docs" "$dest/docs"
     echo "已安装（copy）：${dest}"
   fi
 }
