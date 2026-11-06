@@ -65,7 +65,6 @@ cd ~/Documents/GitHub/agent-workflow-kit
 └── agent-workflow/
     ├── project.yaml          项目事实（唯一输入）
     ├── README.md             规范正文
-    ├── workflows/            dev / debug / docs / review / cross-project
     ├── tasks/                status + todo/current/done
     ├── memory/               cache / history
     ├── tools/                操作手册
@@ -73,6 +72,9 @@ cd ~/Documents/GitHub/agent-workflow-kit
     ├── bin/awf               bootstrap / check / status / register / projects / find
     ├── bin/awf-dispatch      跨项目派发（DSH 会话适配）
     └── check_workflow.sh     兼容入口
+
+（v1.2.0 技能化：无 workflows/ 目录——流程细节在技能 agent-workflow-scaffold 的
+skills/workflows/，AGENTS.md 路由内联状态机 + 强制加载技能即流程入口）
 ```
 
 ### 忽略工作流入库（团队项目）

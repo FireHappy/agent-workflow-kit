@@ -80,6 +80,21 @@ agent-workflow/
 - [ ] 入口含“任务路由”：有团队能力时优先派发，无则单会话
 - [ ] 需要跨项目发现时，`awf projects` 能列出新项目，`awf find <别名>` 能返回路径
 
+## 流程手册（技能内置，v1.2.0 骨架化）
+
+项目内 `agent-workflow/workflows/*.md` 只保留骨架（状态机 + 路由）；**完整执行细节在本技能**：
+
+| 流程 | 细节手册 | 状态机 |
+|------|----------|--------|
+| dev | `skills/workflows/dev.md` | 认领→方案→实现→验证→Review→归档 |
+| debug | `skills/workflows/debug.md` | 认领→诊断→收集证据→验证假设→修复→归档 |
+| docs | `skills/workflows/docs.md` | 认领→大纲与核实→撰写→审阅→归档 |
+| review | `skills/workflows/review.md` | 复核→通过/需修改→修复→复审→归档 |
+| release | `skills/workflows/release.md` | 探测→bump→CHANGELOG→tag→收尾 |
+| cross-project | `skills/workflows/cross-project.md` | G1-G4 门→派发→回报→核验→归档 |
+
+执行任务时按任务类型加载对应手册（AGENTS.md 路由指向本技能）；项目骨架内保留一行状态机摘要作无技能环境的兜底。
+
 ## 跨项目派发（完整手册，已并入本技能）
 
 # 跨项目派发

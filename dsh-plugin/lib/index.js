@@ -300,27 +300,29 @@ async function projectVersions(projectPath) {
 
 /**
  * 汇总版本状态：latest（已最新）/ outdated（落后，给出 upgradeTo）/ unknown（kit 或版本不可读）。
- * 双信号规则：先比 AWF_VERSION 代次；代次持平（或读不到）再比发布 semver。
+ * DEV-184（v1.2.0 骨架化）：升级判定基于**骨架契约版本（AWF_VERSION 代次）**——
+ *   骨架（bin/awf 结构、账本格式、AGENTS.md 模板）变化才提示 upgrade；
+ *   发布版 semver（细节流程更新）只作显示，不再触发 outdated（细节在技能，符号链接自动生效）。
+ * 规则：AWF 代次可读 → 优先代次比对；代次缺失 → 回退发布版 semver（兼容存量全量副本项目）。
  */
 async function versionStatus(projectPath) {
   const p = await projectVersions(projectPath)
   const k = await kitVersions()
   let status = 'unknown'
   let upgradeTo = null
-  // DEV-133/DEV-178：优先按「项目 version_file 锚点 vs kit version_file 锚点」发布版 semver 判定；
-  // 缺锚点文件回退 AWF 代次
-  if (p.installedRelease && k.latestRelease) {
-    status = semverLt(p.installedRelease, k.latestRelease) === true ? 'outdated' : 'latest'
-  } else if (p.installedAWF !== null && k.latestAWF !== null) {
+  if (p.installedAWF !== null && k.latestAWF !== null) {
+    // 骨架契约版本（DEV-184）：AWF_VERSION 代次是结构性版本，+1 才意味着骨架变更
     status = p.installedAWF < k.latestAWF ? 'outdated' : 'latest'
-  }
-  if (status !== 'outdated' && !p.installedRelease && k.latestRelease && p.scaffoldVersion) {
+  } else if (p.installedRelease && k.latestRelease) {
+    // 代次缺失（旧项目未带 AWF_VERSION）回退发布版 semver 判定
+    status = semverLt(p.installedRelease, k.latestRelease) === true ? 'outdated' : 'latest'
+  } else if (status !== 'outdated' && !p.installedRelease && k.latestRelease && p.scaffoldVersion) {
     const lt = semverLt(p.scaffoldVersion, k.latestRelease)
     if (lt === true) status = 'outdated'
   }
   if (status === 'outdated') {
-    if (!p.installedRelease && p.installedAWF !== null && k.latestAWF !== null && p.installedAWF < k.latestAWF) {
-      upgradeTo = `v${k.latestAWF}`
+    if (p.installedAWF !== null && k.latestAWF !== null && p.installedAWF < k.latestAWF) {
+      upgradeTo = `v${k.latestAWF}（骨架契约升级）`
     } else if (k.latestRelease) {
       upgradeTo = k.latestRelease
     } else {
