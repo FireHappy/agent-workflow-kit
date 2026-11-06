@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:0f4588d8 -->
+<!-- awf:begin v1 digest:379571c8 -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -8,12 +8,12 @@
 1. 读 `agent-workflow/tasks/status.md`（唯一状态摘要，由 awf 生成，不要手改）
 2. 按任务类型**只加载一个**流程手册（细节在技能 agent-workflow-scaffold，项目内无副本）：
    - 技能位置：`~/.dsh/skills/agent-workflow-scaffold`（= agent-workflow-kit 仓库符号链接；其他工具读项目信息后按 `install.sh` 安装或直接读该路径）
-   - 功能开发 / 重构 / 优化 → 技能 `skills/workflows/dev.md`（状态机：认领→方案→实现→验证→Review→归档）
-   - 崩溃 / 报错 / 行为异常 → 技能 `skills/workflows/debug.md`（状态机：认领→诊断→证据→假设→修复→归档）
-   - 文档 / 架构分析 → 技能 `skills/workflows/docs.md`（状态机：认领→大纲→撰写→审阅→归档）
-   - 开发完成待审（dev 子流程，随 dev 一起加载） → 技能 `skills/workflows/review.md`（状态机：复核→通过/需修改→修复→复审→归档）
-   - 跨项目派发 / 交接 → 技能 `skills/workflows/cross-project.md`（G1-G4 门→派发→回报→核验→归档）
-   - 发版 / 版本号 / tag / CHANGELOG → 技能 `skills/workflows/release.md`（探测→bump→CHANGELOG→tag→收尾）
+   - 功能开发 / 重构 / 优化 → 技能 `skills/dev/SKILL.md`（状态机：认领→方案→实现→验证→Review→归档）
+   - 崩溃 / 报错 / 行为异常 → 技能 `skills/debug/SKILL.md`（状态机：认领→诊断→证据→假设→修复→归档）
+   - 文档 / 架构分析 → 技能 `skills/docs/SKILL.md`（状态机：认领→大纲→撰写→审阅→归档）
+   - 开发完成待审（dev 子流程，随 dev 一起加载） → 技能 `skills/review/SKILL.md`（状态机：复核→通过/需修改→修复→复审→归档）
+   - 跨项目派发 / 交接 → 技能 `skills/cross-project/SKILL.md`（G1-G4 门→派发→回报→核验→归档）
+   - 发版 / 版本号 / tag / CHANGELOG → 技能 `skills/release/SKILL.md`（探测→bump→CHANGELOG→tag→收尾）
 3. 项目级技能：本仓库 `skills/` 下的领域技能（如 `cross-project-dispatch`，已并入 agent-workflow-scaffold）相应情况直接加载/阅读，不依赖全局技能目录。
 
 4. 开始前先读 `agent-workflow/memory/history/` 中**同类主题的过往结论**（修复类先读过去修法、生成类先读上次教训、排查类先读已知坑）；有 INDEX.md 则先读索引

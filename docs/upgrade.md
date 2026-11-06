@@ -86,6 +86,6 @@ cd <项目目录> && ./agent-workflow/bin/awf status       # 刷新摘要
 - [ ] 只本地 commit（消息含任务 ID），未 push
 ## v1.2.0 技能化迁移（DEV-184）
 
-- 项目内不再有 `agent-workflow/workflows/` 目录：流程细节全部在技能 agent-workflow-scaffold（`skills/workflows/`），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
+- 项目内不再有 `agent-workflow/workflows/` 目录：流程细节全部在技能 agent-workflow-scaffold（`skills/` 各流程技能），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
 - 存量项目（带 workflows/ 副本）：`./bin/awf upgrade <项目> --slim` 清理副本迁移到技能化形态（细节已在技能，副本不再需要）。
 - 骨架版本（agent-workflow/VERSION）只管 bin/awf、AGENTS.md.tmpl、账本结构等稳定契约；流程细节更新只改技能仓库（符号链接自动生效），项目零升级。

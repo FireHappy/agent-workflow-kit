@@ -735,7 +735,7 @@ cmd_init() {
     cp "$TPL_DIR/README.md" "$target/agent-workflow/README.md"
   fi
   # DEV-184 彻底技能化：不再生成 workflows/ 目录——流程细节在技能 agent-workflow-scaffold
-  # （skills/workflows/），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
+  # （skills/ 各流程技能），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
   # 存量项目迁移用 awf upgrade --slim（清掉全量副本）。
   cp "$TPL_DIR/AGENTS.md.tmpl" "$target/agent-workflow/templates/AGENTS.md.tmpl"
   if [ -f "$TPL_DIR/pre-commit" ]; then
@@ -1634,7 +1634,7 @@ upgrade_usage() {
   2. ./agent-workflow/bin/awf bootstrap  刷新 AGENTS.md 受控区块（区块外保留）
   3. ./agent-workflow/bin/awf check      校验（退出码 = 失败项数量）
 
-v1.2.0 彻底技能化：完整流程细节在技能 agent-workflow-scaffold（skills/workflows/），
+v1.2.0 彻底技能化：完整流程细节在技能 agent-workflow-scaffold（skills/ 各流程技能），
 项目内无 workflows/ 副本——AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
 upgrade 只同步骨架契约（bin/awf/tmpl/锚点）；存量项目带 workflows/ 副本时，
 用 --slim 清理（细节已在技能，副本不再需要）。
@@ -1701,7 +1701,7 @@ cmd_upgrade() {
 
   local wf
   # DEV-184 彻底技能化：项目内不再有 workflows/ 目录（细节在技能 agent-workflow-scaffold
-  # 的 skills/workflows/，AGENTS.md 路由内联状态机即流程入口）。upgrade 不再同步 workflows；
+  # 的 skills/ 各流程技能，AGENTS.md 路由内联状态机即流程入口）。upgrade 不再同步 workflows；
   # --slim 清理存量项目的全量/骨架副本（细节已在技能，副本不再需要），无副本则跳过。
   if [ -d "$awf_dir/workflows" ]; then
     if [ "$slim" -eq 1 ]; then

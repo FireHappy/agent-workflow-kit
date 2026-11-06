@@ -1,4 +1,20 @@
-# 调试工作流
+---
+name: debug
+description: agent-workflow 问题排查流程（认领→诊断→证据→假设→修复→归档）：崩溃/报错/行为异常的排查方法论与回归验证。
+whenToUse: 用户报告崩溃/报错/行为异常、启动 DEBUG-xxx 排查任务、或需先证据后结论的排查流程时——自动加载本技能。
+---
+
+# agent-workflow · 问题排查（技能）
+
+> 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
+> 项目内无 workflow 副本：本技能随仓库符号链接自动更新，项目零升级。
+> 路径约定：以下 `tasks/`、`memory/`、`tools/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
+
+## 适用场景
+
+崩溃 / 报错 / 行为异常。先证据后结论，修复必回归。
+
+## 执行步骤
 
 > 状态入口：`../tasks/debug/`
 > 主规范：`../README.md`
@@ -92,3 +108,20 @@
 - 缺少崩溃日志、输入样本或环境条件
 - 有多个修复策略且代价差异明显
 - 问题已超出当前任务范围
+
+## 自检清单
+
+- [ ] 按状态机推进，每步更新任务块「状态 / 最近更新 / 下一步」
+- [ ] 验证命令实际执行（compile/test），命令不可用写明 `验证阻塞：<原因>` 并置 blocked
+- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
+
+## 禁止事项
+
+- 未验证的判断写「待确认」，不写结论
+- 状态只写 active / blocked / review / verify / handoff；一个任务块只有一个 Owner
+- 归档后必须跑通过校验；status.md 由 awf status 刷新才算完成
+- 不自动 push、不改写历史
+
+## 无技能环境兜底
+
+本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `tools/` 手册与 `memory/history`。

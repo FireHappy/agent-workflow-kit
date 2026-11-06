@@ -268,7 +268,7 @@ def task_title(task: Path, text: str) -> str:
 
 
 def task_type(text: str) -> str:
-    # DEV-184 技能化：技能路径 skills/workflows/{kind}.md 与旧 workflows/{kind}.md 都识别
+    # DEV-184 技能化：技能路径 skills/{kind}/SKILL.md 与旧 workflows/{kind}.md 都识别
     match = re.search(r"(?:skills/)?workflows/(dev|debug|docs)\.md", text)
     if match:
         return match.group(1)
@@ -355,7 +355,7 @@ def ticket_source(text: str) -> str:
 
 
 def check_workflow(target: Path) -> None:
-    # DEV-184 彻底技能化：流程细节在技能 agent-workflow-scaffold（skills/workflows/），
+    # DEV-184 彻底技能化：流程细节在技能 agent-workflow-scaffold（skills/ 各流程技能），
     # AGENTS.md 路由内联状态机 + 强制加载技能即流程入口——workflows/ 不再是必需文件。
     required = [
         "AGENTS.md",
@@ -1059,7 +1059,7 @@ def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = Fa
                  dispatcher_session: str = "") -> str:
     prompt = (
         f"请在本会话中执行下面的跨项目任务。目标仓库：{target}。\n"
-        f"必须遵守本仓库 AGENTS.md 与技能 agent-workflow-scaffold 的 skills/workflows/{kind}.md（按任务类型加载对应流程手册）。\n\n"
+        f"必须遵守本仓库 AGENTS.md 与技能 agent-workflow-scaffold 的 skills/{kind}/SKILL.md（按任务类型加载对应流程手册）。\n\n"
         "----- 任务包开始 -----\n"
         f"{text.rstrip()}\n"
         "----- 任务包结束 -----\n\n"

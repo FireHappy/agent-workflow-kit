@@ -84,16 +84,17 @@ agent-workflow/
 
 项目内 `agent-workflow/workflows/*.md` 只保留骨架（状态机 + 路由）；**完整执行细节在本技能**：
 
-| 流程 | 细节手册 | 状态机 |
-|------|----------|--------|
-| dev | `skills/workflows/dev.md` | 认领→方案→实现→验证→Review→归档 |
-| debug | `skills/workflows/debug.md` | 认领→诊断→收集证据→验证假设→修复→归档 |
-| docs | `skills/workflows/docs.md` | 认领→大纲与核实→撰写→审阅→归档 |
-| review | `skills/workflows/review.md` | 复核→通过/需修改→修复→复审→归档 |
-| release | `skills/workflows/release.md` | 探测→bump→CHANGELOG→tag→收尾 |
-| cross-project | `skills/workflows/cross-project.md` | G1-G4 门→派发→回报→核验→归档 |
+| 流程 | 技能 | 状态机 |
+|------|------|--------|
+| dev | `skills/dev/SKILL.md` | 认领→方案→实现→验证→Review→归档 |
+| debug | `skills/debug/SKILL.md` | 认领→诊断→收集证据→验证假设→修复→归档 |
+| docs | `skills/docs/SKILL.md` | 认领→大纲与核实→撰写→审阅→归档 |
+| review | `skills/review/SKILL.md` | 复核→通过/需修改→修复→复审→归档 |
+| release | `skills/release/SKILL.md` | 探测→bump→CHANGELOG→tag→收尾 |
+| cross-project | `skills/cross-project/SKILL.md` | G1-G4 门→派发→回报→核验→归档 |
 
-执行任务时按任务类型加载对应手册（AGENTS.md 路由指向本技能）；项目骨架内保留一行状态机摘要作无技能环境的兜底。
+执行任务时按任务类型**加载对应技能**（AGENTS.md 路由指向本技能，开工顺序强制加载）；
+技能随仓库符号链接自动更新，项目零升级。
 
 ## 跨项目派发（完整手册，已并入本技能）
 

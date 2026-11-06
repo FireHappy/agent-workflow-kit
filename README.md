@@ -74,7 +74,7 @@ cd ~/Documents/GitHub/agent-workflow-kit
     └── check_workflow.sh     兼容入口
 
 （v1.2.0 技能化：无 workflows/ 目录——流程细节在技能 agent-workflow-scaffold 的
-skills/workflows/，AGENTS.md 路由内联状态机 + 强制加载技能即流程入口）
+skills/ 各流程技能，AGENTS.md 路由内联状态机 + 强制加载技能即流程入口）
 ```
 
 ### 忽略工作流入库（团队项目）

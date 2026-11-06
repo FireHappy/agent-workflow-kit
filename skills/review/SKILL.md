@@ -1,4 +1,20 @@
-# 代码审查工作流
+---
+name: review
+description: agent-workflow 复核流程（复核→通过/需修改→修复→复审→归档）：独立复核、verdict 判定、findings 追踪与复审闭环。
+whenToUse: 开发任务完成待审、需对实现独立复核、或需 review 门禁判定（pass/needs_revision/reject）时——自动加载本技能。
+---
+
+# agent-workflow · 复核（技能）
+
+> 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
+> 项目内无 workflow 副本：本技能随仓库符号链接自动更新，项目零升级。
+> 路径约定：以下 `tasks/`、`memory/`、`tools/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
+
+## 适用场景
+
+开发完成待审（dev 子流程，随 dev 一起加载）。复核必须独立重跑验证命令。
+
+## 执行步骤
 
 > review 是 `dev` 的子流程，不单独作为主流程使用。
 > 主规范：`../README.md`
@@ -68,3 +84,20 @@
 - 只有审查意见已超出原任务范围、形成独立需求时，才拆分到 `tasks/<type>/todo/`
 
 review 本身不替代来源任务的归档与提交动作。
+
+## 自检清单
+
+- [ ] 按状态机推进，每步更新任务块「状态 / 最近更新 / 下一步」
+- [ ] 验证命令实际执行（compile/test），命令不可用写明 `验证阻塞：<原因>` 并置 blocked
+- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
+
+## 禁止事项
+
+- 未验证的判断写「待确认」，不写结论
+- 状态只写 active / blocked / review / verify / handoff；一个任务块只有一个 Owner
+- 归档后必须跑通过校验；status.md 由 awf status 刷新才算完成
+- 不自动 push、不改写历史
+
+## 无技能环境兜底
+
+本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `tools/` 手册与 `memory/history`。

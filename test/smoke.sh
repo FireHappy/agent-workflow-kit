@@ -1751,8 +1751,8 @@ for f in "$KIT_DIR/templates/workflows/cross-project.md" "$KIT_DIR/agent-workflo
     ok "F5 $f 无 DSH 专有词"
   fi
 done
-if grep -q '本技能' "$KIT_DIR/skills/workflows/cross-project.md" \
-  && grep -q 'docs/dispatch.md' "$KIT_DIR/skills/workflows/cross-project.md"; then
+if grep -q '本技能' "$KIT_DIR/skills/cross-project/SKILL.md" \
+  && grep -q 'docs/dispatch.md' "$KIT_DIR/skills/cross-project/SKILL.md"; then
   ok "F5 模板把细节下沉指向文档与技能层"
 else
   bad "F5 模板缺少文档/技能层指引"
@@ -2219,8 +2219,8 @@ if grep -q '激活式路由' "$KIT_DIR/templates/AGENTS.md.tmpl" \
 else
   bad "DEV-128 模板路由段缺少允许继续转派"
 fi
-if grep -q '来源：用户 | 工作流' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '允许按需继续' "$KIT_DIR/skills/workflows/cross-project.md"; then
+if grep -q '来源：用户 | 工作流' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '允许按需继续' "$KIT_DIR/skills/cross-project/SKILL.md"; then
   ok "DEV-128 cross-project.md 含来源字段与允许继续转派（替代禁止转派声明）"
 else
   bad "DEV-128 cross-project.md 缺少来源字段/允许转派说明"
@@ -2465,7 +2465,7 @@ else
 fi
 # 24.2 决策三件套模板与跨项目规范含 role（防文档回归）
 if grep -q 'role' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   && grep -q 'role' "$KIT_DIR/skills/workflows/cross-project.md"; then
+   && grep -q 'role' "$KIT_DIR/skills/cross-project/SKILL.md"; then
   ok "DEV-122 决策三件套模板与跨项目规范含 role 匹配语义"
 else
   bad "DEV-122 决策三件套模板/规范缺 role"
@@ -2565,10 +2565,10 @@ else
   bad "DEV-124 开工顺序缺读同类经验步骤"
 fi
 # 26.2 dev/debug 收尾含沉淀到 memory/history 与 tools 收录
-if grep -q 'memory/history' "$KIT_DIR/skills/workflows/dev.md" \
-   && grep -q 'memory/history' "$KIT_DIR/skills/workflows/debug.md" \
-   && grep -q 'tools/README.md' "$KIT_DIR/skills/workflows/dev.md" \
-   && grep -q 'tools/README.md' "$KIT_DIR/skills/workflows/debug.md"; then
+if grep -q 'memory/history' "$KIT_DIR/skills/dev/SKILL.md" \
+   && grep -q 'memory/history' "$KIT_DIR/skills/debug/SKILL.md" \
+   && grep -q 'tools/README.md' "$KIT_DIR/skills/dev/SKILL.md" \
+   && grep -q 'tools/README.md' "$KIT_DIR/skills/debug/SKILL.md"; then
   ok "DEV-124 dev/debug 收尾含沉淀 memory/history + tools 收录（技能手册）"
 else
   bad "DEV-124 dev/debug 收尾缺沉淀步骤"
@@ -2749,9 +2749,9 @@ if grep -q '派发三规则' "$KIT_DIR/templates/AGENTS.md.tmpl" \
 else
   bad "DEV-138 模板 AGENTS.md.tmpl 缺派发三规则"
 fi
-if grep -q '派发三规则（DEV-138' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '分析归属' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '前置侦察' "$KIT_DIR/skills/workflows/cross-project.md"; then
+if grep -q '派发三规则（DEV-138' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '分析归属' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '前置侦察' "$KIT_DIR/skills/cross-project/SKILL.md"; then
   ok "DEV-138 templates/workflows/cross-project.md 含派发三规则与票据瘦身清单"
 else
   bad "DEV-138 templates/workflows/cross-project.md 缺派发三规则"
@@ -2761,7 +2761,7 @@ if [ -d "$KIT_DIR/templates/workflows" ]; then
 elif [ -d "$KIT_DIR/agent-workflow/workflows" ]; then
   bad "DEV-138 技能化后项目内不应有 workflows/ 目录"
 else
-  ok "DEV-138 技能化形态：无 workflows 副本（细节在技能 skills/workflows/）"
+  ok "DEV-138 技能化形态：无 workflows 副本（细节在技能 skills/ 各流程技能）"
 fi
 if grep -q '派发协议三规则' "$KIT_DIR/docs/design.md" \
    && grep -q '不启用智能体团队承载派发' "$KIT_DIR/docs/design.md"; then
@@ -2847,7 +2847,7 @@ if grep -q '代理 FAIL、超时无回报' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '静默中断' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '记忆锚点' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '记忆锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   || grep -q '记忆锚点' "$KIT_DIR/skills/workflows/cross-project.md"; then
+   || grep -q '记忆锚点' "$KIT_DIR/skills/cross-project/SKILL.md"; then
   bad "DISPATCH-134 旧表述残留（代理 FAIL/记忆锚点/无回报常规化）"
 else
   ok "DISPATCH-134 旧表述已清除（无回报不再是常规路径）"
@@ -2856,9 +2856,9 @@ fi
 if grep -q '派发生命周期（DISPATCH-133）' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q '必有回报是主机制' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q '兜底锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   && grep -q '派发生命周期（DISPATCH-133' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '必有回报' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '无回报仅当会话失联' "$KIT_DIR/skills/workflows/cross-project.md"; then
+   && grep -q '派发生命周期（DISPATCH-133' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '必有回报' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '无回报仅当会话失联' "$KIT_DIR/skills/cross-project/SKILL.md"; then
   ok "DISPATCH-134 模板 AGENTS.md.tmpl 与 cross-project.md 同步必有回报/兜底语义"
 else
   bad "DISPATCH-134 模板缺必有回报/兜底语义"
@@ -2893,7 +2893,7 @@ if grep -q '决策回派发端' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'awf-dispatch --session' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DISPATCH-141' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '不得擅自执行推荐方案' "$KIT_DIR/docs/dispatch.md" \
-   && grep -q 'DISPATCH-141' "$KIT_DIR/skills/workflows/cross-project.md"; then
+   && grep -q 'DISPATCH-141' "$KIT_DIR/skills/cross-project/SKILL.md"; then
   ok "DISPATCH-141 docs/dispatch.md 决策回派发端流程（转述→决策→--session 续发）与模板同步"
 else
   bad "DISPATCH-141 决策回派发端流程缺失或模板未同步"
@@ -2907,7 +2907,7 @@ if grep -q 'detect_screen_state' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q 'awf-dispatch --screen-state' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '远程办公状态（remote' "$KIT_DIR/docs/design.md" \
    && grep -q '远程办公状态（remote' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '远程办公状态（remote' "$KIT_DIR/skills/workflows/cross-project.md" \
+   && grep -q '远程办公状态（remote' "$KIT_DIR/skills/cross-project/SKILL.md" \
    && grep -q '远程办公状态（remote' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q '远程办公状态（remote' "$KIT_DIR/AGENTS.md" \
    && grep -q 'DISPATCH-143' "$KIT_DIR/templates/AGENTS.md.tmpl" \
@@ -2928,7 +2928,7 @@ fi
 # 30.10 DISPATCH-144：状态透明化条款（dev.md/review.md/注入文本/文档/模板同步 + 无旧表述残留）
 if grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/docs/dispatch.md" \
-   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/skills/workflows/cross-project.md" \
+   && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/skills/cross-project/SKILL.md" \
    && grep -q 'DISPATCH-144' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q '状态透明化（DISPATCH-144）' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
    && grep -q 'DISPATCH-144' "$KIT_DIR/AGENTS.md" \
@@ -2951,9 +2951,9 @@ if grep -q '回报规则总表（DISPATCH-145' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '回报字段（固定' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '违约后果（定死）' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '追问无果登记滞留' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '回报规则总表（DISPATCH-145' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '1 受理任务（会话打开）' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '10 完成（最终）' "$KIT_DIR/skills/workflows/cross-project.md" \
+   && grep -q '回报规则总表（DISPATCH-145' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '1 受理任务（会话打开）' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '10 完成（最终）' "$KIT_DIR/skills/cross-project/SKILL.md" \
    && grep -q 'DISPATCH-145' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DISPATCH-145' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q 'DISPATCH-145' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
@@ -2979,8 +2979,8 @@ if grep -q '转派链卡点必报' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '静默等待 = 违规' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '处分记档' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q 'CONVENTION.md 决策汇聚' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '转派链卡点必报' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '静默等待 = 违规' "$KIT_DIR/skills/workflows/cross-project.md" \
+   && grep -q '转派链卡点必报' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '静默等待 = 违规' "$KIT_DIR/skills/cross-project/SKILL.md" \
    && grep -q '转派链卡点必报' "$KIT_DIR/docs/dispatch.md" \
    && grep -q '转派链卡点必报' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q '转派链卡点必报' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
@@ -2996,8 +2996,8 @@ if grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q 'dispatch/reports/inbox' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q 'DSH_SESSION_ID' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '【回执请求】' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '经通道投递派发方' "$KIT_DIR/skills/workflows/cross-project.md" \
+   && grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '经通道投递派发方' "$KIT_DIR/skills/cross-project/SKILL.md" \
    && grep -q '回报投递通道（DISPATCH-146' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
    && grep -q 'DISPATCH-146' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DISPATCH-146' "$KIT_DIR/templates/AGENTS.md.tmpl" \
@@ -3037,8 +3037,8 @@ if grep -q '空闲/收尾/自检（DISPATCH-147' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '空闲+仍在线+上次动作时间+无卡死声明' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '空闲也要报' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '自检状态' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q 'DISPATCH-147' "$KIT_DIR/skills/workflows/cross-project.md" \
-   && grep -q '任务完成，会话空闲，可续发' "$KIT_DIR/skills/workflows/cross-project.md" \
+   && grep -q 'DISPATCH-147' "$KIT_DIR/skills/cross-project/SKILL.md" \
+   && grep -q '任务完成，会话空闲，可续发' "$KIT_DIR/skills/cross-project/SKILL.md" \
    && grep -q 'DISPATCH-147' "$KIT_DIR/docs/dispatch.md" \
    && grep -q 'DISPATCH-147' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    && grep -q 'DISPATCH-147' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
@@ -3103,7 +3103,7 @@ fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '用户在目标会话内直接回复' "$KIT_DIR/docs/dispatch.md" \
-   || grep -q '用户在目标会话内回复继续' "$KIT_DIR/skills/workflows/cross-project.md" \
+   || grep -q '用户在目标会话内回复继续' "$KIT_DIR/skills/cross-project/SKILL.md" \
    || grep -q '目标会话多轮对话续聊' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    || grep -q '目标会话多轮对话续聊' "$KIT_DIR/docs/dispatch.md" \
    || grep -q '目标会话多轮对话续聊' "$KIT_DIR/AGENTS.md"; then
