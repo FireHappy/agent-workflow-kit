@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Changed
+- **版本锚点迁移框架支持（DEV-198）**：`version_file` 指向 `agent-workflow/VERSION`（非根目录）全链路验证通过（release-prep 读写 / upgrade 锚点写 / bootstrap·check digest 与根 VERSION 无关，dry-run 实证）；`awf check` 新增「项目根存在 VERSION 文件」防踩坑软提示（迁移建议：`git mv VERSION agent-workflow/VERSION` + `version_file` 指过去；不阻塞，纯脚本项目可忽略）——macOS 大小写不敏感 FS 上根 `VERSION` 遮蔽 libc++ `<version>` 头（Unity IL2CPP Bee clang `-I"."` 全量构建报 `expected unqualified-id`，SP-302，uxrsample 2026-11-07 实测）；release 技能/模板注释同步锚点位置规范（Unity/C++ 项目锚点一律放 `agent-workflow/VERSION`），release 技能 Step 5 去 `git add VERSION` 硬编码（改按 version_file 动态取路径）；SP-302 坑沉淀 kit memory
 - **派发术语统一为「回执」（DEV-195）**：worker→派发方方向全部改「回执」（回报→回执，含 回执投递通道/回执正文/回执字段/回执时机/回执格式/回执数据），消息标题【回执请求】保持，「回报」「汇报」在派发链路活文件中退役——注入文本、技能（cross-project-dispatch/dev/review/team-flow/upgrade/README）、docs/design.md、根 SKILL.md、插件面板文案、smoke 断言同步
 - **票据生命周期统一「用完即删」（DEV-195）**：`awf-dispatch --prune --apply` 从「归档到 dispatch/archive/」改为「真正删除已完成票据（不留存根）」，与 upgrade 技能既有条款对齐；扫描改为递归（覆盖 upgrade-v<版本>/ 子目录票据），删除后向上清空空目录；文档/SKILL/帮助文本同步
 

@@ -296,6 +296,22 @@ else
   bad "release-prep 未按 version_file 写锚点（agent-workflow/VERSION=[$(cat "$REL_VF/agent-workflow/VERSION" 2>/dev/null)]，根=[$(cat "$REL_VF/VERSION")]）"
 fi
 
+# DEV-198：check 对根目录 VERSION 给防踩坑软提示（迁移建议；软提示不阻塞，fails 不增）
+chk_vf_out="$(cd "$REL_VF" && "$KIT_DIR/bin/awf" check 2>&1 || true)"
+if printf '%s\n' "$chk_vf_out" | grep -q 'git mv VERSION agent-workflow/VERSION' \
+  && printf '%s\n' "$chk_vf_out" | grep -q '残留 VERSION'; then
+  ok "DEV-198 check 对根 VERSION 给迁移软提示（version_file 已指 agent-workflow/VERSION）"
+else
+  bad "DEV-198 check 未给根 VERSION 迁移软提示：$(printf '%s\n' "$chk_vf_out" | grep -i 'VERSION' | head -3)"
+fi
+chk_vf_def_out="$(cd "$REL" && "$KIT_DIR/bin/awf" check 2>&1 || true)"
+if printf '%s\n' "$chk_vf_def_out" | grep -q '默认根 VERSION' \
+  && printf '%s\n' "$chk_vf_def_out" | grep -q 'git mv VERSION agent-workflow/VERSION'; then
+  ok "DEV-198 check 对默认根 VERSION 项目给迁移软提示（不阻塞）"
+else
+  bad "DEV-198 check 未对默认根 VERSION 项目给软提示：$(printf '%s\n' "$chk_vf_def_out" | grep -i 'VERSION' | head -3)"
+fi
+
 # 没有 Unreleased 且没有目标版本：提示手动，不报错
 printf '# Changelog\n' > "$REL/CHANGELOG.md"
 manual_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL" 0.4.3 2>&1)"

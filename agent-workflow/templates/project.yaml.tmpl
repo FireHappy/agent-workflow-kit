@@ -26,9 +26,13 @@ scopes: {{SCOPES}}
 # 并行时任何单元都不许同时修改的文件或目录
 serialized: {{SERIALIZED}}
 
-# 发版落点（可选键：不写某个键即回退到默认值；流程见 agent-workflow/workflows/release.md）
+# 发版落点（可选键：不写某个键即回退到默认值；流程见 release 技能 skills/release/SKILL.md）
 # version_file: 版本号所在文件，单行 semver；默认 VERSION。
 #               语言生态有原生版本字段（package.json / pyproject.toml / Cargo.toml）时指向它，只改一处。
+#               锚点位置铁律（DEV-198 / SP-302）：Unity/C++ 项目勿放项目根 VERSION——macOS 大小写
+#               不敏感 FS 上根 VERSION 会遮蔽 libc++ <version> 头（clang -I"." 全量构建报
+#               expected unqualified-id），一律指向 agent-workflow/VERSION（git mv VERSION
+#               agent-workflow/VERSION 后设本键）；纯脚本/文档项目可保持默认。
 # changelog:    变更记录文件；默认 CHANGELOG.md。
 # tag_prefix:   发版 tag 前缀；默认 v（tag 形如 v1.2.3）。
 version_file: VERSION

@@ -666,6 +666,25 @@ check_growth_hints() {
   if [ "$archived" -ge 3 ] && [ "$tfiles" -eq 0 ]; then
     say "提示：如已沉淀过可复用脚本/命令，可按 tools/README.md 晋升三要素（可执行/用法注释/归属）收录进 tools/"
   fi
+
+  # DEV-198：根目录 VERSION 防踩坑软提示（只提示不 FAIL）——macOS 大小写不敏感 FS 上，
+  # 项目根 VERSION 文本文件会与 C++ 标准库头 <version> 撞名：Bee clang（Unity IL2CPP）带 -I"."，
+  # libc++ cstddef 内 #include <version> 命中 ./VERSION → expected unqualified-id 级联错误（SP-302，
+  # uxrsample 2026-11-07 实测：移走即 0 错误）。version_file 默认根 VERSION 的项目（纯脚本）同样提示，
+  # 自行判断：有 C++/Unity 构建即迁移；锚点位置规范见 skills/release/SKILL.md 与 templates/project.yaml.tmpl。
+  if [ -f VERSION ]; then
+    local vf_root
+    vf_root="$(project_version_file .)"
+    case "$vf_root" in
+      ./agent-workflow/*) vf_root="${vf_root#./}" ;;
+      ./*) vf_root="${vf_root#./}" ;;
+    esac
+    if [ "$vf_root" = "VERSION" ]; then
+      say "提示：项目根存在 VERSION 文件（version_file 未配置，默认根 VERSION）——若本项目用 C++/Unity 构建（clang -I. 会遮蔽 libc++ <version> 头，见 SP-302），建议迁移：git mv VERSION agent-workflow/VERSION 并在 agent-workflow/project.yaml 设 version_file: agent-workflow/VERSION；纯脚本项目可忽略"
+    else
+      say "提示：项目根存在残留 VERSION 文件（version_file 已指向 $vf_root）——仍可能遮蔽 libc++ <version> 头，建议 git mv VERSION agent-workflow/VERSION 或删除；纯脚本项目可忽略"
+    fi
+  fi
 }
 
 cmd_init() {

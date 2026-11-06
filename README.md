@@ -149,6 +149,7 @@ CI（GitHub Actions）在每次 push 时运行同一套测试。
 ## 版本
 
 - `VERSION` 为技能版本；`AGENTS.md` 受控区块会记录 `v<version>` 与 `digest`。
+- 版本锚点位置：默认 `agent-workflow/VERSION`（DEV-198/SP-302：勿放项目根——macOS 大小写不敏感 FS 上根 `VERSION` 会遮蔽 libc++ `<version>` 头，Unity IL2CPP 全量构建报错；`awf check` 对根 `VERSION` 给迁移软提示）。
 - 发布：`git tag v0.1.0 && git push --tags`。
 
 ## 推送
