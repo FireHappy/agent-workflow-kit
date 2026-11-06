@@ -104,6 +104,12 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **0.3.4（DEV-178）**：版本锚点读取适配 `version_file`（kit v1.1.7 锚点迁移后不再硬编码根 VERSION）
+  - 背景：kit v1.1.7（DEV-174）把版本锚点迁移为「读 project.yaml 的 `version_file`，默认根 VERSION；kit 自身 = `agent-workflow/VERSION`」。插件此前在两处硬编码根 `VERSION`（`readProjectRelease` 读项目、`kitVersions` 读 kit），锚点迁移后 kit 根 VERSION 已删——kit 最新发布版读成 null、kit 面板只显示框架代次、登记时 `scaffold_version` 无法补齐。
+  - 修复：`src/ledger.js` `projectMetaFromYaml` 支持 `version_file` 键，新增 `projectVersionFile(projectPath, meta)`（与 `bin/awf project_version_file` 同口径，相对项目根解析，未配置默认根 VERSION），`readProjectRelease` 改走该解析；`lib/index.js` `kitVersions` 的 kit 最新发布版改读 `readProjectRelease(kit.path)`（自动跟随 kit 自身 version_file），与 `awf upgrade` 源版本读取（KVF）同口径。
+  - 新增 2 组单测（已配置 version_file → 读其指向文件、未配置 → 默认根 VERSION），另覆盖读不到返回 null；`cd dsh-plugin && node --test` 全绿。
+  - 宿主副本同步：新增 `./scripts/sync-profile.sh`（README 原引用的脚本此前并不存在），一键复制 lib/src/package.json 等到 profile 已安装副本；重启 DSH 后看板版本徽标恢复显示具体发布版（v1.1.7）。
+
 - **0.3.3（DEBUG-002）**：最近完成同日排序修正（最新完成任务排第一）
   - 解析层（`src/ledger.js` `ledgerOf`）：recent 排序由「仅完成日期倒序」改为「**日期倒序 + 任务 ID 数值倒序**」（DEV-134 → 134）。
   - 背景：目录式账本（DEV-127）同日记录按 readdir **字母序**收集，仅有日期键时退化为字母序——kit 同日批次 DEV-115…122 排前、最新完成的 DEV-129…134 被 `slice(0,8)` 切掉，面板「最近完成」看起来全是旧任务；legacy 表格行顶部插入（最新在最小行号），解析层行号序与之相反，同日组内顺序反转。

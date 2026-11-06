@@ -611,3 +611,55 @@ test('DEBUG-002 legacy recent：同日按任务 ID 数值倒序（表顶=最新�
     await rm(root, { recursive: true, force: true })
   }
 })
+
+// ---- DEV-178：readProjectRelease 按 project.yaml version_file 解析（kit 锚点迁移适配） ----
+
+test('DEV-178 readProjectRelease 默认：未配置 version_file → 读仓库根 VERSION（向后兼容）', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { readProjectRelease, projectVersionFile, readProjectMetaFile } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-vfdef-'))
+  try {
+    // 无 agent-workflow/project.yaml（或没有 version_file 键）→ 默认根 VERSION
+    await writeFile(join(root, 'VERSION'), '1.1.7\n')
+    assert.equal(projectVersionFile(root), join(root, 'VERSION'))
+    assert.equal(await readProjectRelease(root), '1.1.7')
+    // 读不到 → null
+    await rm(join(root, 'VERSION'))
+    assert.equal(await readProjectRelease(root), null)
+    // 有 project.yaml 但未配置 version_file → 仍默认根 VERSION
+    await mkdir(join(root, 'agent-workflow'), { recursive: true })
+    await writeFile(join(root, 'agent-workflow', 'project.yaml'), 'id: demo\nname: demo\n')
+    await writeFile(join(root, 'VERSION'), '0.9.0\n')
+    const meta = await readProjectMetaFile(root)
+    assert.equal(projectVersionFile(root, meta), join(root, 'VERSION'))
+    assert.equal(await readProjectRelease(root), '0.9.0')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEV-178 readProjectRelease 已配置：version_file 指向的相对文件优先（kit 自身 = agent-workflow/VERSION）', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { readProjectRelease, projectVersionFile, readProjectMetaFile } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-vfcfg-'))
+  try {
+    await mkdir(join(root, 'agent-workflow'), { recursive: true })
+    await writeFile(join(root, 'agent-workflow', 'project.yaml'),
+      'id: agent-workflow-kit\nname: agent-workflow-kit\nversion_file: agent-workflow/VERSION\n')
+    // 根 VERSION 存在但 version_file 指向 agent-workflow/VERSION → 读指向文件（kit 迁移后形态）
+    await writeFile(join(root, 'VERSION'), '0.0.0-stale\n')
+    await writeFile(join(root, 'agent-workflow', 'VERSION'), '1.1.7\n')
+    const meta = await readProjectMetaFile(root)
+    assert.equal(projectVersionFile(root, meta), join(root, 'agent-workflow', 'VERSION'))
+    assert.equal(await readProjectRelease(root), '1.1.7')
+    // 指向文件不存在 → null（不回退根 VERSION，与 bin/awf upgrade 的 KVF 语义一致）
+    await rm(join(root, 'agent-workflow', 'VERSION'))
+    assert.equal(await readProjectRelease(root), null)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

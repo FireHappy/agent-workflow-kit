@@ -1,3 +1,8 @@
+## [Unreleased]
+
+### Changed
+- **看板插件 0.3.4（DEV-178）**：版本锚点读取适配 `version_file`——v1.1.7 锚点迁移（DEV-174，kit 自身 = `agent-workflow/VERSION`）后插件不再硬编码根 `VERSION`，项目已装发布版与 kit 最新发布版均按 project.yaml 的 `version_file` 解析（未配置默认根 VERSION，向后兼容）；新增 `scripts/sync-profile.sh` 一键同步宿主副本，重启生效
+
 ## [1.1.7] - 2026-11-06
 
 ### Added

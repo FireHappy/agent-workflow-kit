@@ -1569,7 +1569,7 @@ export const SCAFFOLD_VERSION_KEY = 'scaffold_version'
 
 /** 解析 project.yaml 的扁平 kv 关键元信息。 */
 export function projectMetaFromYaml(md) {
-  const meta = { id: '', name: '', aliases: '', track: '', scaffold_version: '' }
+  const meta = { id: '', name: '', aliases: '', track: '', scaffold_version: '', version_file: '' }
   if (!md) return meta
   for (const line of String(md).split('\n')) {
     const m = /^([A-Za-z0-9_.-]+)\s*:\s*(.*?)\s*$/.exec(line)
@@ -1732,10 +1732,26 @@ export async function readProjectAWFVersion(projectPath) {
   return parseAWFVersion(script)
 }
 
-/** DEV-133：读取项目根 VERSION 文件的对外发布版（如 1.0.0）；读不到返回 null。 */
+/**
+ * 版本锚点路径（DEV-178，与 bin/awf project_version_file 同口径）：读项目 project.yaml 的
+ * version_file，相对项目根解析；未配置默认仓库根 VERSION（向后兼容）。
+ * DEV-174 迁移后 kit 自身 project.yaml 设 version_file: agent-workflow/VERSION。
+ */
+export function projectVersionFile(projectPath, meta) {
+  const m = meta || null
+  if (m && m.version_file) return join(projectPath, String(m.version_file))
+  return join(projectPath, 'VERSION')
+}
+
+/**
+ * 读取项目对外发布版锚点（project.yaml 的 version_file 指向，默认根 VERSION，如 1.0.0）；
+ * 读不到返回 null。
+ */
 export async function readProjectRelease(projectPath) {
+  const meta = await readProjectMetaFile(projectPath)
+  const file = projectVersionFile(projectPath, meta)
   try {
-    const v = String(await readFile(join(projectPath, 'VERSION'), 'utf8')).trim()
+    const v = String(await readFile(file, 'utf8')).trim()
     return v || null
   } catch {
     return null

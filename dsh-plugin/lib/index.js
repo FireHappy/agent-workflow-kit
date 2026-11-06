@@ -285,8 +285,9 @@ async function kitVersions() {
   const kit = await findKitProject()
   if (!kit || !kit.path) return { kitPath: null, latestAWF: null, latestRelease: null }
   const latestAWF = await readProjectAWFVersion(kit.path)
-  let latestRelease = null
-  try { latestRelease = String((await readFile(join(kit.path, 'VERSION'), 'utf8'))).trim() || null } catch { /* 无 VERSION */ }
+  // DEV-178：读 kit 自身 project.yaml 的 version_file（was 硬编码根 VERSION；DEV-174 迁移后
+  // kit 锚点 = agent-workflow/VERSION），与 bin/awf upgrade 源版本读取（KVF）口径一致。
+  const latestRelease = await readProjectRelease(kit.path)
   return { kitPath: kit.path, latestAWF, latestRelease }
 }
 
@@ -306,7 +307,8 @@ async function versionStatus(projectPath) {
   const k = await kitVersions()
   let status = 'unknown'
   let upgradeTo = null
-  // DEV-133：优先按「项目根 VERSION vs kit VERSION」发布版 semver 判定；缺 VERSION 文件回退 AWF 代次
+  // DEV-133/DEV-178：优先按「项目 version_file 锚点 vs kit version_file 锚点」发布版 semver 判定；
+  // 缺锚点文件回退 AWF 代次
   if (p.installedRelease && k.latestRelease) {
     status = semverLt(p.installedRelease, k.latestRelease) === true ? 'outdated' : 'latest'
   } else if (p.installedAWF !== null && k.latestAWF !== null) {
