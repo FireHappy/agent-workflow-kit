@@ -87,6 +87,16 @@ cd <项目目录> && ./agent-workflow/check_workflow.sh    # 退出码 0
 cd <项目目录> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf status       # 刷新摘要
 ```
 
+## 派发票据生命周期（用完即删，不保留存根）
+
+批量升级通过 `awf-dispatch` 派发时，每个目标对应一张票据（`dispatch/tasks/upgrade-v<版本>/<项目>.md`）：
+
+- 票据是**一次性任务文件**：派发时写入、目标完成后**删除**，不留存根（避免 `dispatch/tasks/` 无限堆积）
+- `dispatch/` 目录整体在 `.gitignore`（派发运行时产物不入库）；票据删除后账本不保留派发文件
+- 目标**回报核验通过**（锚点=目标版本、check 0 FAIL、本地 commit 落地）→ 删除该票据，并回报核验小结
+- 票据删除时机：目标必报点 10（完成回报）**且派发方核验收讫**后，不等批量全部结束——完成一个删一个
+- 特殊情况：目标门禁不通过（G1-G4 拦截）→ 票据保留至用户决策（补 init / 清理工作区 / 豁免），决策后重派或删除
+
 ## 验收标准
 
 - [ ] `upgrade --dry-run` 与实际执行打印的变更/保留清单一致
