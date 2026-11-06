@@ -7,7 +7,7 @@ whenToUse: 开发任务完成待审、需对实现独立复核、或需 review �
 # agent-workflow · 复核（技能）
 
 > 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
-> 项目内无 workflow 副本：本技能随仓库符号链接自动更新，项目零升级。
+> 项目内无 workflow 副本：本技能是实体目录（install.sh copy 安装），更新重跑 `./install.sh`。
 > 路径约定：以下 `tasks/`、`memory/`、`tools/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
 
 ## 适用场景

@@ -1,8 +1,30 @@
-## [Unreleased]
+## [1.3.0] - 2026-11-06
+
+### Added
+- **流程技能化（DEV-184）**：6 个流程（dev/debug/docs/review/release/cross-project）细节全部迁入技能 agent-workflow-scaffold 的 `skills/`（每个为规范独立技能：frontmatter + 执行步骤 + 自检清单 + 禁止事项）；项目内 `workflows/` 目录退役（净删 1735 行副本），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口
+- **工具技能化（DEV-186）**：`bin/awf`、`bin/awf-dispatch` 迁入技能（项目内不再复制工具副本），项目命令统一调技能路径 `~/.dsh/skills/agent-workflow-scaffold/bin/awf`；`check_workflow.sh` 为接口 shim 指向技能工具；upgrade 不再同步工具、`--slim` 清理存量副本
+- **技能实体化（DEV-186）**：install.sh 默认 copy——技能为实体目录（SKILL.md + skills/ + bin/ + templates/ + docs/ + test/），不再符号链接指向项目仓库；更新重跑 `./install.sh`
+- **统一测试标准（DEV-186）**：smoke 双形态适配——仓库形态全量 225 断言、技能形态 216 断言（仓库级断言 skip「技能形态不适用」），同一套标准覆盖仓库与技能
+- **看板插件 1.2.0/1.3.0 同步**：插件 versionStatus 升级判定改为基于骨架版本（AWF 代次），细节更新不误报；显示脚手架版本
 
 ### Changed
-- **看板插件 0.3.5（DEV-179）**：当前任务行内联显示流程阶段（阶段徽章「流程 · 当前阶段 · 位置/总步数」+ 迷你分段进度，blocked 标注「暂停」），无需点击详情；流程渲染重做参考 AgentTeams 布局——删除死代码大步骤条（WorkflowSteps）及其呼吸圆点/流动连线动画，改为紧凑静态阶段行（状态色徽章 + 当前阶段强调，无布局跳动）；新增 `stageSummary` 纯函数与 `test/client-chunk.test.js` 单测（40/40 全绿）
-- **看板插件 0.3.4（DEV-178）**：版本锚点读取适配 `version_file`——v1.1.7 锚点迁移（DEV-174，kit 自身 = `agent-workflow/VERSION`）后插件不再硬编码根 `VERSION`，项目已装发布版与 kit 最新发布版均按 project.yaml 的 `version_file` 解析（未配置默认根 VERSION，向后兼容）；新增 `scripts/sync-profile.sh` 一键同步宿主副本，重启生效
+- **回报规范完善（DEV-186）**：回报正文排版（DISPATCH-153）完整内联技能；标题措辞「开始执行任务 / 完成任务」；删除冗余技能 cross-project-dispatch（内容被 cross-project 覆盖）
+- **init 初始化与升级一致（DEV-183）**：`/awf/init/agent` 改为注入主会话（不再用受管理子代理）；引导卡加「git 忽略工作流」toggle
+- **gitignore 框架段（DEV-183）**：init 默认写派发产物忽略段（dispatch/log.md、reports/、headless/、.agent-teams/）
+
+### Fixed
+- 版本号 vv1 显示修复（客户端不再重复拼 v 前缀）
+
+## [1.2.0] - 2026-11-06
+
+### Added
+- **全局升级 v1.2.0 技能化（DEV-185）**：dsh-settings / finderpathbar / uxrsample 升级落地（锚点 1.2.0、workflows 清理、技能路由就位）
+
+### Changed
+- **彻底技能化（DEV-184）**：项目内 workflows/ 退役，细节入技能；check/upgrade/G1 门禁适配技能化形态（workflows 可选、--slim 清理存量）；AGENTS.md 路由内联状态机 + 强制加载技能
+
+### Fixed
+- **看板移除静态流程阶段（DEV-182）**：status 静态映射非真实流程数据，行内流程阶段展示移除（纯函数保留待真实数据接入）
 
 ## [1.1.7] - 2026-11-06
 

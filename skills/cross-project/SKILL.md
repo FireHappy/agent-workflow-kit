@@ -7,7 +7,7 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、目标
 # agent-workflow · 跨项目派发（技能）
 
 > 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
-> 项目内无 workflow 副本：本技能随仓库符号链接自动更新，项目零升级。
+> 项目内无 workflow 副本：本技能是实体目录（install.sh copy 安装），更新重跑 `./install.sh`。
 > 路径约定：以下 `tasks/`、`memory/`、`tools/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
 
 ## 适用场景
