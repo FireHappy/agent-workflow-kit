@@ -1,3 +1,20 @@
+## [1.4.0] - 2026-11-06
+
+### Added
+- **技能库顶层化（DEV-191/DEV-192）**：8 个流程技能（dev / debug / docs / review / cross-project-dispatch / release / team-flow / upgrade）提升为 DSH 顶层技能（`~/.dsh/skills/<name>/`），DSH 启动注入 frontmatter、凭 `whenToUse` 自动匹配——`AGENTS.md` 只需「按任务类型加载技能」，入口不再列举清单、不再维护路由索引
+- **新增独立技能**：`team-flow`（团队执行三轨）、`upgrade`（awf upgrade 规范）从内嵌章节拆为独立技能
+- **技能索引**：`skills/README.md` 作为路由表（任务类型 → 技能），新增技能只改此文件
+
+### Changed
+- **AGENTS.md 精简**：路由表、路由决策、回报细则全部收进技能；入口只保留开工顺序 / 铁律 / 校验 / 技能库指针（净删大量内联细则）
+- **install.sh 逐技能安装**：一套命令把所有技能装为 DSH 顶层技能（link/copy），并把技能版本（`agent-workflow/VERSION`）同步到实体 `VERSION`
+- **版本锚点**：插件「技能版本」读全局索引 kit 仓库 VERSION，「项目版本」读各项目 agent-workflow/VERSION——升级判定为两版差量对比（项目落后 → outdated 提示可升级），非强制同步
+- **docs 收技能**：dispatch / team-flow / release / upgrade / enforcement 迁出 docs/（工作流文档归技能）；design / arch-review 保留 docs/（项目文档）
+
+### Fixed
+- 跨项目派发技能重写为单 SKILL.md：清理 DISPATCH-xxx 编号噪音（编号降级为附录登记表），参数表补全（--report/--force/--allow-dirty 等）
+- smoke 断言收敛：删除「文档措辞同步」类断言（80+ 处），保留行为断言（216 项全绿）——文档措辞不再做冒烟门禁
+
 ## [1.3.0] - 2026-11-06
 
 ### Added
