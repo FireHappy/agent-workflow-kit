@@ -1851,6 +1851,10 @@ window.__ModuleLoader__.load({
               setNotInit(false)
               setNeedsUpgrade(false)
               setLedger(data.ledger || null)
+              // DEV-185：账本可读 = 初始化已完成 → 结束「初始化中…」动画，进入进度面板
+              //   （对齐升级流程 versions.status==='latest' 结束「升级中」态的数据驱动方式）
+              setInitBusy(false)
+              if (initDoneRef) initDoneRef.current = true
             }
             // DEV-035：版本状态随账本一起刷新；升级完成后自动结束「升级中」态
             if (data && data.versions) {
@@ -1909,10 +1913,16 @@ window.__ModuleLoader__.load({
       // （无项目切换：只跟随当前会话，锚定在步骤 2）
 
       // 5) 初始化工作流（未初始化引导）
+      // DEV-185：初始化动画状态机对齐升级流程——
+      //   注入成功 → 保持「初始化中…」动画 → loadLedger 检测账本可读（初始化完成）→ 结束动画显示进度面板；
+      //   注入被拒 / 子代理失败 / 超出兜底时限才显式结束动画并报错（不再无条件 finally 结束）。
+      const initTimerRef = useRef(null)
+      const initDoneRef = useRef(false)
       const handleInit = useCallback(async () => {
         if (!selected || initBusy) return
         setInitBusy(true)
         setInitError(null)
+        initDoneRef.current = false
         try {
           // DEV-183：初始化与升级一致——注入主会话由 agent 完整配置（读项目上下文生成骨架）；
           //   gitignore=true 时指令附加「写入 .gitignore」步骤
@@ -1922,13 +1932,35 @@ window.__ModuleLoader__.load({
             sessionId: props.sessionId || (props.scope && props.scope.sessionId) || undefined,
             gitignore: initGitignore,
           })
-          if (out && out.channel === 'agent' && out.failed) {
-            setInitError('初始化子代理未完成：' + String((out.agent && (out.agent.error || out.agent.code)) || '未知原因'))
+          if (out && out.channel === 'inject') {
+            const team = out.team || {}
+            if (team.prompted === false) {
+              // 注入未被宿主接受：立即结束动画并明确报错（不挂起空转）
+              setInitError('未能向主会话注入初始化指令' + (team.error ? '：' + team.error : '（宿主未接受注入，可能缺 sessionId 或 sessionController）') + '。请重启 DSH 后重试。')
+              setInitBusy(false)
+              return
+            }
+            // 注入成功：保持动画，由 loadLedger 检测账本可读后自动结束（对齐升级流程）
+            loadLedger()
+            clearTimeout(initTimerRef.current)
+            initTimerRef.current = setTimeout(() => {
+              // 兜底：3 分钟仍未完成（主会话未收到指令 / agent 未完成）→ 结束动画并提示
+              if (initDoneRef.current) return
+              setInitBusy(false)
+              setInitError('初始化未在 3 分钟内完成：请确认主会话已收到初始化指令（面板与主会话不同步时请重启 DSH 后重试）。')
+            }, 180_000)
+            return
           }
-          loadLedger() // 成功后重新加载账本，显示正常看板
+          if (out && out.channel === 'agent' && out.failed) {
+            // 旧版服务端子代理通道失败（宿主仍运行旧服务端路由时出现）
+            setInitError('初始化子代理未完成：' + String((out.agent && (out.agent.error || out.agent.code)) || '未知原因'))
+            setInitBusy(false)
+            return
+          }
+          loadLedger() // 其他成功响应：刷新账本（账本可读时 loadLedger 会结束动画）
         } catch (e) {
           if (e.code === 'already-initialized') {
-            loadLedger() // 已在别处初始化：直接刷新账本
+            loadLedger() // 已在别处初始化：直接刷新账本（账本可读时 loadLedger 会结束动画）
           } else if (e.code === 'path-not-allowed') {
             setInitError('路径不在白名单：必须位于全局项目索引或当前工作区根。')
           } else if (e.code === 'forbidden') {
@@ -1938,7 +1970,6 @@ window.__ModuleLoader__.load({
           } else {
             setInitError('初始化失败：' + String((e && e.message) || e))
           }
-        } finally {
           setInitBusy(false)
         }
       }, [selected, initBusy, initGitignore, anchorRoot, loadLedger])
