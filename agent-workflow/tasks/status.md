@@ -1,7 +1,7 @@
 # 全局状态摘要
 
 <!-- awf:status:begin -->
-> 本区块由 `agent-workflow/bin/awf status` 生成，请勿手改。
+> 本区块由 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 生成，请勿手改。
 > 数据来源：`tasks/<type>/<ID>.md`（单任务文件；todo/current/done README 为检索视图）。
 
 ## 当前进行中
@@ -27,5 +27,5 @@
 | dev | DEV-183 | P1 | 初始化与升级流程一致（主会话注入）+ git 忽略 toggle + 全局派发会话 ≤ 3 | 2026-11-06 |
 | dev | DEV-184 | P1 | 工作流骨架化 v1.2.0：流程细节技能化 + 插件骨架版本判定（骨架+插件同步升级） | 2026-11-06 |
 
-*最后更新：2026-11-06 20:24*
+*最后更新：2026-11-06 20:54*
 <!-- awf:status:end -->

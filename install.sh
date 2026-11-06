@@ -38,8 +38,11 @@ install_skill() {
 }
 
 install_skill "agent-workflow-scaffold" "$REPO"
-# 跨项目派发细则已内联进 workflow（templates/workflows/cross-project.md），不再全局装技能（2026-11-05 用户决定）
 
+# DEV-186 工具技能化：bin/awf、bin/awf-dispatch 是技能的一部分（agent-workflow-scaffold
+# = kit 仓库符号链接）。项目内命令直接用技能路径：
+#   ~/.dsh/skills/agent-workflow-scaffold/bin/awf
+#   ~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch
 chmod +x "$REPO/bin/awf" "$REPO/bin/awf-dispatch" "$REPO/test/smoke.sh" 2>/dev/null || true
 chmod +x "$SKILLS/agent-workflow-scaffold/bin/awf" \
          "$SKILLS/agent-workflow-scaffold/bin/awf-dispatch" \

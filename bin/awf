@@ -413,8 +413,9 @@ EOF
 
   put_if_absent "$root/agent-workflow/check_workflow.sh" <<'EOF'
 #!/bin/sh
-# 兼容入口：等价于 agent-workflow/bin/awf check
-exec "$(dirname "$0")/bin/awf" check "$@"
+# 兼容入口（DEV-186 工具技能化）：等价于技能 agent-workflow-scaffold 的 bin/awf check。
+# 工具在技能（~/.dsh/skills/agent-workflow-scaffold = kit 仓库符号链接），项目内不复制副本。
+exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"
 EOF
   chmod +x "$root/agent-workflow/check_workflow.sh"
 }
@@ -741,14 +742,10 @@ cmd_init() {
   if [ -f "$TPL_DIR/pre-commit" ]; then
     cp "$TPL_DIR/pre-commit" "$target/agent-workflow/templates/pre-commit"
   fi
-  cp "$KIT_DIR/bin/awf" "$target/agent-workflow/bin/awf"
-  chmod +x "$target/agent-workflow/bin/awf"
-  if [ -f "$KIT_DIR/bin/awf-dispatch" ]; then
-    cp "$KIT_DIR/bin/awf-dispatch" "$target/agent-workflow/bin/awf-dispatch"
-    chmod +x "$target/agent-workflow/bin/awf-dispatch"
-  else
-    warn "未找到 bin/awf-dispatch；目标项目只能手工派发"
-  fi
+  # DEV-186 工具技能化：不再复制 bin/awf / bin/awf-dispatch 到项目——
+  # 工具是技能的一部分（agent-workflow-scaffold = kit 仓库符号链接，一处维护），
+  # 项目内命令统一调技能路径 ~/.dsh/skills/agent-workflow-scaffold/bin/awf。
+  # check_workflow.sh 兼容入口由 write_aux_files 生成并指向技能工具。
 
   write_task_files "$target/agent-workflow/tasks"
   write_aux_files "$target"
@@ -795,7 +792,7 @@ EOF
 
   (
     cd "$target"
-    ./agent-workflow/bin/awf status >/dev/null
+    ~/.dsh/skills/agent-workflow-scaffold/bin/awf status >/dev/null
   )
 
   say "已生成工作流框架：$target"
@@ -819,16 +816,16 @@ EOF
   fi
   say "  已写入 .gitignore：派发流水/回报/运行时状态不入库（dispatch/log.md、reports/、headless/、.agent-teams/）"
   say "下一步：编辑 agent-workflow/project.yaml，然后运行"
-  say "  ./agent-workflow/bin/awf bootstrap"
+  say "  ~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap"
   say ""
 
-  ( cd "$target" && ./agent-workflow/bin/awf check )
+  ( cd "$target" && ~/.dsh/skills/agent-workflow-scaffold/bin/awf check )
 
   if [ "$no_register" -eq 0 ] && [ "${AWF_NO_REGISTER:-0}" != "1" ]; then
-    if ( cd "$target" && ./agent-workflow/bin/awf register >/dev/null ); then
+    if ( cd "$target" && ~/.dsh/skills/agent-workflow-scaffold/bin/awf register >/dev/null ); then
       say "已写入全局索引：$AGENTS_HOME/AGENTS.md（可用 awf projects / awf find 检索）"
     else
-      warn "全局索引写入失败；框架已生成，可稍后运行 ./agent-workflow/bin/awf register"
+      warn "全局索引写入失败；框架已生成，可稍后运行 ~/.dsh/skills/agent-workflow-scaffold/bin/awf register"
     fi
   else
     say "已跳过全局索引登记（--no-register）"
@@ -1010,7 +1007,7 @@ status_build_block() {
   local block="$1" type f id pri st own title date
   local cur_rows="" todo_rows="" done_rows=""
   {
-    printf '> 本区块由 `agent-workflow/bin/awf status` 生成，请勿手改。\n'
+    printf '> 本区块由 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 生成，请勿手改。\n'
     printf '> 数据来源：`tasks/<type>/<ID>.md`（单任务文件；todo/current/done README 为检索视图）。\n\n'
 
     # DEV-127：current/todo/done 段直接扫任务文件（README 只是视图；直接扫文件才能让
@@ -1089,7 +1086,7 @@ check_status_fresh() {
     return 0
   fi
   say "FAIL  tasks/status.md 已过期（账本改动后未刷新）"
-  say "      → 运行 ./agent-workflow/bin/awf status"
+  say "      → 运行 ~/.dsh/skills/agent-workflow-scaffold/bin/awf status"
   return 1
 }
 
@@ -1101,9 +1098,9 @@ copy_drift_report() {
   if [ ! -f "$root/bin/awf" ] || [ ! -f "$root/templates/README.md" ]; then
     return 0
   fi
-  for pair in "bin/awf:agent-workflow/bin/awf" \
-              "bin/awf-dispatch:agent-workflow/bin/awf-dispatch" \
-              "templates/README.md:agent-workflow/README.md" \
+  # DEV-186 工具技能化：bin/awf、bin/awf-dispatch 是技能工具本体（根 bin/ 即技能），
+  # 项目内不再复制副本——不再纳入漂移比对；只比对骨架契约文件。
+  for pair in "templates/README.md:agent-workflow/README.md" \
               "templates/AGENTS.md.tmpl:agent-workflow/templates/AGENTS.md.tmpl"; do
     src="${pair%%:*}"; dst="${pair#*:}"
     [ -f "$root/$src" ] || continue
@@ -1210,7 +1207,7 @@ agent-workflow/tasks/docs/done/README.md
     say "ok    AGENTS.md 入口与 project.yaml 同步（digest: ${actual}）"
   else
     say "FAIL  AGENTS.md 入口已过期（记录: ${recorded:-无} / 实际: ${actual}）"
-    say "      → 运行 ./agent-workflow/bin/awf bootstrap"
+    say "      → 运行 ~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap"
     fails=$((fails + 1))
   fi
 
@@ -1361,7 +1358,7 @@ release_usage() {
   2. 在 agent-workflow/tasks/dev/current/ 写入 release-prep 任务文件（release_write_current）
   3. 改版本锚点（project.yaml 的 version_file 指向的文件，默认根 VERSION）；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
   4. 跑 ./agent-workflow/check_workflow.sh 与 bash test/smoke.sh
-  5. ./agent-workflow/bin/awf status 刷新 status.md，并把任务文件归档到 dev/done/（状态 done + 完成日期）
+  5. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status 刷新 status.md，并把任务文件归档到 dev/done/（状态 done + 完成日期）
   6. 打印下一步 git add/commit/tag/push 命令与建议 commit 消息
 
 --dry-run   只打印将执行的动作，不改文件、不跑命令
@@ -1541,7 +1538,7 @@ cmd_release_prep() {
     say "[dry-run] ./agent-workflow/check_workflow.sh"
     say "[dry-run] bash test/smoke.sh"
     say "[dry-run] 归档任务文件到 dev/done/（状态 done + 完成日期）"
-    say "[dry-run] ./agent-workflow/bin/awf status"
+    say "[dry-run] $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status"
     say "[dry-run] 下一步（不会执行）：git add -A && git commit -m \"release: v${version}（${TASK_ID}）\" && git tag -a v${version} -m \"v${version}\" && git push origin main v$version"
     return 0
   fi
@@ -1595,7 +1592,7 @@ cmd_release_prep() {
   # c2. 账本块刚写入 current.md → 先刷新 status.md，避免「status.md 新鲜度」门禁在 d 误拦截
   #     （F1-F3 门禁加入后 release-prep 的顺序修复；已归档的幂等重跑无需刷新）
   if [ -z "$(release_done_id)" ]; then
-    release_run ./agent-workflow/bin/awf status
+    release_run $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status
   fi
 
   # d. 校验（失败即停，账本保留在 current.md）
@@ -1604,7 +1601,7 @@ cmd_release_prep() {
 
   # e. 先归档再刷新 status，确保 status.md 反映最终状态
   release_archive
-  release_run ./agent-workflow/bin/awf status
+  release_run $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status
 
   # f. 下一步（只提示，不执行）
   say ""
@@ -1631,8 +1628,8 @@ upgrade_usage() {
   1. 复制框架文件到目标 agent-workflow/：
      bin/awf、bin/awf-dispatch、templates/AGENTS.md.tmpl、README.md、
      check_workflow.sh 兼容入口（自定义门禁默认保留，见下）
-  2. ./agent-workflow/bin/awf bootstrap  刷新 AGENTS.md 受控区块（区块外保留）
-  3. ./agent-workflow/bin/awf check      校验（退出码 = 失败项数量）
+  2. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap  刷新 AGENTS.md 受控区块（区块外保留）
+  3. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check      校验（退出码 = 失败项数量）
 
 v1.2.0 彻底技能化：完整流程细节在技能 agent-workflow-scaffold（skills/ 各流程技能），
 项目内无 workflows/ 副本——AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
@@ -1681,10 +1678,9 @@ cmd_upgrade() {
   say "== awf upgrade $target =="
 
   local item src dst
-  # 变更清单：覆盖为 kit 版本（check_workflow.sh 单独处理）
+  # DEV-186 工具技能化：变更清单不再含 bin/awf、bin/awf-dispatch（工具在技能
+  # agent-workflow-scaffold 的 bin/，符号链接一处维护）；只同步骨架契约文件。
   for item in \
-      "bin/awf:$KIT_DIR/bin/awf" \
-      "bin/awf-dispatch:$KIT_DIR/bin/awf-dispatch" \
       "templates/AGENTS.md.tmpl:$TPL_DIR/AGENTS.md.tmpl" \
       "templates/pre-commit:$TPL_DIR/pre-commit" \
       "README.md:$TPL_DIR/README.md"; do
@@ -1716,9 +1712,26 @@ cmd_upgrade() {
     fi
   fi
 
+  # DEV-186 工具技能化：--slim 清理存量项目内复制的 bin/awf、bin/awf-dispatch 副本
+  # （工具在技能 agent-workflow-scaffold/bin/，符号链接一处维护；项目内副本不再需要）。
+  for tool in bin/awf bin/awf-dispatch; do
+    if [ -f "$awf_dir/$tool" ]; then
+      if [ "$slim" -eq 1 ]; then
+        if [ "$dry_run" -eq 1 ]; then
+          say "  将删除 $awf_dir/$tool（存量工具副本；工具在技能 bin/）"
+        else
+          rm -f "$awf_dir/$tool"
+          say "  已删除 $awf_dir/$tool（工具技能化迁移完成：调用技能 ~/.dsh/skills/agent-workflow-scaffold/bin/awf）"
+        fi
+      else
+        say "  提示：$awf_dir/$tool 为存量工具副本（技能化后不再需要），可用 awf upgrade --slim 清理"
+      fi
+    fi
+  done
+
   # check_workflow.sh：标准 3 行兼容入口直接覆盖；自定义门禁默认保留（--force 覆盖）
   local shim="$awf_dir/check_workflow.sh" shim_std shim_cur
-  shim_std="$(printf '%s\n' '#!/bin/sh' '# 兼容入口：等价于 agent-workflow/bin/awf check' 'exec "$(dirname "$0")/bin/awf" check "$@"')"
+  shim_std="$(printf '%s\n' '#!/bin/sh' '# 兼容入口（DEV-186 工具技能化）：等价于技能 agent-workflow-scaffold 的 bin/awf check' 'exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"')"
   shim_cur="$(cat "$shim" 2>/dev/null || true)"
   if [ "$shim_cur" != "$shim_std" ] && [ "$force" -eq 0 ]; then
     if [ "$dry_run" -eq 1 ]; then
@@ -1784,7 +1797,7 @@ cmd_upgrade() {
     && warn "check_workflow.sh 为项目自定义门禁（未覆盖）；请另行确认其通过"
   say "后续：目标项目只本地 commit（消息含任务 ID），禁止 push"
   if [ -d "$target/.git" ] && [ -f "$awf_dir/templates/pre-commit" ]; then
-    say "提示：可用 ./agent-workflow/bin/awf install-hooks 安装 git pre-commit 钩子（提交前自动跑 check，未过即拒绝）"
+    say "提示：可用 $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf install-hooks 安装 git pre-commit 钩子（提交前自动跑 check，未过即拒绝）"
   fi
   return "$rc"
 }
@@ -2031,7 +2044,7 @@ cmd_register() {
 }
 
 cmd_projects() {
-  [ -f "$REGISTRY" ] || die "尚未登记任何项目（在项目内运行 ./agent-workflow/bin/awf register）"
+  [ -f "$REGISTRY" ] || die "尚未登记任何项目（在项目内运行 $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf register）"
   printf '| 项目ID | 别名 | 路径 | 角色 |\n|--------|------|------|------|\n'
   local rid ralias rpath rentry rp role
   while IFS='|' read -r rid ralias rpath rentry; do

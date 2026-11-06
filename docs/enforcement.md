@@ -19,7 +19,7 @@ $ LC_ALL=C awk 'BEGIN{ a="状态"; b="字段"; printf "%d\n", (a==b) }'  # → 0
 
 ## 修复方案（选 A，无副作用）
 
-`agent-workflow/bin/awf` 内**所有 awk 调用统一经 `awfk()` 包装**：
+`~/.dsh/skills/agent-workflow-scaffold/bin/awf` 内**所有 awk 调用统一经 `awfk()` 包装**：
 
 ```sh
 awfk() { LC_ALL=C awk "$@"; }
@@ -49,8 +49,8 @@ awfk() { LC_ALL=C awk "$@"; }
 LC_ALL=C bash test/smoke.sh                       # C locale 全绿（≥124 项 + 新增断言）
 bash test/smoke.sh                                # 默认 locale 同样全绿
 LC_ALL=en_US.UTF-8 bash test/smoke.sh             # 复现 bug 的 locale 同样全绿
-bash -n agent-workflow/bin/awf && bash -n bin/awf
-python3 -m py_compile agent-workflow/bin/awf-dispatch
+bash -n ~/.dsh/skills/agent-workflow-scaffold/bin/awf && bash -n bin/awf
+python3 -m py_compile ~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch
 ./agent-workflow/check_workflow.sh                # 通过
-( cd <项目> && ./agent-workflow/bin/awf install-hooks --check )   # 钩子状态
+( cd <项目> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf install-hooks --check )   # 钩子状态
 ```

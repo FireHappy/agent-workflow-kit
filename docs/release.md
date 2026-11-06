@@ -90,7 +90,7 @@ printf '0.2.2\n' > VERSION
 ./bin/awf release-prep 0.4.2 --dry-run # 只打印将执行的动作
 ```
 
-`./agent-workflow/bin/awf` 是 `init --force` 生成的副本，同样带本命令；在已安装的项目里可用该路径。
+`~/.dsh/skills/agent-workflow-scaffold/bin/awf` 是 `init --force` 生成的副本，同样带本命令；在已安装的项目里可用该路径。
 
 它**会做**：
 
@@ -99,7 +99,7 @@ printf '0.2.2\n' > VERSION
 2. 在 `agent-workflow/tasks/dev/current.md` 写入 `[DEV-XXX] release-prep <版本>` 块（自动取下一个可用 ID），校验通过后归档到 `done.md`；
 3. 把**版本锚点**（`agent-workflow/project.yaml` 的 `version_file`，本仓库默认根 `VERSION`）改为 `<X.Y.Z>`；把 `CHANGELOG.md` 顶部的 `## [Unreleased]` 改为 `## [<X.Y.Z>] - 今天`（没有 Unreleased 时提示手动处理）；
 4. 跑 `./agent-workflow/check_workflow.sh` 与 `bash test/smoke.sh`，任一失败即停（账本留在 `current.md`）；
-5. 跑 `./agent-workflow/bin/awf status` 刷新 `status.md`；
+5. 跑 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 刷新 `status.md`；
 6. 打印下一步的 `git add -A && git commit … && git tag -a v<X.Y.Z> … && git push …` 命令与建议 commit 消息。
 
 它**不会做**（铁律）：

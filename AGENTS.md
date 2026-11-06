@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:379571c8 -->
+<!-- awf:begin v1 digest:134270ef -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -14,12 +14,12 @@
    - 开发完成待审（dev 子流程，随 dev 一起加载） → 技能 `skills/review/SKILL.md`（状态机：复核→通过/需修改→修复→复审→归档）
    - 跨项目派发 / 交接 → 技能 `skills/cross-project/SKILL.md`（G1-G4 门→派发→回报→核验→归档）
    - 发版 / 版本号 / tag / CHANGELOG → 技能 `skills/release/SKILL.md`（探测→bump→CHANGELOG→tag→收尾）
-3. 项目级技能：本仓库 `skills/` 下的领域技能（如 `cross-project-dispatch`，已并入 agent-workflow-scaffold）相应情况直接加载/阅读，不依赖全局技能目录。
+3. 项目级技能：本仓库 `skills/` 下的领域技能（如 `cross-project`，跨项目派发）相应情况直接加载/阅读，不依赖全局技能目录。
 
 4. 开始前先读 `agent-workflow/memory/history/` 中**同类主题的过往结论**（修复类先读过去修法、生成类先读上次教训、排查类先读已知坑）；有 INDEX.md 则先读索引
 5. 有自己名下 `active/verify/review/blocked` 的任务先恢复；没有则从 `tasks/<type>/todo/` 认领（目录式：每个任务一个 `<ID>.md`，`todo/README.md` 为检索索引，由 `awf status` 生成）
 6. 动手前把任务写入 `tasks/<type>/current/<ID>.md`（从 `todo/` 移入 `current/` 并改状态为 active）：优先级、状态、Owner、验收标准、下一步；认领/归档只移动文件 + 同步状态字段，索引 `README.md` 由 `awf status` 自动重生成
-7. 收尾：归档（`current/` → `done/` 移动文件 + 状态改 `done` + 补 `完成日期`）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → `./agent-workflow/check_workflow.sh` 通过 → `./agent-workflow/bin/awf status` → 本地 commit
+7. 收尾：归档（`current/` → `done/` 移动文件 + 状态改 `done` + 补 `完成日期`）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → `./agent-workflow/check_workflow.sh` 通过 → `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` → 本地 commit
 
 ## 铁律
 
@@ -42,7 +42,7 @@
    - 可并行拆分（多模块、修改范围不重叠、共享写点已声明、协调成本低于收益）：**才用团队**——先出计划与依赖，成员执行、主线汇总；共享写点只由主线改。
    - 其余默认单会话。
 2. **目标仓库 ≠ 当前工作区**（跨仓库任务）：
-   - **执行细则见 `agent-workflow/workflows/cross-project.md`（跨项目派发工作流，自包含）**——四道门（G1 工作流 / G2 工作区 / G3 可写 / G4 通道）、派发三规则、必报点总表、阻塞回执请求、转达回执格式均在工作流内；**项目级技能**在同仓库 `skills/cross-project-dispatch/SKILL.md`（相应情况可加载参考，不依赖全局安装）。以下条款为速查兜底。
+   - **执行细则见 `agent-workflow/workflows/cross-project.md`（跨项目派发工作流，自包含）**——四道门（G1 工作流 / G2 工作区 / G3 可写 / G4 通道）、派发三规则、必报点总表、阻塞回执请求、转达回执格式均在工作流内；**执行细则在技能** `skills/cross-project/SKILL.md`（跨项目派发完整手册，AGENTS.md 路由强制加载）。以下条款为速查兜底。
    - **默认 `awf-dispatch` 派发到目标项目自己的工作区会话**执行；调度方只发任务、收结果，**不直接改目标仓库**。前置：目标有工作流且已登记为当前 harness 的工作区（见 `agent-workflow/workflows/cross-project.md` 四道前置门）。
    - **派发三规则（DEV-138）**：① **默认异步**——派发只发送任务、立即返回会话 ID，主会话不被钉住；需要本回合结果/落地确认时调用方**显式 `--wait`**（`--timeout` 仅对 `--wait` 生效）。② **派发即启动子代理**——派发动作就是在目标工作区启动目标 agent 的子代理会话，**不启用智能体团队承载派发**（无 captain/dispatcher 成员层；多目标=多次派发，默认异步互不阻塞）。③ **票据瘦身 + 分析归 worker**——router 只写 用户意图 / 硬约束 / 验收标准 / 路由裁决，**不写执行步骤、不做前置侦察**；前置分析由目标 worker 在自己的会话里用目标仓库 `tools/` 手册与 `memory/history` 完成，有疑问返回 router / 用户决策。
    - **派发生命周期（DISPATCH-133）**：派发动作纳入**派发方自己的任务账本**——派发前登记「进行中开发任务」（active：目标 worker / 关联票据 / 派发时间 / 一句话目标 / 验收标准）作**兜底锚点**，代理回报且**派发方核验收讫后归档 done**（补 完成日期 / 结果概要 / commit 引用）。**必有回报是主机制**：目标会话一旦打开就有回报能力——成功必须回报（commit / 产物 / 验证结果），失败必须回报（环节 / 错误 / 阻塞点）；需用户确认时**不在目标会话内向用户提问**，按回报格式写「阻塞：需用户确认 X」并保持会话等待，由派发端转述用户决策、`awf-dispatch --session` 续发（多轮对话），决策送达前不擅自行事（DISPATCH-141）；需用户确认前先判定本机熄屏状态（`awf-dispatch --screen-state`，off/locked＝远程办公状态（remote）→ 回报注明「远程办公状态（remote），请派发端经 IM 主动、立即通知用户决策」、不原地死等，DISPATCH-143）；**状态透明化（DISPATCH-144）**：中间状态转换（review 不通过 / 修复开始 / 修复完成待复审 / 复审通过或再次不通过 / 归档完成）必须主动回报派发方，写清当前状态/结果/下一步/预计，时机不晚于状态转换后一回合，不因「还在修复」而沉默（异步派发同样适用）；回报时机/字段/违约后果全量化见**回报规则必报点总表（DISPATCH-145）**（必报点 1-10，并入 133/141/143/144；**转派链卡点必报**：多层转派 A→B→C 时必报点表适用于每一跳、转派不断链、卡点必报 + 「仍阻塞」心跳 ≤5 分钟、静默等待 = 违规）；**回报投递通道（DISPATCH-146）**：目标会话回报**经通道投递派发方、非仅写会话**——任一必报点/中途状态回报时运行 `awf-dispatch --report --to <派发方会话ID> "<回报文本>"`，回报推送进派发方会话收件箱（inbox，RPC 不可达/未注入时降级收件箱文件 `dispatch/reports/inbox/`），派发方无需轮询即可收到；**空闲/收尾/自检（DISPATCH-147）**：无任务发生也报平安——必报点 10 后追加收尾句「任务完成，会话空闲，可续发（来源会话：<会话ID>）」；>10 分钟无新必报点且仍存活时发空闲心跳（空闲+仍在线+上次动作时间+无卡死声明，≥10 分钟/有活动变化时，防刷屏合并；阻塞态按「仍阻塞」心跳 ≤5 分钟优先、空闲心跳兜底）；非任务动作（bootstrap/通道自检/仓库体检）可选发「自检状态」回报（做了 X / 结果 OK，不计入也不替代空闲心跳）；均走同一 `--report` 通道，与静默=违规衔接（**空闲也要报**）；无回报仅当会话失联（进程退出 / 会话关闭），此时登记 active 兜底，例行扫描账本追问 / 重派 / 上报用户决策，防止「派发了就忘记」；**转达用户回执格式（DISPATCH-152）**：派发方收回报核验后转达用户按固定回执（✅ 完成 / ❌ 失败·核验不过 / ⏳ 阻塞进行中 三态；字段：发送者/执行内容/改动范围/验证/问题风险/我的处理，以「无需你操作」收尾）；**回报正文排版（DISPATCH-153）**：回报正文用 markdown 结构化（`## ✅ 完成回报（编号 · 任务名）` + 状态/执行内容/改动范围/commit/验证/遗留·风险 列表），禁止整段长文本，见 `docs/dispatch.md`「回报正文排版」小节。
@@ -64,11 +64,11 @@
 
 ## 跨项目
 
-- 全局索引：`~/.agents/AGENTS.md`（别名 → 路径）；也可运行 `./agent-workflow/bin/awf projects`
-- 按名字定位：`./agent-workflow/bin/awf find <别名|ID>`
-- 若索引里还没有本仓库（clone/移动后），运行 `./agent-workflow/bin/awf register`；`bootstrap` 会自动刷新已登记项目的路径
+- 全局索引：`~/.agents/AGENTS.md`（别名 → 路径）；也可运行 `~/.dsh/skills/agent-workflow-scaffold/bin/awf projects`
+- 按名字定位：`~/.dsh/skills/agent-workflow-scaffold/bin/awf find <别名|ID>`
+- 若索引里还没有本仓库（clone/移动后），运行 `~/.dsh/skills/agent-workflow-scaffold/bin/awf register`；`bootstrap` 会自动刷新已登记项目的路径
 - 派发前先确认目标项目有工作流且已登记为当前 harness 的工作区；满足后优先在目标工作区的会话中执行，不要默认无人值守（后台）执行
-- 派发工具（若 harness 提供）：`./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
+- 派发工具（若 harness 提供）：`~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
 - 不要在调度方会话里直接改目标仓库；写入由目标 agent 在目标工作区完成
 
 ## 项目事实
@@ -76,10 +76,10 @@
 `agent-workflow/project.yaml` 是唯一输入。改完运行：
 
 ```sh
-./agent-workflow/bin/awf bootstrap   # 只刷新本文件受控区块
+~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap   # 只刷新本文件受控区块
 ```
 
-> 本区块由 `agent-workflow/bin/awf bootstrap` 生成，源为 `agent-workflow/project.yaml` 与该模板。区块外的内容可以自由编辑。
+> 本区块由 `~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap` 生成，源为 `agent-workflow/project.yaml` 与该模板。区块外的内容可以自由编辑。
 <!-- awf:end -->
 
 ## 本仓库协作约定（区块外，本地维护）

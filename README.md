@@ -46,14 +46,14 @@ cd ~/Documents/GitHub/agent-workflow-kit
 ~/Documents/GitHub/agent-workflow-kit/bin/awf init . --name "我的项目" --purpose "一句话定位"
 
 # 改完项目事实后刷新入口
-./agent-workflow/bin/awf bootstrap
+~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap
 
 # 校验 / 状态
 ./agent-workflow/check_workflow.sh
-./agent-workflow/bin/awf status
+~/.dsh/skills/agent-workflow-scaffold/bin/awf status
 
 # 跨项目派发（目标有工作流且已登记工作区；默认只发送不等待，--wait 才等待回合结束）
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md
 ```
 
 生成结果：
@@ -86,7 +86,7 @@ skills/ 各流程技能，AGENTS.md 路由内联状态机 + 强制加载技能�
 ~/Documents/GitHub/agent-workflow-kit/bin/awf init . --name "我的项目" --gitignore
 
 # 存量项目补忽略
-./agent-workflow/bin/awf gitignore
+~/.dsh/skills/agent-workflow-scaffold/bin/awf gitignore
 ```
 
 忽略范围：`/agent-workflow/`、`/AGENTS.md`、`/CLAUDE.md`（根锚定，写入项目根 `.gitignore`，带固定标记行、不重复追加）。之后 `check` / `status` / `bootstrap` 等仍是本地常用命令，只是不再入库。
@@ -98,11 +98,11 @@ skills/ 各流程技能，AGENTS.md 路由内联状态机 + 强制加载技能�
 派发遵循**激活式 router** 协议：路由能力只在直接面对**用户原始请求**的节点临时激活（任务票据头部带「来源：用户 | 工作流」标记，缺省=用户，向后兼容）；派发深度 = 1——收到「来源：工作流」任务的节点保持 worker、**禁止转派**，`awf-dispatch` 对工作流来源票据的二次派发直接拒绝（退出码 2）。每个 worker 可在项目 `project.yaml` 填 `role` 作**名牌**（一句话自述，`awf find` / `awf projects` 检索时带出；缺省回退 name），router 检索工作群时可见。设计权衡与「激活派发 / 转派被拒」两段示意见 [docs/design.md](docs/design.md)「激活式 Router」，名牌说明见同文「worker 名牌（role）」，票据来源字段与派发器校验见 [docs/dispatch.md](docs/dispatch.md)「任务票据来源」。`templates/AGENTS.md.tmpl` 任务路由段与生成的 `agent-workflow/workflows/cross-project.md` 已内置同一规则。
 
 ```bash
-./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
-./agent-workflow/bin/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
-./agent-workflow/bin/awf-dispatch demo02 task.md --headless # GUI 不可用时
-./agent-workflow/bin/awf-dispatch demo02 task.md --handoff  # 只生成交接单
-./agent-workflow/bin/awf-dispatch demo02 task.md --team     # 任务包附团队执行建议
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch <别名|目录> <任务文件>
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --headless # GUI 不可用时
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --handoff  # 只生成交接单
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --team     # 任务包附团队执行建议
 ```
 
 四道前置门、回退矩阵与任务包格式见 [docs/dispatch.md](docs/dispatch.md) 和生成的 `agent-workflow/workflows/cross-project.md`。

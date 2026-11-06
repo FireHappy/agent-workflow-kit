@@ -16,9 +16,9 @@
 
 ```sh
 # 调度方（主线）直接派发：默认异步，立即返回会话 ID，主会话继续做其它事
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-010-fix-calc.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-010-fix-calc.md
 # 需要本回合结果 / 落地确认时才显式等待（配 --timeout）
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-010-fix-calc.md --wait --timeout 900
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-010-fix-calc.md --wait --timeout 900
 # 退出码 0：派发/等待正常结束（不代表任务成功）
 ```
 
@@ -28,11 +28,11 @@
 
 ```sh
 # 目标 A（异步）
-./agent-workflow/bin/awf-dispatch demo01 dispatch/tasks/demo01-DOCS-002-calc-doc.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo01 dispatch/tasks/demo01-DOCS-002-calc-doc.md
 # 目标 B（异步）
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-011-clock.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-011-clock.md
 # 需要结果时：各自 `--wait`，或稍后回到会话查看
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-011-clock.md --wait --timeout 900
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-011-clock.md --wait --timeout 900
 ```
 
 - 调度方按回报到达顺序汇总，不要求两个目标同时起步；
@@ -44,9 +44,9 @@
 
 ```sh
 # 上游：需要等接口/数据落地，显式 --wait
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-012-api.md --wait --timeout 900
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-012-api.md --wait --timeout 900
 # 调度方确认上游 commit 落地后，再派下游（下游同样可按需 --wait）
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-013-ui.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/demo02-DEV-013-ui.md
 ```
 
 依赖关系写在调度方的分解里，不写在票据里让目标方猜；没有「等上游」的空转成员一说。
@@ -163,7 +163,7 @@
 DSH 适配器（Python 3 标准库，不写第三方依赖）：
 
 ```sh
-./agent-workflow/bin/awf-dispatch <别名|目录> dispatch/tasks/<项目>-<ID>-<slug>.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch <别名|目录> dispatch/tasks/<项目>-<ID>-<slug>.md
 ```
 
 它会：
@@ -211,7 +211,7 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 目标会话的回报**经通道投递派发方，非仅写会话**回复文本。**目标侧**在任一必报点（1-10）/中途状态回报时运行：
 
 ```sh
-./agent-workflow/bin/awf-dispatch --report --to <派发方会话ID> "必报点 3 里程碑完成：..."
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch --report --to <派发方会话ID> "必报点 3 里程碑完成：..."
 # 派发方会话 = 派发方运行 awf-dispatch 时的 env DSH_SESSION_ID（随注入文本告知目标）
 # 成功：已投递到派发方会话 <id> 收件箱（inbox；触发其回合处理，派发方无需轮询即可收到）
 # RPC 不可达 / 未指定 --to：已写入收件箱文件 dispatch/reports/inbox/<来源会话ID>.md（派发方可查）
@@ -292,32 +292,14 @@ DSH 适配器（Python 3 标准库，不写第三方依赖）：
 
 ### 回报正文排版（DISPATCH-153 追加）
 
-worker 回报正文（受理 / 开始执行 / 中途状态 / 完成 / 阻塞）用 **markdown 结构化**，禁止整段长文本（实测连段可读性差，用户 2026-11-05 要求美化）。固定骨架（任何必报点通用，可照抄；完成示例）：
-
-```markdown
-## ✅ 完成回报（DEV-035 · 提交框架升级改动）
-
-- **状态**：done（已归档）
-- **执行内容**：改动清单核对 + 框架入库提交成功
-- **改动范围**：
-  - 框架：README / check_workflow.sh / workflows×6 / bin×2 / templates×2
-  - 入口：AGENTS.md、VERSION（锚点 1.1.3）
-  - 账本：旧式 tasks 迁移 → 新式账本（DEV-026/028/029/033/034/035 入库）
-- **commit**：`5f6df373`（未 push）
-- **验证**：check_workflow.sh 0 FAIL（终态复跑）
-- **遗留/风险**：.gitignore 增补 5 行待决策；服务端 Unity 资源/.DS_Store 未提交（项目遗留）
-
-任务完成，会话空闲，可续发（来源会话：session-89b66bdb-…）
-```
-
-其他必报点同骨架：标题换状态词与符号（⏳ 阻塞进行中 / ⏸ 中途状态 / 受理回报 / 开始执行），字段按「回报字段（固定）」表（DISPATCH-145）；收尾句（DISPATCH-147）在正文末尾。投递头（项目名＋会话名，DEV-165）由 `--report` 渲染，不属于正文。
+> 完整规范与模板样例已内联到技能 **agent-workflow-scaffold 的 `skills/cross-project/SKILL.md`**（第 13 条）——目标 agent 加载技能即见，骨架侧不再承载。要点：回报正文 markdown 结构化（`## ✅ 完成任务（<编号> · <任务名>）` + 状态/执行内容/改动范围/commit/验证/遗留·风险），禁止整段长文本；标题换状态词与符号（⏳ 阻塞进行中 / ⏸ 中途状态 / 受理任务 / 开始执行任务）。
 
 ### 默认异步与回到会话
 
 默认派发只做「（复用或新建会话）→ 发送任务 → 记日志」，几秒内返回并打印会话 ID：
 
 ```sh
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md
 # 模块：通用（会话标题 [awf] [lead] [DEV-003 示例]）
 # 复用会话：session-...（复用；reused: true）
 # 已记录：/path/to/dispatch/log.md
@@ -326,7 +308,7 @@ worker 回报正文（受理 / 开始执行 / 中途状态 / 完成 / 阻塞）�
 `dispatch/log.md` 的状态写「已发送，未等待回合」，并记录「会话来源：复用 / 新建」与打开方式：GUI 左侧切到目标工作区，打开同名会话即可继续追问。需要等这一回合出结果（脚本串联、CI、立刻验收）时再加 `--wait`：
 
 ```sh
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait --timeout 900
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait --timeout 900
 ```
 
 `--wait` 分两段：先轮询到回合结束，再等「落地」。落地基线（初始 HEAD）在**任务发送前一刻**采集；等落地时目标 `git -C <target> rev-parse HEAD` 与基线相比发生变化（本地 commit），**且最新 commit 的提交消息含本任务 ID**（无关会话/用户的 commit 不算），或账本 `agent-workflow/tasks/<type>/done.md` 出现本任务 ID（归档）。两者任一即完成；超时返回退出码 3，会话保留在 GUI。`--no-wait` 是 `--wait` 的反向兼容别名，等价于默认，二者互斥。
@@ -394,9 +376,9 @@ worker 回报正文（受理 / 开始执行 / 中途状态 / 完成 / 阻塞）�
 
 ```sh
 # 用票据里的「模块：工作流」
-./agent-workflow/bin/awf-dispatch demo01 dispatch/tasks/demo01-DEV-020-flow.md
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo01 dispatch/tasks/demo01-DEV-020-flow.md
 # 命令行覆盖票据里的模块
-./agent-workflow/bin/awf-dispatch demo01 dispatch/tasks/demo01-DEV-020-flow.md --module 文档
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo01 dispatch/tasks/demo01-DEV-020-flow.md --module 文档
 ```
 
 复用/等待的判定规则：
@@ -418,10 +400,10 @@ worker 回报正文（受理 / 开始执行 / 中途状态 / 完成 / 阻塞）�
 
 ```sh
 # 强制新建（隔离/调试；与 --reuse 互斥）
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
 
 # 直接向指定会话发送（续跑历史会话 / 人工指定；不会新建）
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxxx
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxxx
 ```
 
 `--reuse` 是默认值，可以显式书写，便于脚本表达意图。
@@ -453,7 +435,7 @@ worker 回报正文（受理 / 开始执行 / 中途状态 / 完成 / 阻塞）�
 - 目标端没有 AgentTeams 插件时，目标 agent 直接忽略这一节，用普通会话完成任务——不阻塞、不报错。
 
 ```sh
-./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --team
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --team
 ```
 
 只在明确需要时显式加；小改动直接普通会话即可。不加 `--team` 时任务包与旧版完全一致；`--team` 只影响会话模式注入的任务包，`--handoff` 生成的交接单保持原文。是否拆队由**目标 agent** 自己决定，调度方不为目标代开团队。
@@ -485,13 +467,13 @@ dispatch/archive/<目标别名>/<YYYY-MM>/<原文件名>
 
 ```sh
 # 只打印计划（默认 dry-run，不改任何文件）
-./agent-workflow/bin/awf-dispatch --prune
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch --prune
 
 # 确认后真正归档
-./agent-workflow/bin/awf-dispatch --prune --apply
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch --prune --apply
 
 # 机器可读（items[].status / archive / summary）
-./agent-workflow/bin/awf-dispatch --prune --json
+~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch --prune --json
 ```
 
 dry-run 示例：

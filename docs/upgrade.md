@@ -20,8 +20,8 @@
 2. **预览**：`/path/to/kit/bin/awf upgrade <项目目录> --dry-run` —— 只打印将变更/保留的文件，不改写任何文件。
 3. **执行**：`/path/to/kit/bin/awf upgrade <项目目录>` —— 依次自动完成：
    - 复制框架文件（见下「变更清单」）；
-   - `./agent-workflow/bin/awf bootstrap` 刷新 `AGENTS.md` 受控区块（区块外内容保留）；
-   - `./agent-workflow/bin/awf check` 校验（退出码 = 失败项数量）。
+   - `~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap` 刷新 `AGENTS.md` 受控区块（区块外内容保留）；
+   - `~/.dsh/skills/agent-workflow-scaffold/bin/awf check` 校验（退出码 = 失败项数量）。
 4. **修复**：`check` 的 FAIL 按输出自解释处理；旧账本迁移问题见「旧账本迁移」节。
 5. **提交**：目标项目只本地 commit（消息含任务 ID），**禁止 push**。
 
@@ -29,8 +29,8 @@
 
 | 文件 | 说明 |
 |---|---|
-| `agent-workflow/bin/awf` | 生成/校验工具（新增 `upgrade`、check 迁移修复指引随版本生效） |
-| `agent-workflow/bin/awf-dispatch` | 跨项目派发器 |
+| `~/.dsh/skills/agent-workflow-scaffold/bin/awf` | 生成/校验工具（新增 `upgrade`、check 迁移修复指引随版本生效） |
+| `~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch` | 跨项目派发器 |
 | `agent-workflow/templates/AGENTS.md.tmpl` | 入口模板（任务路由等规则随之更新） |
 | `agent-workflow/README.md` | 规范正文 |
 | `agent-workflow/workflows/*.md` | dev / debug / docs / review / cross-project / release |
@@ -66,7 +66,7 @@
 - **其他畸形行** → 以最接近字段推断转换；无法推断的保留原文并回报 note
 - 同时确认 `current.md`/`done.md` 任务块格式：`## [ID] 标题` + 字段表（含 `状态`）+ `### 下一步`
 
-升级完成后用 `./agent-workflow/bin/awf status` 刷新摘要，确认待办行能正常解析（面板自动轮询账本，格式修复后立即可见）。
+升级完成后用 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要，确认待办行能正常解析（面板自动轮询账本，格式修复后立即可见）。
 
 ## 验证命令（必须实际执行）
 
@@ -74,13 +74,13 @@
 /path/to/kit/bin/awf upgrade <项目目录> --dry-run      # 预览
 /path/to/kit/bin/awf upgrade <项目目录>                # 执行（rc=check 失败项数量）
 cd <项目目录> && ./agent-workflow/check_workflow.sh    # 退出码 0
-cd <项目目录> && ./agent-workflow/bin/awf status       # 刷新摘要
+cd <项目目录> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf status       # 刷新摘要
 ```
 
 ## 验收标准
 
 - [ ] `upgrade --dry-run` 与实际执行打印的变更/保留清单一致
-- [ ] 升级后 `agent-workflow/bin/awf`、`templates/AGENTS.md.tmpl`、`README.md`、`workflows/*.md` 与 kit 一致
+- [ ] 升级后 `~/.dsh/skills/agent-workflow-scaffold/bin/awf`、`templates/AGENTS.md.tmpl`、`README.md`、`workflows/*.md` 与 kit 一致
 - [ ] `project.yaml` / `tasks/**` / `memory/**` / `tools/**` 逐字节保留
 - [ ] `check` 退出码 0；旧账本格式问题输出含可直接执行的修复指引
 - [ ] 只本地 commit（消息含任务 ID），未 push

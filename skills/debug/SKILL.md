@@ -95,7 +95,7 @@ whenToUse: 用户报告崩溃/报错/行为异常、启动 DEBUG-xxx 排查任�
 2. 有**可复用结论**（根因/修法/复现/规避）→ 追加或新建 `../memory/history/<主题>_<YYYY-MM-DD>.md`（标准见 `../memory/README.md`）；有**新写的可复用诊断/修复脚本** → 按 `../tools/README.md` 晋升三要素收录进 `tools/`
 3. 清理对应 `../memory/cache/`
 4. 运行 `./agent-workflow/check_workflow.sh` 通过
-5. 运行 `./agent-workflow/bin/awf status` 刷新摘要
+5. 运行 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要
 6. 提交一次本地 git commit（**禁止 push**）
 
 未证实的风险要在完成摘要里单独列出。
