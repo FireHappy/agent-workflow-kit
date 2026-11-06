@@ -82,3 +82,4 @@
 | DEV-172 | P1 | release-prep 1.1.6 | 2026-11-05 |
 | DEV-174 | P1 | kit 锚点迁移至 agent-workflow/VERSION + upgrade 源版本读取适配 | 2026-11-06 |
 | DEV-175 | P1 | init 流程支持 git 忽略本工作流（--gitignore + awf gitignore 子命令） | 2026-11-06 |
+| DEV-176 | P1 | release-prep 1.1.7 | 2026-11-06 |

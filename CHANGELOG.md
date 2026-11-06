@@ -1,3 +1,14 @@
+## [1.1.7] - 2026-11-06
+
+### Added
+- **git 忽略本机私有工作流（DEV-175）**：`awf init --gitignore` + `awf gitignore` 子命令——把 `/agent-workflow/`、`/AGENTS.md`、`/CLAUDE.md` 写入项目 `.gitignore`（根锚定、固定标记行幂等），团队项目把本机私有工作流一键排除入库；usage/README/SKILL/smoke 同步
+
+### Changed
+- **kit 自身锚点迁移至 agent-workflow/VERSION（DEV-174，DISPATCH-155）**：kit 版本号统一放 `agent-workflow/VERSION`（版本锚点可配置，DEV-145 的 version_file 机制），`awf upgrade` 源版本由硬编码改读 kit 自身 `version_file`（KVF），upgrade 到目标时动态写锚点
+
+### Fixed
+- **派发者规范（--sender 填项目名）**：`awf-dispatch` 注入文本/示例/标题默认 sender 由 lead 角色名改为 cwd 项目名（agent-workflow-kit），用户规范禁止代理名
+
 ## [1.1.6] - 2026-11-05
 
 ### Fixed
