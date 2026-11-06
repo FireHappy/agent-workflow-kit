@@ -1161,3 +1161,68 @@
 - 根因：awf-dispatch `_session_locked_cg` CoreGraphics ctypes 探针用 c_char_p 裸指针传 key 给 CFDictionaryGetValue（期望 CFStringRef），CFEqual 比较段错误（macOS 弹崩溃报告噪音）；子进程隔离已保证主流程不崩、pmset 兜底
 - 修复：CFStringCreateWithCString(kCFStringEncodingUTF8) 构造 key；3 次运行 rc=0 无崩溃
 - 用户怀疑正确：派发流程 --screen-state 触发
+## 2026-11-06 17:57 → uxrsample
+
+- 目标：/Users/chenlin/Documents/GitHub/uxrsample
+- 任务：uxrsample · 工作流架构升级 v1.1.7（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.7/uxrsample.md）
+- 模块：通用
+- 工作区：uxrsample（5f0d6206-c4c9-417a-acda-063a41757547）
+- 会话：session-5b3fa562-e4d2-4390-aaa0-0a7c0920d7ce（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]）
+- 回报通道：派发方会话 session-c7be56db-d6e4-43f3-8aea-9d5b3642fd71（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：6bd8367 chore(build): 重新打包 uxr005-SpatialMesh APK（全新构建，CleanBuildCache）SP-302 DISPATCH-139
+- 回到会话：在 GUI 的 `uxrsample` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]」（会话 session-5b3fa562-e4d2-4390-aaa0-0a7c0920d7ce）继续提细节。
+
+## 2026-11-06 17:57 → dsh-settings
+
+- 目标：/Users/chenlin/Documents/GitHub/dsh-settings
+- 任务：dsh-settings · 工作流架构升级 v1.1.7（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.7/dsh-settings.md）
+- 模块：通用
+- 工作区：dsh-settings（b9ddb884-47fd-43ee-ad73-7fa9a8f78213）
+- 会话：session-fd0b1ca9-8cfa-4a6f-b8a0-814891c3b952（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]）
+- 回报通道：派发方会话 session-c7be56db-d6e4-43f3-8aea-9d5b3642fd71（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：e94bdad chore: daily sync 2026-11-06
+- 回到会话：在 GUI 的 `dsh-settings` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]」（会话 session-fd0b1ca9-8cfa-4a6f-b8a0-814891c3b952）继续提细节。
+
+## 2026-11-06 17:57 → FinderPathBar
+
+- 目标：/Users/chenlin/Documents/GitHub/FinderPathBar
+- 任务：FinderPathBar · 工作流架构升级 v1.1.7（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.7/finderpathbar.md）
+- 模块：通用
+- 工作区：findpathbar（20ebba16-29e9-4082-a6cc-7309a5d1f44e）
+- 会话：session-585f343e-4ba8-4df0-b096-2a9ff08fba3d（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]）
+- 回报通道：派发方会话 session-c7be56db-d6e4-43f3-8aea-9d5b3642fd71（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：0b49701 chore: 移除 current/DEV-012.md（已归档到 done）
+- 回到会话：在 GUI 的 `findpathbar` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]」（会话 session-585f343e-4ba8-4df0-b096-2a9ff08fba3d）继续提细节。
+
+## 2026-11-06 17:57 → agent-demo01
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo01
+- 任务：agent-demo01 · 工作流架构升级 v1.1.7（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.7/agent-demo-01.md）
+- 模块：通用
+- 工作区：agent-demo01（1f8b9846-12fb-4165-95c1-f971f9696d8d）
+- 会话：session-1d4ed3ec-4bab-4b69-a700-806d546f3597（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]）
+- 回报通道：派发方会话 session-c7be56db-d6e4-43f3-8aea-9d5b3642fd71（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：2a0d98a chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）
+- 回到会话：在 GUI 的 `agent-demo01` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]」（会话 session-1d4ed3ec-4bab-4b69-a700-806d546f3597）继续提细节。
+
+## 2026-11-06 17:57 → agent-demo02
+
+- 目标：/Users/chenlin/Documents/GitHub/agent-demo02
+- 任务：agent-demo02 · 工作流架构升级 v1.1.7（/Users/chenlin/Documents/GitHub/agent-workflow-kit/dispatch/tasks/upgrade-v1.1.7/agent-demo-02.md）
+- 模块：通用
+- 工作区：agent-demo02（3e6504d2-0eeb-4fc4-b51e-5eb78d9e7731）
+- 会话：session-04076011-0dd3-4c39-82ed-124e7c18caa4（[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]）
+- 回报通道：派发方会话 session-c7be56db-d6e4-43f3-8aea-9d5b3642fd71（目标回报经 `awf-dispatch --report` 投递该会话收件箱）
+- 会话来源：新建
+- 状态：已发送，未等待回合
+- 目标 HEAD：1a8bfa3 chore: 升级 agent-workflow 框架至 kit v0.5.0（awf-upgrade-20261102）
+- 回到会话：在 GUI 的 `agent-demo02` 工作区打开「[awf] [agent-workflow-kit] [工作流架构升级 v1.1.7]」（会话 session-04076011-0dd3-4c39-82ed-124e7c18caa4）继续提细节。
+
