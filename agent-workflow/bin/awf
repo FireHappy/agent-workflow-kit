@@ -90,12 +90,20 @@ awf — agent workflow framework
 
 用法:
   awf init [目录] [--name 名称] [--id 标识] [--purpose 一句话] [--role 能力自述] [--stack 类型]
-           [--keep-docs] [--force]
+           [--keep-docs] [--force] [--gitignore]
       在目标目录生成 agent-workflow/ 框架与仓库根 AGENTS.md。
       --role 能力自述（一句话）写入 project.yaml 的 role 字段作为 worker 名牌，
              init 即带能力定义；缺省保留空 role 键，可稍后在 project.yaml 补充。
       --keep-docs  已存在的 README.md 与 workflows/*.md 不覆盖（迁移旧项目用）。
       --no-register 不写入全局索引（默认自动登记，便于跨项目检索）。
+      --gitignore  把本机私有工作流写入目标 .gitignore（/agent-workflow/、
+             /AGENTS.md、/CLAUDE.md，根锚定；幂等）——团队项目不想把私有
+             工作流入库时使用；存量项目可用 awf gitignore 补写。
+
+  awf gitignore [目录]
+      把本机私有工作流写入项目 .gitignore（/agent-workflow/、/AGENTS.md、
+      /CLAUDE.md，根锚定；幂等，已含标记则跳过）。为已初始化的存量项目补
+      忽略用；新建项目可在 init 时直接加 --gitignore。
 
   awf bootstrap
       按当前 project.yaml 重建 AGENTS.md 受控区块（只替换区块，不动其他内容）。
@@ -660,7 +668,7 @@ check_growth_hints() {
 }
 
 cmd_init() {
-  local target="." name="" id="" purpose="" role="" stack="" force=0 keep_docs=0 no_register=0
+  local target="." name="" id="" purpose="" role="" stack="" force=0 keep_docs=0 no_register=0 gitignore=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -676,6 +684,7 @@ cmd_init() {
       --stack=*) stack="${1#*=}"; shift ;;
       --keep-docs) keep_docs=1; shift ;;
       --no-register) no_register=1; shift ;;
+      --gitignore) gitignore=1; shift ;;
       --force)   force=1; shift ;;
       -h|--help) usage; return 0 ;;
       -*)        die "未知参数：$1" ;;
@@ -784,6 +793,10 @@ cmd_init() {
 EOF
   fi
 
+  if [ "$gitignore" -eq 1 ]; then
+    append_gitignore "$target"
+  fi
+
   (
     cd "$target"
     ./agent-workflow/bin/awf status >/dev/null
@@ -804,6 +817,10 @@ EOF
   say "  ├── bin/awf-dispatch         跨项目派发（DSH 会话适配）"
   say "  └── check_workflow.sh        兼容入口"
   say ""
+  if [ "$gitignore" -eq 1 ]; then
+    say "  已写入 .gitignore：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
+    say ""
+  fi
   say "下一步：编辑 agent-workflow/project.yaml，然后运行"
   say "  ./agent-workflow/bin/awf bootstrap"
   say ""
@@ -823,6 +840,46 @@ EOF
   if [ -z "$role" ]; then
     say "提示：在 agent-workflow/project.yaml 的 role 字段填写本项目的 worker 能力自述（如：擅长…），awf find / awf projects 检索时可见"
   fi
+}
+
+# ---------------------------------------------------------------- gitignore
+
+# 本机私有工作流忽略块：固定标记行（幂等锚点）+ 三条根锚定路径
+GITIGNORE_MARK='# agent-workflow（本机私有工作流，不入库）'
+
+# 把忽略块写入 $1/.gitignore；已含标记则跳过，末尾无换行先补换行再追加。
+append_gitignore() {
+  local root="$1" gi="$1/.gitignore"
+  if [ -f "$gi" ] && grep -qF "$GITIGNORE_MARK" "$gi"; then
+    say "已忽略：$gi 已包含 agent-workflow（未重复追加）"
+    return 0
+  fi
+  # 末尾无换行时先补一行，避免忽略块粘在上一行末尾
+  if [ -s "$gi" ] && [ -n "$(tail -c 1 "$gi")" ]; then
+    printf '\n' >> "$gi"
+  fi
+  {
+    printf '%s\n' "$GITIGNORE_MARK"
+    printf '%s\n' '/agent-workflow/'
+    printf '%s\n' '/AGENTS.md'
+    printf '%s\n' '/CLAUDE.md'
+  } >> "$gi"
+  say "已写入 $gi：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
+}
+
+cmd_gitignore() {
+  local target="."
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help) usage; return 0 ;;
+      -*)        die "未知参数：$1（用法：awf gitignore [目录]）" ;;
+      *)         target="$1"; shift ;;
+    esac
+  done
+  target="$(cd "$target" 2>/dev/null && pwd)" || die "目录不存在：$target"
+  [ -f "$target/agent-workflow/project.yaml" ] \
+    || die "目标不是 agent-workflow 项目：$target（没有 agent-workflow/project.yaml；新项目请用 awf init --gitignore）"
+  append_gitignore "$target"
 }
 
 # ---------------------------------------------------------------- bootstrap
@@ -1987,11 +2044,12 @@ main() {
     register)  cmd_register ;;
     projects)  cmd_projects ;;
     find)      cmd_find "$@" ;;
+    gitignore) cmd_gitignore "$@" ;;
     release-prep) cmd_release_prep "$@" ;;
     upgrade)     cmd_upgrade "$@" ;;
     install-hooks) cmd_install_hooks "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / register / projects / find / release-prep / upgrade / install-hooks）" ;;
+    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / register / projects / find / gitignore / release-prep / upgrade / install-hooks）" ;;
   esac
 }
 

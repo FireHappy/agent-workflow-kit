@@ -75,6 +75,20 @@ cd ~/Documents/GitHub/agent-workflow-kit
     └── check_workflow.sh     兼容入口
 ```
 
+### 忽略工作流入库（团队项目）
+
+团队项目的共享仓库不想带本机私有工作流时，可一键把工作流写进 `.gitignore`（幂等，可重复执行）：
+
+```bash
+# 新建项目：init 时直接忽略
+~/Documents/GitHub/agent-workflow-kit/bin/awf init . --name "我的项目" --gitignore
+
+# 存量项目补忽略
+./agent-workflow/bin/awf gitignore
+```
+
+忽略范围：`/agent-workflow/`、`/AGENTS.md`、`/CLAUDE.md`（根锚定，写入项目根 `.gitignore`，带固定标记行、不重复追加）。之后 `check` / `status` / `bootstrap` 等仍是本地常用命令，只是不再入库。
+
 ## 跨项目派发
 
 当任务目标在另一个仓库时，先检查目标是否有工作流、是否已登记为当前 harness 的工作区；都满足后，优先在**目标工作区的会话**中执行，而不是默认 headless。

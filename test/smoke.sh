@@ -32,6 +32,26 @@ assert_file "$PROJ/agent-workflow/workflows/release.md" "release 工作流"
 assert_file "$PROJ/agent-workflow/bin/awf-dispatch" "awf-dispatch"
 assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
 
+# 1.4 gitignore：init --gitignore 写 .gitignore（根锚定+幂等）；awf gitignore 为存量项目补写
+GI_PROJ="$TMP/gi-proj"
+"$KIT_DIR/bin/awf" init "$GI_PROJ" --name "忽略项目" --no-register --gitignore >/dev/null
+assert_grep '^/agent-workflow/$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 agent-workflow/（根锚定）"
+assert_grep '^/AGENTS.md$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 AGENTS.md"
+assert_grep '^/CLAUDE.md$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 CLAUDE.md"
+GI_MARK="# agent-workflow（本机私有工作流，不入库）"
+[ "$(grep -cF "$GI_MARK" "$GI_PROJ/.gitignore")" = "1" ] && ok "gitignore 块含唯一标记行" || bad "gitignore 块标记行数量异常"
+( cd "$GI_PROJ" && ./agent-workflow/bin/awf gitignore ) >/dev/null
+[ "$(grep -cF "$GI_MARK" "$GI_PROJ/.gitignore")" = "1" ] && ok "awf gitignore 幂等（不重复追加）" || bad "awf gitignore 重复追加"
+
+NOGI_PROJ="$TMP/nogi-proj"
+"$KIT_DIR/bin/awf" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
+[ ! -f "$NOGI_PROJ/.gitignore" ] && ok "init 缺省不写 .gitignore" || bad "init 缺省不应写 .gitignore"
+printf '/node_modules/' > "$NOGI_PROJ/.gitignore"
+( cd "$NOGI_PROJ" && ./agent-workflow/bin/awf gitignore ) >/dev/null
+assert_grep '^/node_modules/$' "$NOGI_PROJ/.gitignore" "既有内容不被粘连（无换行先补行）"
+assert_grep '^/agent-workflow/$' "$NOGI_PROJ/.gitignore" "awf gitignore 为存量项目补写忽略"
+assert_grep '^/CLAUDE.md$' "$NOGI_PROJ/.gitignore" "无换行 .gitignore 追加块完整落行"
+
 # 1.1 派发器：help / --team 任务包注入 / handoff / 无工作流前置检查
 "$PROJ/agent-workflow/bin/awf-dispatch" --help >/dev/null && ok "awf-dispatch --help" || bad "awf-dispatch --help 失败"
 if "$PROJ/agent-workflow/bin/awf-dispatch" --help 2>&1 | grep -q -- '--team'; then

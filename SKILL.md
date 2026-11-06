@@ -42,6 +42,7 @@ whenToUse: 用户要求为新项目搭建 agent 协作流程、初始化任务�
    `awf bootstrap` 在项目已登记时自动刷新路径与别名（仓库移动/改名后无需手工处理）。
 
    - 不希望写入：`awf init ... --no-register` 或设置 `AWF_NO_REGISTER=1`
+   - 团队项目不想把本机私有工作流提交到共享仓库：`awf init ... --gitignore`（或存量项目运行 `./agent-workflow/bin/awf gitignore` 补忽略），把 `/agent-workflow/`、`/AGENTS.md`、`/CLAUDE.md` 写进项目 `.gitignore`（幂等）
    - 手工补登记：`cd <目标目录> && ./agent-workflow/bin/awf register`
    - 检索：`./agent-workflow/bin/awf projects` / `awf find <别名>`
 5. 向用户报告生成树，并说明下一步：
