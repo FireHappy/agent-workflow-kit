@@ -875,21 +875,13 @@ export function apply(ctx) {
           return
         }
         const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined
-        const result = await runManagedActionAgent(ctx, {
-          prompt: buildActPrompt({ action: 'init', id: 'INIT', type: 'dev', projectPath: path, reason: '', engine: 'subagent' }),
-          cwd: path,
-          parentSessionId: sessionId,
-          label: '工作流初始化（agent 完整配置）',
-          timeoutMs: 180_000,
-        })
-        if (result.ok) {
-          writeJson(res, 200, { ok: true, channel: 'agent', agent: { id: result.agentId, text: result.text } })
-        } else {
-          writeJson(res, 200, {
-            ok: true, channel: 'agent', failed: true,
-            agent: { id: result.agentId || null, code: result.code || 'agent-run-failed', error: result.error || '子代理初始化失败', phases: result.phases || [] },
-          })
-        }
+        // DEV-183：初始化与升级一致——注入主会话由 agent 完整配置（不再用受管理子代理）。
+        //   gitignore=true 时附加「把工作流写入 .gitignore」步骤（对应 awf init --gitignore / awf gitignore）。
+        const gitignore = body && body.gitignore === true
+        const initText = buildActPrompt({ action: 'init', id: 'INIT', type: 'dev', projectPath: path, reason: '', engine: 'inject' })
+          + (gitignore ? '\n\n附加步骤（gitignore）：初始化完成后把本机私有工作流写入项目 .gitignore——在 .gitignore 追加 `agent-workflow/`、`AGENTS.md`、`CLAUDE.md` 忽略块（对应 awf init --gitignore / awf gitignore；已含标记则跳过，末尾无换行先补换行再追加），并在回报里说明是否写入。' : '')
+        const team = await promptSession(ctx, sessionId, initText, 'awf-init')
+        writeJson(res, 200, { ok: true, channel: 'inject', gitignore, team })
       } catch (error) {
         writeError(res, 500, 'internal', error instanceof Error ? error.message : String(error))
       }

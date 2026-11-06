@@ -14,6 +14,7 @@ agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，�
   - `GET  /awf/projects`（全局索引）
   - `GET  /awf/ledger?path=<项目根>`（账本看板；未初始化项目返回 400 bad-request 或缺省标识，前端据此显示初始化引导）
   - `POST /awf/init`（未初始化引导：生成骨架，白名单 = 绝对路径 ∧（全局索引 ∨ 客户端上报 workspaceRoot），零外部命令）
+  - `POST /awf/init/agent`（DEV-183 起初始化与升级一致：**注入主会话**由当前会话 agent 完整配置；body `{path, workspaceRoot, sessionId, gitignore?}`，`gitignore: true` 时指令附加「写入 .gitignore 忽略工作流」步骤）
   - `POST /awf/task/start`（开始任务：todo 表格行 → current.md active 任务块）
   - `GET  /awf/archive?path=&id=`（归档只读查看：done 表格行 + 完整任务块原文）
   - `POST /awf/todo`（待办 CRUD：body `{path, type, action: add|update|delete, row:{id, 优先级?, 描述?}}`；add 时 ID 需 `TYPE-xxx`、优先级 P0–P3，duplicate→409）
@@ -46,10 +47,10 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 打开页签即自动加载**当前会话项目**的账本（无项目下拉选择器、无顶部工具条，不看其他项目）。DEV-044 起面板统一为**轻量行风格**：当前任务 / 待办 / 最近完成三区都是紧凑行（hairline 分隔、无卡片边框），只读展示账本事实，无任何操作按钮；写操作由 agent 在对话中执行，面板经 SSE/轮询自动反映账本变化。
 
 - 项目卡：名称（右侧带**版本号** chip：latest 绿点 / outdated 黄点可点击升级）+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
-- 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）· **流程阶段行**（DEV-179：阶段徽章「流程 · 当前阶段 · 位置/总步数」+ 迷你分段进度，一瞥即知当前到哪个流程；blocked 徽章标注「暂停」；无需点击详情）
+- 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）
 - 待办（行）：类型 chip + ID + 描述 + 优先级，dev/debug/docs 三态切换；每个类型 tab 显示该类型未开始任务数量徽章（如「开发 2」「调试 0」，数据取自 `ledger.todoRows` 过滤计数），标题「未开始任务 · 类型」不再重复数量（tab 徽章一处即可）；数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」），解析层兼容 4/5 列任务表格
 - 最近完成（行）：✓ 日期 ID 描述，点击查看归档
-- **未初始化引导**：所选项目尚未初始化 agent-workflow 时，页签显示引导卡（图标 + 文案 + 「初始化工作流」按钮）。点击调用 `/awf/init` 生成骨架（project.yaml + tasks/*/{todo,current,done}.md + status.md），成功后自动重新加载账本显示正常看板；`already-initialized` 等错误有友好提示
+- **未初始化引导**：所选项目尚未初始化 agent-workflow 时，页签显示引导卡（图标 + 文案 + 「初始化工作流（主会话）」按钮 + **「在 .gitignore 中忽略工作流」toggle**）。点击调用 `/awf/init/agent`：**注入当前会话**由 agent 读取项目上下文生成完整骨架（与升级/整理流程一致，不再用受管理子代理）；勾选 gitignore 时指令附加「把 agent-workflow/、AGENTS.md、CLAUDE.md 写入 .gitignore」步骤；成功后自动重新加载账本显示正常看板；`already-initialized` 等错误有友好提示
 - **待办列表（只读）**：dev/debug/docs 三态切换器（默认 dev）展示未开始任务表格行（类型 / ID / 描述 / 优先级），无新增/编辑/删除/开始按钮；该类型无行时显示空态（「该类型暂无未开始任务」）；todo.md 是表格行格式、无 checkbox，不渲染待办进度条
 - **源文件面板**（`GET /awf/source?path=&type=&file=`，服务端能力保留）：面板可查看/编辑 `.md` 原文并保存写回；DEV-044 起看板行上不再暴露「源文件」按钮（纯看板），面板仅由内部程序逻辑触发
 - 最近完成：done.md 归档记录（**行式** 4/5/6 列摘要行 + **块式** `## [ID]` 任务块合并去重、块式优先；块仅统计状态=完成/取消，日期取 归档日期 > 完成日期 > 最近更新/Last Updated）全局按完成日期倒序**仅显示前 5 条**（日期 / ID / 描述排版），每条可点击弹出**归档查看**弹层（done 表格行 + 完整任务块 markdown 原文；归档未保留任务块的显示「该任务归档时未保留详细任务块，仅摘要」并仍展示摘要行与日期），可关闭返回
@@ -104,11 +105,11 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
-- **0.3.5（DEV-179）**：当前任务行内联显示流程阶段 + 流程渲染重做（参考 AgentTeams 布局）
+- **0.3.5（DEV-179）**：当前任务行内联显示流程阶段 + 流程渲染重做（参考 AgentTeams 布局）；**0.3.6（DEV-182）**：移除流程阶段行——阶段由 status 静态映射、非真实流程数据，看板不再呈现（等真实流程数据接入后再恢复）
   - 背景：用户反馈 ①「当前任务要点击进度详情才能看到当前到哪个流程了」——阶段信息不在行内；②「流程画得太难看，参考 agent-team 的布局优化」——旧大步骤条（横向节点轨道 + 呼吸圆点/流动连线）观感差。
   - 现状核对：`WorkflowSteps` 大步骤条组件为死代码（全仓库未被调用），当前任务行（TaskCard）确实不渲染任何阶段。
   - 实现（仅前端 `lib/client.js` + 单测 + 版本号）：
-    - TaskCard 行内新增固定单行「流程阶段」：阶段徽章（`流程 · <当前阶段> · <位置>/<总步数>`，如「流程 · 验证 · 4/6」）+ 迷你分段进度（完成段=状态色浅底、当前段=状态色实底+静态光圈、未到段=灰）；blocked 徽章标注「⏸ 暂停」。一瞥即知，无需点击详情。
+    - TaskCard 行内新增固定单行「流程阶段」：阶段徽章（`流程 · <当前阶段> · <位置>/<总步数>`，如「流程 · 验证 · 4/6」）+ 迷你分段进度（完成段=状态色浅底、当前段=状态色实底+静态光圈、未到段=灰）；blocked 徽章标注「⏸ 暂停」。一瞥即知，无需点击详情。**（0.3.6 移除：status 静态映射非真实流程数据）**
     - 删除死代码大步骤条及其呼吸/流动动画 CSS（awf-breathe/awf-flow/awf-live-dot 等），阶段渲染为纯静态强调（无动画、box-shadow 光圈不影响布局），尊重 `prefers-reduced-motion`；状态色随账本状态语义（verify=绿 / review=琥珀 / active=品牌蓝 / blocked=琥珀暂停）。
     - 新增 `stageSummary` 纯函数（导出，供单测）：由 `inferWorkflowStage` 派生「流程 · 阶段 · 位置/总步数」摘要；`WORKFLOW_STEPS`/`inferWorkflowStage` 契约不变。
     - 回归不破坏：整行点击仍打开源文件详情；行高固定（阶段行为固定单行），无 hover 位移/布局跳动（DEV-026 约束）；`awf-*` 类名契约（`awf-stage`/`awf-stage-chip`/`awf-stage-segs`/`awf-stage-seg`）供断言。
@@ -151,6 +152,7 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
   - 修复：全部 td 统一 `word-break:break-word;overflow-wrap:anywhere`（去除 nowrap）；colgroup 列宽按比例归一化合计 100%（旧值 18+12+52+18+16+16=132% 溢出）；4 列 docs 型表格宽度不变（回归）
   - 验证：抽取 mdToHtml 对真实 6 列归档表合成渲染断言通过 + 单测回归 26/26 全绿
 
+- **0.3.6+（DEV-183）**：初始化与升级流程一致——`/awf/init/agent` 改为**注入主会话**（不再用受管理子代理）；引导卡加「git 忽略工作流」toggle（对应 awf init --gitignore / awf gitignore）；同时 `awf-dispatch` 增加**全局 [awf] 会话总数 ≤ 3** 限制（所有项目合计，复用不受限）
 - **0.2.4（DEV-103 等）**：看板初始化 agent 化 + 引导卡提亮
   - 初始化改走 agent 完整配置（`lib/index.js` 新增 `POST /awf/init/agent`）：受管理子代理读项目上下文（README/技术栈/结构）→ 生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin/awf + 标准 4 列账本骨架 + 初始真实任务）→ awf check/status 验证 → 回报；替代仅空模板的最小骨架
   - `buildActPrompt` 新增 init 动作分支（`INIT_AGENT_GUIDE`），`AGENT_ACTIONS` 白名单加入 init

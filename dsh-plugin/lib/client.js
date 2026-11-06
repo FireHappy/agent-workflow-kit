@@ -224,14 +224,6 @@ window.__ModuleLoader__.load({
     // 统一基础样式类（DEV-024 收敛零散 inline style 的根源）：
     // 所有组件只挂类名 + 少量主题变量，尺寸/圆角/间距走同一体系，杜绝「裁切/大小不一致」。
     const AWF_UI_CSS =
-      // DEV-179：紧凑流程阶段（AgentTeams 参考布局）——阶段徽章 + 迷你分段进度。
-      // 类名契约：awf-stage / awf-stage-chip / awf-stage-segs / awf-stage-seg 供单测断言；
-      // 尺寸/圆角集中在这里，颜色走 inline 状态语义色（跟随主题令牌，不额外引入 CSS 类）。
-      '.awf-stage{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;min-width:0}' +
-      '.awf-stage-chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;' +
-      'font-size:11px;font-weight:600;line-height:16px;padding:1px 8px;white-space:nowrap;box-sizing:border-box}' +
-      '.awf-stage-segs{display:inline-flex;gap:3px;align-items:center;flex-shrink:0}' +
-      '.awf-stage-seg{width:5px;height:12px;border-radius:2px;flex-shrink:0;box-sizing:border-box}' +
       // 徽章统一尺寸：所有优先级/状态 Pill 同高同字号，仅用颜色/边框区分等级
       '.awf-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;' +
       'font-size:11px;font-weight:600;line-height:16px;padding:1px 8px;white-space:nowrap;box-sizing:border-box}' +
@@ -1034,7 +1026,9 @@ window.__ModuleLoader__.load({
     // 移除编辑/暂停/删除/放回待办/回填/验证等全部操作交互；状态徽章判断不准，
     // 徽章行只保留账本事实：类型/优先级/Owner。
     // DEV-043：进行中任务可打开源文件（current.md）并编辑。徽章行只保留账本事实。
-    // DEV-179：行内联「流程阶段」——阶段徽章 + 迷你分段（StageInline），无需点击详情。
+    // DEV-182：移除行内联「流程阶段」（原 DEV-179）——阶段由 status 静态映射、
+    // 非真实流程数据，UI 不再呈现；inferWorkflowStage/stageSummary 纯函数保留导出
+    // （供单测或将来接入真实流程数据监控复用）。
     /**
      * 当前任务行（DEV-044 对齐「最近完成」轻量行风格）：无卡片边框、hairline 分隔、
      * 紧凑布局。徽章行只保留账本事实：类型 / 优先级 / Owner；阶段行内联展示当前流程阶段。
@@ -1069,10 +1063,8 @@ window.__ModuleLoader__.load({
           h('span', { style: { color: C.faint } }, '↻'), h('span', {}, '更新 ' + t.updated)) : null,
         t.mode ? h('span', { style: { color: C.faint } }, t.mode) : null)
 
-      // DEV-179：当前任务行内联流程阶段——独立固定单行（阶段徽章 + 迷你分段），
-      // 无需点击详情即可一瞥即知；固定高度不随内容变化，不造成行高/布局跳动。
-      const stageLine = h('div', { style: { display: 'flex', alignItems: 'center', marginTop: 3, minWidth: 0 } },
-        h(StageInline, { t }))
+      // DEV-182：移除行内联「流程阶段」（原 DEV-179 阶段徽章 + 迷你分段）——
+      // 阶段由 status 静态映射、非真实流程数据，用户确认无具体数据监控意义，UI 不再呈现。
 
       return h('div', {
         className: 'awf-row' + (clickable ? ' awf-row-clickable' : ''),
@@ -1089,8 +1081,7 @@ window.__ModuleLoader__.load({
         rowHead,
         h('div', { style: { fontSize: F(13), fontWeight: 600, color: C.text, lineHeight: 1.45 } },
           t.title || '（无标题）'),
-        meta,
-        stageLine)
+        meta)
     }
 
     /** 最近完成行：完成标记 / 日期 / ID / 描述，可点击查看归档（DEV-044：无源文件按钮）。 */
@@ -1237,51 +1228,6 @@ window.__ModuleLoader__.load({
               background: pct >= 100 ? C.success : C.accent,
             },
           })))
-    }
-
-    /**
-     * DEV-179：紧凑流程阶段（替代旧大步骤条 WorkflowSteps，AgentTeams 参考布局）——
-     * 阶段徽章（「流程 · <当前阶段> · <当前位置>/<总步数>」）+ 迷你分段进度
-     * （完成段=状态色浅底、当前段=状态色实底+静态光圈、未到段=灰）。
-     * 纯静态强调、无动画、固定单行高度，不影响布局；blocked 徽章标注「暂停」。
-     * 类名契约：awf-stage / awf-stage-chip / awf-stage-segs / awf-stage-seg。
-     */
-    function StageInline({ t }) {
-      const s = stageSummary(t)
-      if (!s || !s.steps || s.steps.length < 2) return null
-      // 当前阶段状态色：verify=绿 / review=琥珀 / handoff=中性 / 其余（active/archived）=品牌蓝；
-      // blocked=琥珀 + 「暂停」标注（沿用既有「暂停」语义色 C.warn）
-      const color = s.paused
-        ? C.warn
-        : (s.status === 'verify' ? C.success : s.status === 'review' ? C.warn : s.status === 'handoff' ? C.idle : C.accent)
-      const chip = h('span', {
-        className: 'awf-stage-chip',
-        title: '流程阶段：' + s.current.label + (s.paused ? '（已暂停）' : ''),
-        style: {
-          color,
-          background: 'color-mix(in srgb, ' + color + ' 10%, transparent)',
-          border: '1px solid color-mix(in srgb, ' + color + ' 38%, transparent)',
-        },
-      },
-        s.text,
-        s.paused ? h('span', { style: { fontWeight: 700 } }, ' ⏸ 暂停') : null)
-      const segStyle = (i) => {
-        if (i < s.index) return { background: 'color-mix(in srgb, ' + color + ' 45%, transparent)' }
-        if (i === s.index) {
-          const c = s.paused ? C.warn : color
-          return { background: c, boxShadow: '0 0 0 2px color-mix(in srgb, ' + c + ' 22%, transparent)' }
-        }
-        return { background: 'color-mix(in srgb, ' + C.faint + ' 26%, transparent)' }
-      }
-      return h('span', { className: 'awf-stage' },
-        chip,
-        h('span', { className: 'awf-stage-segs' },
-          s.steps.map((st, i) => h('span', {
-            key: st.key,
-            className: 'awf-stage-seg',
-            style: segStyle(i),
-            title: st.label + (i === s.index && s.paused ? '（暂停）' : ''),
-          }))))
     }
 
     /**
@@ -1703,7 +1649,7 @@ window.__ModuleLoader__.load({
 
     /** 未初始化引导卡：图标 + 文案 + 「初始化工作流」按钮（EmptyState accent 形态）。 */
     /** 未初始化/半初始化引导卡：区分「从未初始化」（初始化骨架）与「已有工作流文件夹但项目事实不完整」（引导升级整理）。 */
-    function renderInitCard({ busy, error, onInit, needsUpgrade, onUpgrade }) {
+    function renderInitCard({ busy, error, onInit, needsUpgrade, onUpgrade, gitignore, onGitignoreToggle }) {
       if (needsUpgrade) {
         // DEV-041+升级中：按钮「更新中…」+ 旋转动画图标 + 禁点（busy=upgrading）
         const spin = busy
@@ -1751,31 +1697,49 @@ window.__ModuleLoader__.load({
             verticalAlign: '-1px',
           },
         })
-        // DEV-103：初始化由 agent 完整配置（读项目上下文生成骨架），子代理运行中
+        // DEV-183：初始化与升级一致——指令已注入主会话，由当前会话 agent 完整配置
         return h(EmptyState, {
           icon: '🚀', tone: 'accent',
           title: '初始化中…',
-          desc: '已派发 agent 子代理为项目生成完整工作流框架（读取项目上下文后配置 project.yaml、工作流文件与初始账本），完成后面板自动刷新。',
+          desc: '已向当前会话注入初始化指令，由 agent 读取项目上下文生成完整工作流框架（project.yaml、工作流文件与初始账本），完成后面板自动刷新。',
           extra: error
             ? h('div', { style: { marginTop: 10, fontSize: F(12), color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
                 '⚠️ ' + error)
             : null,
         })
       }
+      // DEV-183：gitignore toggle（仅未初始化卡显示；UI 对齐升级卡按钮风格）
+      const gitignoreToggle = typeof onGitignoreToggle === 'function'
+        ? h('label', {
+            style: {
+              display: 'flex', alignItems: 'center', gap: 6, marginTop: 12,
+              fontSize: F(11.5), color: C.sub, cursor: 'pointer', userSelect: 'none',
+            },
+          },
+            h('input', {
+              type: 'checkbox',
+              checked: !!gitignore,
+              onChange: (e) => onGitignoreToggle(!!(e && e.target && e.target.checked)),
+              style: { accentColor: C.accent, cursor: 'pointer' },
+            }),
+            '在 .gitignore 中忽略工作流（agent-workflow/、AGENTS.md、CLAUDE.md 不入库）')
+        : null
       return h(EmptyState, {
         icon: '🚀', tone: 'accent',
         title: '工作流未初始化',
-        desc: '该项目尚未初始化 agent-workflow。点击下方按钮，由 agent 读取项目上下文生成完整框架：project.yaml（项目事实）+ AGENTS.md 入口 + 工作流规范 + 任务账本骨架。',
+        desc: '该项目尚未初始化 agent-workflow。点击下方按钮，由当前会话 agent 读取项目上下文生成完整框架：project.yaml（项目事实）+ AGENTS.md 入口 + 工作流规范 + 任务账本骨架（与升级/整理流程一致，在主会话中处理）。',
         action: typeof onInit === 'function'
-          ? h('button', {
-              onClick: busy ? undefined : onInit,
-              disabled: busy,
-              style: Object.assign(buttonStyle(true), {
-                marginTop: 12, padding: '5px 16px', fontSize: F(12),
-                opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
-              }),
-            }, '初始化工作流（agent 配置）')
-          : null,
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center' } },
+              h('button', {
+                onClick: busy ? undefined : onInit,
+                disabled: busy,
+                style: Object.assign(buttonStyle(true), {
+                  marginTop: 12, padding: '5px 16px', fontSize: F(12),
+                  opacity: busy ? 0.6 : 1, cursor: busy ? 'default' : 'pointer',
+                }),
+              }, '初始化工作流（主会话）'),
+              gitignoreToggle)
+          : gitignoreToggle,
         extra: error
           ? h('div', { style: { marginTop: 10, fontSize: F(12), color: C.error, maxWidth: 280, wordBreak: 'break-all' } },
               '⚠️ ' + error)
@@ -1815,6 +1779,7 @@ window.__ModuleLoader__.load({
       const [loading, setLoading] = useState(false)
       const [initBusy, setInitBusy] = useState(false)
       const [initError, setInitError] = useState(null)
+      const [initGitignore, setInitGitignore] = useState(false) // DEV-183：初始化时把工作流写入 .gitignore
       // DEV-035：登记当前项目 / 仅本地模式 / 框架版本监测
       const [regBusy, setRegBusy] = useState(false)
       const [regError, setRegError] = useState(null)
@@ -1949,11 +1914,13 @@ window.__ModuleLoader__.load({
         setInitBusy(true)
         setInitError(null)
         try {
-          // DEV-103：初始化改为 agent 完整配置（读项目上下文生成完整骨架），不再用空模板
+          // DEV-183：初始化与升级一致——注入主会话由 agent 完整配置（读项目上下文生成骨架）；
+          //   gitignore=true 时指令附加「写入 .gitignore」步骤
           const out = await postJson('/awf/init/agent', {
             path: selected,
             workspaceRoot: anchorRoot || undefined,
             sessionId: props.sessionId || (props.scope && props.scope.sessionId) || undefined,
+            gitignore: initGitignore,
           })
           if (out && out.channel === 'agent' && out.failed) {
             setInitError('初始化子代理未完成：' + String((out.agent && (out.agent.error || out.agent.code)) || '未知原因'))
@@ -1974,7 +1941,7 @@ window.__ModuleLoader__.load({
         } finally {
           setInitBusy(false)
         }
-      }, [selected, initBusy, anchorRoot, loadLedger])
+      }, [selected, initBusy, initGitignore, anchorRoot, loadLedger])
 
       // DEV-035：重取项目索引（登记成功后 / 手动刷新时，修复索引只在挂载时取一次的陈旧问题）
       const reloadProjects = useCallback(async () => {
@@ -2507,6 +2474,8 @@ window.__ModuleLoader__.load({
             onInit: handleInit,
             needsUpgrade,
             onUpgrade: needsUpgrade ? handleUpgrade : undefined,
+            gitignore: initGitignore,
+            onGitignoreToggle: setInitGitignore,
           })
         : error
           ? renderErrorBody(error, loadLedger)

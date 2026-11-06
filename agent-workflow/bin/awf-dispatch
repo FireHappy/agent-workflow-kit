@@ -88,6 +88,10 @@ AWF_TITLE_PREFIX = "[awf]"
 # DEV-134：同一派发者在同一目标项目的 [awf] 任务会话数量上限（并发上限）。
 # 池内空闲优先复用；都忙且池未满 → 新建扩充；池满（>=MAX）都忙 → 等待空闲。
 MAX_SENDER_SESSIONS = 3
+# DEV-183：全局 [awf] 会话总数上限（所有项目合计，用户要求：跨会话派发总数 ≤ 3）。
+# 复用不受此限（复用不新增会话）；仅「需要新建」时检查：已达全局上限 → 报错要求
+# 复用空闲会话 / 清理归档，--force 为逃生口。
+MAX_GLOBAL_AWF_SESSIONS = 3
 # 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
 # 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
 DEFAULT_QUEUE_TIMEOUT = 180
@@ -2036,6 +2040,19 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                     f"该派发者「{sender_key}」在 {target.name} 已有 {pool_count} 个 [awf] 会话"
                     f"（上限 {MAX_SENDER_SESSIONS}）——达到数量上限：请复用空闲会话、"
                     "或清理（--prune / GUI 归档）后重试；确需强制新建加 --force"
+                )
+            # DEV-183：全局 [awf] 会话总数上限（所有项目合计 ≤ 3，用户要求）。
+            # 走到新建路径说明没有可复用会话（复用池全忙或不存在）——全局已达上限时
+            # 必须等待空闲/清理，不允许再新建第 4 个；--force 逃生口保留。
+            global_count = sum(
+                1 for row in rows
+                if session_title(row).startswith(AWF_TITLE_PREFIX)
+            )
+            if global_count >= MAX_GLOBAL_AWF_SESSIONS:
+                raise DispatchError(
+                    f"全局 [awf] 会话已达 {global_count} 个（上限 {MAX_GLOBAL_AWF_SESSIONS}，"
+                    "所有项目合计）——无可复用空闲会话，请等待现有会话空闲（--queue-timeout）"
+                    "或清理归档后重试；确需强制新建加 --force"
                 )
         # 新建路径：--new 直接建会话，不碰 session/list；自动新建时才做同名保护。
         # 显式 --new 跳过复用检查与同名保护（用户已明确要新会话）。
