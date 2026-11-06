@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Changed
+- **派发术语统一为「回执」（DEV-195）**：worker→派发方方向全部改「回执」（回报→回执，含 回执投递通道/回执正文/回执字段/回执时机/回执格式/回执数据），消息标题【回执请求】保持，「回报」「汇报」在派发链路活文件中退役——注入文本、技能（cross-project-dispatch/dev/review/team-flow/upgrade/README）、docs/design.md、根 SKILL.md、插件面板文案、smoke 断言同步
+- **票据生命周期统一「用完即删」（DEV-195）**：`awf-dispatch --prune --apply` 从「归档到 dispatch/archive/」改为「真正删除已完成票据（不留存根）」，与 upgrade 技能既有条款对齐；扫描改为递归（覆盖 upgrade-v<版本>/ 子目录票据），删除后向上清空空目录；文档/SKILL/帮助文本同步
+
 ## [1.4.0] - 2026-11-06
 
 ### Added

@@ -11,7 +11,7 @@
 | 崩溃 / 报错 / 行为异常 | `skills/debug/SKILL.md` | 认领→诊断→收集证据→验证假设→修复→归档 |
 | 文档 / 架构分析 | `skills/docs/SKILL.md` | 认领→大纲与核实→撰写→审阅→归档 |
 | 开发完成待审（dev 子流程） | `skills/review/SKILL.md` | 复核→通过/需修改→修复→复审→归档 |
-| 跨项目派发 / 交接 | `skills/cross-project-dispatch/SKILL.md` | G1-G4 门→派发→回报→核验→归档 |
+| 跨项目派发 / 交接 | `skills/cross-project-dispatch/SKILL.md` | G1-G4 门→派发→回执→核验→归档 |
 | 发版 / 版本号 / tag / CHANGELOG | `skills/release/SKILL.md` | 探测→bump→CHANGELOG→tag→收尾 |
 | 团队执行 / 多角色协办 | `skills/team-flow/SKILL.md` | 先登记→建队→三轨→质量合同→队长收尾 |
 | 升级 / 整理已有工作流 | `skills/upgrade/SKILL.md` | 定位→预览→执行→修复→提交（保留账本历史） |

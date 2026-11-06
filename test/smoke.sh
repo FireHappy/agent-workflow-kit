@@ -64,7 +64,7 @@ GI_MARK="# agent-workflow（本机私有工作流，不入库）"
 
 NOGI_PROJ="$TMP/nogi-proj"
 "$KIT_DIR/bin/awf" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
-# DEV-183：init 缺省写「本机派发产物」忽略段（dispatch 流水/回报/运行时状态，任何项目都不入库）；
+# DEV-183：init 缺省写「本机派发产物」忽略段（dispatch 流水/回执/运行时状态，任何项目都不入库）；
 # 但缺省不写「工作流私有」段（--gitignore 才写 agent-workflow/ 整体）。
 assert_grep '^/dispatch/log.md$' "$NOGI_PROJ/.gitignore" "init 缺省写派发流水忽略"
 DISP_MARK="# agent-workflow（本机派发产物，不入库）"
@@ -107,7 +107,7 @@ else
   bad "--help 未写清默认不等待"
 fi
 
-# 1.3 --prune：help 同步归档参数与目录语义
+# 1.3 --prune：help 同步清理（用完即删）语义
 if printf '%s\n' "$help_text" | grep -q -- '--prune'; then
   ok "--help 列出 --prune"
 else
@@ -118,10 +118,10 @@ if printf '%s\n' "$help_text" | grep -q -- '--apply'; then
 else
   bad "--help 未列出 --apply"
 fi
-if printf '%s\n' "$help_text" | grep -q 'dispatch/archive'; then
-  ok "--help 说明归档目录"
+if printf '%s\n' "$help_text" | grep -q '用完即删'; then
+  ok "--help 说明票据用完即删"
 else
-  bad "--help 未说明归档目录"
+  bad "--help 未说明票据用完即删"
 fi
 
 # 1.3b 会话复用：help 参数与选择函数（项目+模块复用键、不看压力、running 等待、--session 互斥）
@@ -1040,15 +1040,15 @@ with tempfile.TemporaryDirectory() as tmp:
     assert module.check_active(proj, allow_active=False) == "无 active 任务", \
         "README 索引不得误报为 active"
 
-# S2：派发注入的补充约定含 blocked 回报条款（必有回报主机制覆盖 blocked 场景）
+# S2：派发注入的补充约定含 blocked 回执条款（必有回执主机制覆盖 blocked 场景）
 prompt = module.build_prompt(target, "TEST", "dev", "任务：TEST-001 冒烟\n")
-assert "blocked" in prompt and "必须回报派发方" in prompt, prompt
+assert "blocked" in prompt and "必须回执派发方" in prompt, prompt
 assert "解除条件" in prompt and "静默停等" in prompt, prompt
 
 # S3（DISPATCH-139）：门禁严格度——P0 默认 180s + 中途状态 / P1 allow-dirty=tasks 粒度 + G3 三选项 / P2 G1 瞬态豁免
 assert module.DEFAULT_QUEUE_TIMEOUT == 180, module.DEFAULT_QUEUE_TIMEOUT
 _src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-assert "report_mid_status" in _src and "中途状态" in _src and "已等 %ds" in _src, "P0 中途状态回报缺失"
+assert "report_mid_status" in _src and "中途状态" in _src and "已等 %ds" in _src, "P0 中途状态回执缺失"
 assert "--allow-dirty=" in _src and "allow_dirty_scope" in _src, "P1 allow-dirty 范围解析缺失"
 assert "只豁免账本自我生成物" in _src and "业务/代码改动仍拦截" in _src, "P1 粒度豁免语义缺失"
 assert "三选项" in _src and "--allow-active" in _src and "① 等它完成后再派" in _src, "P1 G3 三选项提示缺失"
@@ -1111,7 +1111,7 @@ with tempfile.TemporaryDirectory() as tmp:
         pass
 
 # S3.5（DISPATCH-139 回归）：report_mid_status「HEAD 未变」分支曾 TypeError 破坏
-# wait_for_turn 的 (None,None) 语义；现必须不崩、正常回报中途状态、语义不变。
+# wait_for_turn 的 (None,None) 语义；现必须不崩、正常回执中途状态、语义不变。
 with tempfile.TemporaryDirectory() as tmp:
     mid_repo = pathlib.Path(tmp) / "mid"
     mid_repo.mkdir()
@@ -1166,7 +1166,7 @@ probe_json = subprocess.run([sys.argv[1], "--screen-state", "--json"], capture_o
 assert probe_json.returncode == 0
 assert json.loads(probe_json.stdout)["screen_state"] in ("on", "off", "locked", "unknown"), probe_json.stdout
 
-# S6（DISPATCH-144）：注入文本含状态透明化条款（中间状态转换主动回报，不因还在修复而沉默）
+# S6（DISPATCH-144）：注入文本含状态透明化条款（中间状态转换主动回执，不因还在修复而沉默）
 agreed = module.build_prompt("demo", "S6", "dev", "任务：S6-144 冒烟\n")
 assert "状态透明化（DISPATCH-144）" in agreed, "注入文本缺状态透明化条款"
 assert "一回合内" in agreed and "修复开始" in agreed and "归档完成" in agreed, agreed
@@ -1306,9 +1306,7 @@ with tempfile.TemporaryDirectory() as tmp:
     items = {item["taskId"]: item for item in module.scan_tickets(tmp)}
     assert items["DEV-007"]["status"] == "completed", items["DEV-007"]
     assert ("done/" in items["DEV-007"]["reason"] or "done.md" in items["DEV-007"]["reason"]), items["DEV-007"]["reason"]
-    month = module.datetime.date.today().strftime("%Y-%m")
-    expected = f"dispatch/archive/demo02/{month}/demo02-DEV-007-ledger.md"
-    assert items["DEV-007"]["archive"] == expected, items["DEV-007"]["archive"]
+    assert "archive" not in items["DEV-007"], "用完即删：完成票据不再生成归档路径"
     assert items["DEV-099"]["status"] == "pending", items["DEV-099"]
     assert items["DEV-100"]["status"] == "unknown", items["DEV-100"]
     assert items["DEV-101"]["status"] == "unknown", items["DEV-101"]
@@ -1386,7 +1384,7 @@ else
   grep -q 'G1 工作流失败' "$TMP/out" && ok "无工作流时前置检查失败" || bad "无工作流时错误信息不明确"
 fi
 
-# 1.5 --prune 端到端：dry-run 不改文件 / --apply 移动（git mv 与 os.rename）/ 冲突不覆盖 / 用法错误
+# 1.5 --prune 端到端：dry-run 不改文件 / --apply 删除（git rm 与 unlink）/ 用法错误
 DISPATCH="$KIT_DIR/bin/awf-dispatch"
 PRUNE="$TMP/prune"
 PRUNE_TARGET="$TMP/prune-target"
@@ -1415,8 +1413,8 @@ cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
 EOF
 git -C "$PRUNE" add dispatch/tasks/demo01-DEV-101-tracked.md
 git -C "$PRUNE" commit -qm "chore: 种子票据（只把 tracked 加入索引）"
-cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-conflict.md" <<EOF
-# demo01 · DEV-101 冲突
+cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
+# demo01 · DEV-101 副本
 
 - 目标项目：demo01（${PRUNE_TARGET}）
 EOF
@@ -1427,7 +1425,7 @@ else
   bad "--prune dry-run 失败"
 fi
 if [ -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && [ ! -e "$PRUNE/dispatch/archive" ]; then
-  ok "dry-run 不移动文件、不建 archive"
+  ok "dry-run 不删除文件、不建 archive"
 else
   bad "dry-run 改动了票据文件"
 fi
@@ -1438,61 +1436,43 @@ import sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 assert data["mode"] == "prune", data
 assert data["dryRun"] is True, data
-assert data["summary"]["completed"] == 3, data["summary"]
-assert data["summary"]["total"] == 3, data["summary"]
+assert data["summary"]["completed"] == 2, data["summary"]
+assert data["summary"]["total"] == 2, data["summary"]
 for item in data["items"]:
     assert item["status"] == "completed", item
     assert item["taskId"] == "DEV-101", item
-    assert item["archive"].startswith("dispatch/archive/demo01/"), item
-    assert item["archive"].endswith(item["file"].split("/")[-1]), item
+    assert "archive" not in item, item
 PY
 then
-  ok "--prune --json 计划字段完整（completed / 任务 ID / 归档路径）"
+  ok "--prune --json 计划字段完整（completed / 任务 ID / 无归档路径）"
 else
   bad "--prune --json 计划字段不完整"
 fi
-
-# 冲突：预先占用一张票据的归档路径，apply 时必须跳过且不覆盖
-conflict_dest="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([i["archive"] for i in d["items"] if i["file"].endswith("conflict.md")][0])' "$PRUNE/plan.json")"
-mkdir -p "$(dirname "$PRUNE/$conflict_dest")"
-printf '老内容\n' > "$PRUNE/$conflict_dest"
 
 if ( cd "$PRUNE" && "$DISPATCH" --prune --apply --json > apply.json ); then
   ok "--prune --apply 退出 0"
 else
   bad "--prune --apply 失败"
 fi
-[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && ok "apply 移走已跟踪票据" || bad "已跟踪票据未移动"
-[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" ] && ok "apply 移走未跟踪票据" || bad "未跟踪票据未移动"
-[ -f "$PRUNE/dispatch/tasks/demo01-DEV-101-conflict.md" ] && ok "冲突时源票据保留" || bad "冲突时源票据被删除"
-[ "$(cat "$PRUNE/$conflict_dest")" = "老内容" ] && ok "冲突不覆盖目标文件" || bad "冲突覆盖了目标文件"
-if git -C "$PRUNE" status --porcelain | grep -q '^R  dispatch/tasks/.* -> dispatch/archive/'; then
-  ok "已跟踪票据用 git mv（索引记录为 rename）"
-else
-  bad "已跟踪票据未使用 git mv"
-fi
-if ls "$PRUNE"/dispatch/archive/demo01/*/demo01-DEV-101-tracked.md >/dev/null 2>&1; then
-  ok "归档路径含别名与 YYYY-MM"
-else
-  bad "归档路径不符合 <别名>/<YYYY-MM>/<文件名>"
-fi
+[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && ok "apply 删除已跟踪票据（git rm）" || bad "已跟踪票据未删除"
+[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" ] && ok "apply 删除未跟踪票据" || bad "未跟踪票据未删除"
+[ ! -e "$PRUNE/dispatch/archive" ] && ok "不再产生 dispatch/archive" || bad "仍产生 dispatch/archive"
 if python3 - "$PRUNE/apply.json" <<'PY'
 import json
 import sys
 
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 assert data["dryRun"] is False, data
-assert data["summary"]["moved"] == 2, data["summary"]
-assert data["summary"]["conflicts"] == 1, data["summary"]
+assert data["summary"]["deleted"] == 2, data["summary"]
 assert data["summary"]["errors"] == 0, data["summary"]
 PY
 then
-  ok "apply 汇总：移动 2、冲突 1、失败 0"
+  ok "apply 汇总：删除 2、失败 0"
 else
   bad "apply 汇总不符"
 fi
 
-( cd "$PRUNE" && "$DISPATCH" --prune >/dev/null ) && ok "全部 pending/冲突时 dry-run 退出 0" || bad "剩余票据 dry-run 退出非 0"
+( cd "$PRUNE" && "$DISPATCH" --prune >/dev/null ) && ok "全部删除后 dry-run 退出 0" || bad "无票据 dry-run 退出非 0"
 set +e
 ( cd "$PRUNE" && "$DISPATCH" --prune demo01 x.md >/dev/null 2>&1 )
 prune_positional=$?
@@ -1762,7 +1742,7 @@ fi
 grep -q 'approval=automatic' $KIT_DIR/skills/team-flow/SKILL.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
 
 # 17. F5：入口（AGENTS.md.tmpl）精简——只含路由与技能指针，细则全部下沉技能（不内联）
-F5_PAT='必报点总表（DISPATCH-145|回报规则总表（DISPATCH-145|远程办公状态（remote|状态透明化（DISPATCH-144|回报投递通道（DISPATCH-146|空闲/收尾/自检报平安（DISPATCH-147'
+F5_PAT='必报点总表（DISPATCH-145|回执规则总表（DISPATCH-145|远程办公状态（remote|状态透明化（DISPATCH-144|回执投递通道（DISPATCH-146|空闲/收尾/自检报平安（DISPATCH-147'
 if grep -qE "$F5_PAT" "$KIT_DIR/templates/AGENTS.md.tmpl"; then
   bad "F5 入口模板仍内联 DISPATCH 细则：$(grep -oE "$F5_PAT" "$KIT_DIR/templates/AGENTS.md.tmpl" | sort -u | tr '\n' ';')"
 else
@@ -2762,22 +2742,22 @@ done
 if [ "$stale_ok" -eq 1 ]; then
   ok "DEV-138 派发文档/模板无旧团队派发语义残留"
 fi
-# 30. 回报契约与投递通道（行为验证见 bin/awf-dispatch；技能文档章节完整性见下）
+# 30. 回执契约与投递通道（行为验证见 bin/awf-dispatch；技能文档章节完整性见下）
 SKILL_CROSS="$KIT_DIR/skills/cross-project-dispatch/SKILL.md"
-for section in "必报点总表" "回报投递通道" "回报正文排版" "远程办公状态" "派发方转达用户回执格式" "僵尸会话与落地判定" "退出码与失败处理"; do
+for section in "必报点总表" "回执投递通道" "回执正文排版" "远程办公状态" "派发方转达用户回执格式" "僵尸会话与落地判定" "退出码与失败处理"; do
   grep -q "$section" "$SKILL_CROSS" && ok "技能章节齐全：$section" || bad "技能缺章节：$section"
 done
 # 行为契约：注入文本/脚本必须实现这些语义（来自 bin/awf-dispatch 注入段与实现）
-if grep -q '必有回报' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '无回报' "$KIT_DIR/bin/awf-dispatch" \
+if grep -q '必有回执' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '无回执' "$KIT_DIR/bin/awf-dispatch" \
    && grep -q '派发方' "$KIT_DIR/bin/awf-dispatch"; then
-  ok "DISPATCH 必有回报/失联兜底/投递通道语义在注入文本"
+  ok "DISPATCH 必有回执/失联兜底/投递通道语义在注入文本"
 else
-  bad "DISPATCH 必有回报/失联兜底/投递通道语义不在注入文本"
+  bad "DISPATCH 必有回执/失联兜底/投递通道语义不在注入文本"
 fi
 # 3.13+ 行为断言（保留原有独立实现块）
 
-# 30.1 派发生命周期闭环（必有回报是主机制，登记 active 作兜底锚点）
+# 30.1 派发生命周期闭环（必有回执是主机制，登记 active 作兜底锚点）
 if grep -q '派发生命周期' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
    && grep -q '兜底锚点' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
   ok "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 有派发生命周期闭环（五步 + 兜底锚点）"
@@ -2792,29 +2772,29 @@ if grep -q '目标 worker' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
 else
   bad "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 登记样例字段缺失"
 fi
-# 30.2 必有回报是主机制（成功必须回报 / 失败必须回报 / 需用户确认·多轮对话）
-if grep -q '必有回报' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '必有回报' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 必有回报是主机制（成功/失败都必须回报，需用户确认+多轮对话）"
+# 30.2 必有回执是主机制（成功必须回执 / 失败必须回执 / 需用户确认·多轮对话）
+if grep -q '必有回执' "$KIT_DIR/bin/awf-dispatch" \
+   && grep -q '必有回执' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 必有回执是主机制（成功/失败都必须回执，需用户确认+多轮对话）"
 else
-  bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺必有回报语义"
+  bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺必有回执语义"
 fi
-# 30.3 无回报仅当会话失联；登记 active 只是兜底
+# 30.3 无回执仅当会话失联；登记 active 只是兜底
 if grep -q '兜底锚点' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
    && grep -q 'active' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 无回报仅当会话失联（登记 active 是兜底锚点）"
+  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 无回执仅当会话失联（登记 active 是兜底锚点）"
 else
   bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺兜底语义"
 fi
-# 30.4 旧表述（代理 FAIL/无回报常规化 / 记忆锚点）已从三处源文本清除
-if grep -q '代理 FAIL、超时无回报' "$KIT_DIR/bin/awf-dispatch" \
+# 30.4 旧表述（代理 FAIL/无回执常规化 / 记忆锚点）已从三处源文本清除
+if grep -q '代理 FAIL、超时无回执' "$KIT_DIR/bin/awf-dispatch" \
    || grep -q '静默中断' "$KIT_DIR/bin/awf-dispatch" \
    || grep -q '记忆锚点' "$KIT_DIR/bin/awf-dispatch" \
    || grep -q '记忆锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
    || grep -q '记忆锚点' "$KIT_DIR/bin/awf-dispatch"; then
-  bad "DISPATCH-134 旧表述残留（代理 FAIL/记忆锚点/无回报常规化）"
+  bad "DISPATCH-134 旧表述残留（代理 FAIL/记忆锚点/无回执常规化）"
 else
-  ok "DISPATCH-134 旧表述已清除（无回报不再是常规路径）"
+  ok "DISPATCH-134 旧表述已清除（无回执不再是常规路径）"
 fi
 if diff -q "$KIT_DIR/templates/AGENTS.md.tmpl" \
           "$KIT_DIR/agent-workflow/templates/AGENTS.md.tmpl" >/dev/null \
@@ -2848,11 +2828,11 @@ if grep -rn '用户暂离\|away' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/tem
 else
   ok "DISPATCH-143 术语统一：无「用户暂离/away」残留，统一为「远程办公状态（remote）」"
 fi
-if grep -rn '等待最终成功才回报\|闷头执行到最终成功' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/templates" \
+if grep -rn '等待最终成功才回执\|闷头执行到最终成功' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/templates" \
    "$KIT_DIR/bin/awf-dispatch" "$KIT_DIR/agent-workflow/workflows" 2>/dev/null | grep -v '^Binary'; then
-  bad "DISPATCH-144 旧表述残留（等待最终成功才回报/闷头执行），应改为状态转换即回报"
+  bad "DISPATCH-144 旧表述残留（等待最终成功才回执/闷头执行），应改为状态转换即回执"
 else
-  ok "DISPATCH-144 无「等待最终成功才回报/闷头执行」旧表述（状态转换即回报）"
+  ok "DISPATCH-144 无「等待最终成功才回执/闷头执行」旧表述（状态转换即回执）"
 fi
 # 只查注入文本（新条款载体）——仓库既有 DEV-138「派发即启动子代理会话」等契约词属既有表述，不算本条款引入
 if grep -q '子代理\|主代理' "$KIT_DIR/bin/awf-dispatch" 2>/dev/null; then
@@ -2860,17 +2840,17 @@ if grep -q '子代理\|主代理' "$KIT_DIR/bin/awf-dispatch" 2>/dev/null; then
 else
   ok "DISPATCH-145 注入文本沿用「派发方/目标会话」表述，未引入子代理/主代理新词"
 fi
-# 30.13b DISPATCH-146：--report --dry-run 渲染回报消息（不依赖 GUI，本地可复现；含标记/来源/派发单）
-if "$KIT_DIR/bin/awf-dispatch" --report "必报点 3 里程碑完成：DEV-156 已实现回报通道" \
+# 30.13b DISPATCH-146：--report --dry-run 渲染回执消息（不依赖 GUI，本地可复现；含标记/来源/派发单）
+if "$KIT_DIR/bin/awf-dispatch" --report "必报点 3 里程碑完成：DEV-156 已实现回执通道" \
      --to session-demo-0001 --from session-demo-0002 --ticket DISPATCH-146 --dry-run 2>&1 \
    | grep -q '【回执请求】'; then
-  ok "DISPATCH-146 --report --dry-run 渲染回报消息（不联网）"
+  ok "DISPATCH-146 --report --dry-run 渲染回执消息（不联网）"
 else
-  bad "DISPATCH-146 --report --dry-run 未渲染回报消息"
+  bad "DISPATCH-146 --report --dry-run 未渲染回执消息"
 fi
-# 30.13c DISPATCH-146：--report 与派发参数互斥（第一个位置参数=回报文本，第二个=非法）
+# 30.13c DISPATCH-146：--report 与派发参数互斥（第一个位置参数=回执文本，第二个=非法）
 if "$KIT_DIR/bin/awf-dispatch" --report "x" demo02 2>&1 | grep -q '不能与'; then
-  ok "DISPATCH-146 --report 与第二个位置参数互斥（第一个位置参数=回报文本；既有调用方式不变）"
+  ok "DISPATCH-146 --report 与第二个位置参数互斥（第一个位置参数=回执文本；既有调用方式不变）"
 else
   bad "DISPATCH-146 --report 互斥校验缺失"
 fi
@@ -2879,7 +2859,7 @@ if "$KIT_DIR/bin/awf-dispatch" --report >/tmp/awf-report-notext.out 2>&1; then
   bad "DISPATCH-146 --report 缺文本应退出码 2"
 elif grep -q 'Traceback' /tmp/awf-report-notext.out; then
   bad "DISPATCH-146 --report 缺文本不应抛 traceback"
-elif grep -q '需要回报文本' /tmp/awf-report-notext.out; then
+elif grep -q '需要回执文本' /tmp/awf-report-notext.out; then
   ok "DISPATCH-146 --report 缺文本干净报错 + 退出码 2"
 else
   bad "DISPATCH-146 --report 缺文本报错信息缺失"
@@ -2893,7 +2873,7 @@ else
   bad "DISPATCH-147 收尾句未走 --report 通道"
 fi
 
-# 30.15 DEV-165：回报投递头用「项目名＋会话名」，查不到回退会话 ID
+# 30.15 DEV-165：回执投递头用「项目名＋会话名」，查不到回退会话 ID
 if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
 import importlib.machinery
 import importlib.util
@@ -2933,9 +2913,9 @@ old = module.render_report_message("s-1", "s-2", "D-1", "正文")
 assert "- 来源：s-1" in old and "- 派发方：s-2" in old, old
 PY
 then
-  ok "DEV-165 回报投递头=项目名＋会话名（查不到回退会话 ID）"
+  ok "DEV-165 回执投递头=项目名＋会话名（查不到回退会话 ID）"
 else
-  bad "DEV-165 回报投递头改造未通过"
+  bad "DEV-165 回执投递头改造未通过"
 fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
 if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/bin/awf-dispatch" \

@@ -91,7 +91,7 @@ agent-workflow/
 | docs | `skills/docs/SKILL.md` | 认领→大纲与核实→撰写→审阅→归档 |
 | review | `skills/review/SKILL.md` | 复核→通过/需修改→修复→复审→归档 |
 | release | `skills/release/SKILL.md` | 探测→bump→CHANGELOG→tag→收尾 |
-| cross-project | `skills/cross-project-dispatch/SKILL.md` | G1-G4 门→派发→回报→核验→归档 |
+| cross-project | `skills/cross-project-dispatch/SKILL.md` | G1-G4 门→派发→回执→核验→归档 |
 | team-flow | `skills/team-flow/SKILL.md` | 先登记→建队→三轨→质量合同→队长收尾 |
 | upgrade | `skills/upgrade/SKILL.md` | 定位→预览→执行→修复→提交（保留账本历史） |
 
@@ -100,8 +100,8 @@ agent-workflow/
 
 ## 跨项目派发
 
-跨项目派发的**完整手册在技能 `skills/cross-project-dispatch/SKILL.md`**（四道门 → 派发 → 回报 → 核验 → 归档），
-回报/生命周期细则（必报点总表、回执与排版样例）在同一技能 `skills/cross-project-dispatch/SKILL.md` 的「必报点总表」「回报投递通道」「回报正文排版」章节。
+跨项目派发的**完整手册在技能 `skills/cross-project-dispatch/SKILL.md`**（四道门 → 派发 → 回执 → 核验 → 归档），
+回执/生命周期细则（必报点总表、回执与排版样例）在同一技能 `skills/cross-project-dispatch/SKILL.md` 的「必报点总表」「回执投递通道」「回执正文排版」章节。
 本入口不重复细则（见「禁止事项」）。执行跨项目派发时按 AGENTS.md 路由加载 `skills/cross-project-dispatch/SKILL.md`。
 
 ## 安全

@@ -154,7 +154,7 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 - **0.3.6+（DEV-183）**：初始化与升级流程一致——`/awf/init/agent` 改为**注入主会话**（不再用受管理子代理）；引导卡加「git 忽略工作流」toggle（对应 awf init --gitignore / awf gitignore）；同时 `awf-dispatch` 增加**全局 [awf] 会话总数 ≤ 3** 限制（所有项目合计，复用不受限）
 - **0.2.4（DEV-103 等）**：看板初始化 agent 化 + 引导卡提亮
-  - 初始化改走 agent 完整配置（`lib/index.js` 新增 `POST /awf/init/agent`）：受管理子代理读项目上下文（README/技术栈/结构）→ 生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin/awf + 标准 4 列账本骨架 + 初始真实任务）→ awf check/status 验证 → 回报；替代仅空模板的最小骨架
+  - 初始化改走 agent 完整配置（`lib/index.js` 新增 `POST /awf/init/agent`）：受管理子代理读项目上下文（README/技术栈/结构）→ 生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin/awf + 标准 4 列账本骨架 + 初始真实任务）→ awf check/status 验证 → 回执；替代仅空模板的最小骨架
   - `buildActPrompt` 新增 init 动作分支（`INIT_AGENT_GUIDE`），`AGENT_ACTIONS` 白名单加入 init
   - 引导卡：busy 态「初始化中…」标题 + 旋转动画 + 说明已派发 agent；按钮「初始化工作流（agent 配置）」；失败显示原因
   - 引导卡说明文字提亮（EmptyState desc dim→sub），与待办/最近完成/底部提示一致

@@ -928,7 +928,7 @@ window.__ModuleLoader__.load({
     /**
      * DEV-039：调服务端子代理通道执行面板动作（回填/返回待办/删除）。
      * 服务端通过宿主 subagents.startActivation 注册可见子代理，继承父预设；
-     * delivery=parent 由宿主向父会话汇报。缺服务或 live 父代理直接失败，禁止裸会话降级。
+     * delivery=parent 由宿主向父会话回执。缺服务或 live 父代理直接失败，禁止裸会话降级。
      * 响应：{ok, channel:'agent', action, task, agent?,failed?}
      */
     async function runAgentAction(o) {
@@ -2052,7 +2052,7 @@ window.__ModuleLoader__.load({
 
       // 6) 开始任务（managed agent 通道）
       //    调 /awf/team/start：服务端通过宿主托管子代理开始任务。
-      //    managed 子代理执行；结果由宿主 parent 汇报，插件仅刷新账本。
+      //    managed 子代理执行；结果由宿主 parent 回执，插件仅刷新账本。
       const handleStart = useCallback(async (row) => {
         if (!selected || !row || !row.id || !row.type) return
         const token = taskLocks.acquire(selected, row, 'start')
@@ -2872,51 +2872,6 @@ window.__ModuleLoader__.load({
     ]
 
 
-
-    // ---- DEV-170 回报面板（数据与渲染分离，AgentTeams 式：读 /awf/reports 聚合渲染）------
-
-    function ReportsPanel(p) {
-      var reports = useState(null)
-      var setReports = reports[1]
-      var openFile = useState(null)
-      var setOpenFile = openFile[1]
-      var load = useCallback(function () {
-        getJson('/awf/reports').then(function (r) { setReports((r && r.reports) || []) }).catch(function () { setReports([]) })
-      }, [])
-      useEffect(function () { load(); var t = setInterval(load, 15000); return function () { clearInterval(t) } }, [load])
-      var F = function (n) { return Math.round(n * (HOST_FONT_SCALE || 1)) }
-      function statusColor(st) {
-        if (st === '完成') return { color: '#2e9e63', bg: 'rgba(46,158,99,.12)' }
-        if (st === '阻塞') return { color: '#c98a1b', bg: 'rgba(201,138,27,.12)' }
-        if (st === '失败') return { color: '#d64550', bg: 'rgba(214,69,80,.12)' }
-        return { color: 'var(--dsw-alias-label-tertiary)', bg: 'transparent' }
-      }
-      function row(r) {
-        var sc = statusColor(r.status)
-        var open = openFile[0] === r.file
-        var head = h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-          h('span', { style: { fontSize: F(11), fontWeight: 700, color: 'var(--dsw-alias-label-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, r.ticket || r.file),
-          r.status ? h('span', { style: { flex: 'none', fontSize: F(10), fontWeight: 600, color: sc.color, background: sc.bg, borderRadius: 4, padding: '1px 6px' } }, r.status) : null)
-        var meta = h('div', { style: { display: 'flex', gap: 8, fontSize: F(11), color: 'var(--dsw-alias-label-tertiary)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-          r.time ? h('span', null, r.time) : null,
-          r.source ? h('span', null, r.source) : null,
-          r.dispatcher ? h('span', null, '→ ' + r.dispatcher) : null)
-        var body = open ? h('div', { style: { fontSize: F(11), color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap', marginTop: 6, borderTop: '1px solid var(--dsw-alias-border-l2)', paddingTop: 6, maxHeight: 300, overflow: 'auto' } }, r.body || '') : null
-        return h('div', { key: r.file, style: { borderBottom: '1px solid var(--dsw-alias-border-l2)', padding: '8px 10px', cursor: 'pointer' }, onClick: function () { setOpenFile(open ? null : r.file) } }, head, meta, body)
-      }
-      var rows = reports[0] || []
-      try {
-      return h('div', { style: { padding: '8px 4px', display: 'flex', flexDirection: 'column' } },
-        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 8px 6px' } },
-          h('span', { style: { fontSize: F(12), fontWeight: 700, color: 'var(--dsw-alias-label-primary)' } }, '回报 ' + rows.length),
-          h('button', { onClick: load, style: { fontSize: F(11), cursor: 'pointer', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-secondary)', padding: '2px 8px' } }, '刷新')),
-        rows.length === 0
-          ? h('div', { style: { fontSize: F(11), color: 'var(--dsw-alias-label-tertiary)', padding: '16px 8px' } }, reports[0] === null ? '加载中…' : '暂无回报（目标项目运行 --report 后出现）')
-          : h('div', null, rows.map(row)))
-      } catch (e) {
-        return h('div', { style: { padding: 8, fontSize: 11, color: '#d64550' } }, '[awf-reports 渲染错误] ' + String(e && e.message || e))
-      }
-    }
     function apply(ctx) {
       ctx.effect(() => {
         const disposers = []
@@ -2934,7 +2889,7 @@ window.__ModuleLoader__.load({
           key: 'awf-dashboard',
           inject: (sessionId) => ({ sessionId }),
         }, TabTitle)))
-        // DEV-170 v2：会话头部回报入口已移除（用户弃用）——回报仅走边栏「回报数据」页签（通道 2 awf-reports）
+        // DEV-170 v2：会话头部回执入口已移除（用户弃用）；回执经 --report 投递派发方会话，无独立 UI 面板（DEV-195 移除 awf-reports）
         // 通道 2：better-sidebar 接管右侧边栏时（本 profile 已装），把页签注册进它的
         // registerTab 服务，用户才看得到。注意必须用 ctx.inject(['betterSidebar'], cb)
         // **动态注入**，而不是 apply 时 ctx.get('betterSidebar')：ctx.get 是**非响应式**
@@ -2957,15 +2912,6 @@ window.__ModuleLoader__.load({
               component: (tabProps) => h(Dashboard, tabProps || {}),
             })
             ends.push(end1)
-            // DEV-170：回报数据面板（/awf/reports），与 agent-teams「团队协作」页签同模式
-            const end2 = better.registerTab({
-              id: 'awf-reports',
-              title: '回报数据',
-              description: 'agent-workflow 回报面板：来源/派发方/票据/状态/正文（/awf/reports 聚合）',
-              single: true,
-              component: (tabProps) => h(ReportsPanel, tabProps || {}),
-            })
-            ends.push(end2)
             return () => { ends.forEach((end) => { try { end() } catch { /* 忽略 */ } }) }
           } catch { return () => {} }
         }))

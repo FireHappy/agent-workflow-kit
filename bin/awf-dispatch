@@ -38,7 +38,7 @@
   ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
   ./agent-workflow/bin/awf-dispatch demo02 task.md --team
 
-票据归档（默认为 dry-run，只打印计划）：
+票据清理（用完即删；默认为 dry-run，只打印计划）：
   ./agent-workflow/bin/awf-dispatch --prune
   ./agent-workflow/bin/awf-dispatch --prune --apply
   ./agent-workflow/bin/awf-dispatch --prune --json
@@ -142,9 +142,9 @@ EXIT_TIMEOUT = 3
 EXIT_ZOMBIE = 4
 EXIT_HEADLESS_FAIL = 5
 DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-# DISPATCH-146：回报投递通道——目标会话回报推送进派发方会话收件箱（RPC 主通道，
+# DISPATCH-146：回执投递通道——目标会话回执推送进派发方会话收件箱（RPC 主通道，
 # inbox 自动触发其回合处理，派发方无需轮询）；RPC 不可达 / 未注入派发方会话时
-# 降级写收件箱文件（默认目录相对派发方/目标侧 cwd）。回报内容仍按必报点表组织。
+# 降级写收件箱文件（默认目录相对派发方/目标侧 cwd）。回执内容仍按必报点表组织。
 REPORT_MARKER = "【回执请求】"
 REPORT_INBOX_DIR = "dispatch/reports/inbox"
 
@@ -804,7 +804,7 @@ def detect_screen_state() -> str:
     Display is turned off/on 中较新者。任何一步失败都保守返回 unknown——
     绝不把熄屏误报成亮屏。非 macOS 直接 unknown。
     off/locked 的语义解释为远程办公状态（remote，DISPATCH-143 定义升级：用户不在电脑前、
-    但经 IM 在线可随时决策），由回报标记与派发端承载，本函数只报物理状态。
+    但经 IM 在线可随时决策），由回执标记与派发端承载，本函数只报物理状态。
     """
     if sys.platform != "darwin":
         return "unknown"
@@ -823,13 +823,13 @@ def detect_screen_state() -> str:
     return state if state in ("on", "off") else "unknown"
 
 
-# ---------------------------------------------------------------- 回报投递通道（DISPATCH-146）
+# ---------------------------------------------------------------- 回执投递通道（DISPATCH-146）
 
 
 def dispatcher_session_env() -> str:
     """返回当前进程所在会话的 DSH_SESSION_ID（若有）。
 
-    派发方运行 awf-dispatch 时 = 派发方会话 ID（注入文本告知目标回报投递目标）；
+    派发方运行 awf-dispatch 时 = 派发方会话 ID（注入文本告知目标回执投递目标）；
     目标会话运行 --report 时 = 目标会话 ID（作为 --from 默认来源）。"""
     return (os.environ.get("DSH_SESSION_ID") or "").strip()
 
@@ -861,14 +861,14 @@ def session_display_label(api, session_id: str) -> str:
 
 
 def report_status_of(body: str) -> str:
-    """从回报正文解析状态徽章（DISPATCH-153 格式：`状态：完成` 等）。"""
+    """从回执正文解析状态徽章（DISPATCH-153 格式：`状态：完成` 等）。"""
     m = re.search(r"状态[:：]\s*(完成|阻塞|失败|进行中|review|待复审)", body or "")
     return m.group(1) if m else ""
 
 
 def report_json_path(cwd: Path, ticket: str) -> Path:
-    """回报 JSON 落盘路径（DEV-170 架构调整：数据与渲染分离，AgentTeams 式）。"""
-    safe = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", (ticket or "回报").strip()) or "回报"
+    """回执 JSON 落盘路径（DEV-170 架构调整：数据与渲染分离，AgentTeams 式）。"""
+    safe = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", (ticket or "回执").strip()) or "回执"
     safe = safe[:60]
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     return Path(cwd) / "dispatch" / "reports" / ("%s-%s.json" % (safe, ts))
@@ -876,7 +876,7 @@ def report_json_path(cwd: Path, ticket: str) -> Path:
 
 def write_report_json(cwd, *, ticket: str, source: str, target_session: str, body: str,
                       source_label: str = "", target_label: str = "") -> Path:
-    """把回报落盘为结构化 JSON（目标项目 dispatch/reports/，供插件面板渲染）。
+    """把回执落盘为结构化 JSON（目标项目 dispatch/reports/，供插件面板渲染）。
 
     纯函数（时间戳当次生成），供 --report 与 smoke 断言。不改业务文件。
     """
@@ -901,7 +901,7 @@ def write_report_json(cwd, *, ticket: str, source: str, target_session: str, bod
 
 def render_report_message(source: str, target_session: str, ticket: str, body: str,
                           source_label: str = "", target_label: str = "") -> str:
-    """组装回报投递消息：标记行 + 时间戳 + 来源/派发方/派发单 + 回报正文。
+    """组装回执投递消息：标记行 + 时间戳 + 来源/派发方/派发单 + 回执正文。
 
     纯函数（时间戳当次生成），供 --report --dry-run 渲染与 smoke 断言。
     source_label / target_label 传入时投递头显示「项目名＋会话名」（人类可读，DEV-165），
@@ -930,7 +930,7 @@ def inbox_path_for(source: str, ticket: str = "") -> Path:
 
 
 def append_inbox(source: str, ticket: str, body: str, fallback_note: str = "") -> Path:
-    """把回报追加进收件箱文件（RPC 不可达 / 未注入派发方会话时的降级通道）。"""
+    """把回执追加进收件箱文件（RPC 不可达 / 未注入派发方会话时的降级通道）。"""
     path = inbox_path_for(source, ticket)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -942,62 +942,62 @@ def append_inbox(source: str, ticket: str, body: str, fallback_note: str = "") -
 
 
 def report_channel_section(dispatcher_session: str = "") -> str:
-    """build_prompt 补充约定的「回报投递通道（DISPATCH-146）」小节。
+    """build_prompt 补充约定的「回执投递通道（DISPATCH-146）」小节。
 
     派发方会话已知 → 注入 --to 命令示例；未知（派发方环境无 DSH_SESSION_ID，
-    如人工终端调用）→ 目标自动降级写收件箱文件。回报「说什么」仍走必报点表。
+    如人工终端调用）→ 目标自动降级写收件箱文件。回执「说什么」仍走必报点表。
     """
     if dispatcher_session:
         target_part = "本任务派发方会话：%s；" % dispatcher_session
-        cmd = ("`awf-dispatch --report --to %s \"<回报文本>\"`"
+        cmd = ("`awf-dispatch --report --to %s \"<回执文本>\"`"
                "（--from 默认取当前会话 env DSH_SESSION_ID，--ticket 可带派发单号）" % dispatcher_session)
     else:
         target_part = "本任务未注入派发方会话（派发方环境无 DSH_SESSION_ID）；"
-        cmd = ("`awf-dispatch --report \"<回报文本>\"`"
+        cmd = ("`awf-dispatch --report \"<回执文本>\"`"
                "（将自动降级写收件箱文件 `dispatch/reports/inbox/<来源会话ID>.md`）")
     return (
-        "- **回报投递通道（DISPATCH-146）**：本任务的回报经通道投递派发方，非仅写会话回复文本"
+        "- **回执投递通道（DISPATCH-146）**：本任务的回执经通道投递派发方，非仅写会话回复文本"
         "（无通道＝有规则没送达，DISPATCH-144/145 实证）。" + target_part
-        + "任一必报点（1-10）或中途状态回报时运行 " + cmd
-        + "——命令把「回报投递」消息推送到派发方会话收件箱（inbox）并触发其回合处理（繁忙时排队），"
+        + "任一必报点（1-10）或中途状态回执时运行 " + cmd
+        + "——命令把「回执投递」消息推送到派发方会话收件箱（inbox）并触发其回合处理（繁忙时排队），"
           "派发方无需轮询即可收到；RPC 不可达（GUI 关闭 / 无凭证 / 未注入派发方会话）时自动降级写入"
           "收件箱文件 `dispatch/reports/inbox/<来源会话ID>.md`（派发方可查）。"
-          "回报内容仍按必报点表组织（说什么不变，通道负责怎么送达）。\n"
+          "回执内容仍按必报点表组织（说什么不变，通道负责怎么送达）。\n"
     )
 
 
-# DISPATCH-147：空闲/收尾/自检回报（DISPATCH-147 追加）——「无事发生」也报平安，
+# DISPATCH-147：空闲/收尾/自检回执（DISPATCH-147 追加）——「无事发生」也报平安，
 # 复用 --report 通道投递派发方，不新造通道。与静默=违规衔接：正常空闲 ≠ 静默失联，
-# 区别在于空闲心跳是否发出；无心跳且无回报 → 派发方仍按疑似失联处理。
+# 区别在于空闲心跳是否发出；无心跳且无回执 → 派发方仍按疑似失联处理。
 IDLE_REPORT_SECTION = (
     "- **空闲/收尾/自检（DISPATCH-147 追加；无任务发生时也报平安，杜绝「有会话在动却不知在干嘛」）**"
     "——复用 `awf-dispatch --report` 通道投递派发方，不新造通道：\n"
-    "  a 收尾报平安：必报点 10 完成回报后追加收尾句「任务完成，会话空闲，可续发（来源会话：<会话ID>）」"
-    "（<会话ID> = 当前会话 env DSH_SESSION_ID 或回报内自述），不再默默安静结束；\n"
-    "  b 空闲心跳（防「卡住」误判）：任务完成收尾后 / 等待外部但已报过阻塞后，会话仍存活且距上次回报 >10 分钟"
-    "无新必报点回报时，主动回报一次「空闲心跳：空闲+仍在线+上次动作时间+无卡死声明」（上次动作时间 = 上次实质动作/"
-    "回报时间），此后每 ≥10 分钟一次，或仅在有活动变化时立即合并更新；**防刷屏**：心跳与已报过的最后状态合并"
+    "  a 收尾报平安：必报点 10 完成回执后追加收尾句「任务完成，会话空闲，可续发（来源会话：<会话ID>）」"
+    "（<会话ID> = 当前会话 env DSH_SESSION_ID 或回执内自述），不再默默安静结束；\n"
+    "  b 空闲心跳（防「卡住」误判）：任务完成收尾后 / 等待外部但已报过阻塞后，会话仍存活且距上次回执 >10 分钟"
+    "无新必报点回执时，主动回执一次「空闲心跳：空闲+仍在线+上次动作时间+无卡死声明」（上次动作时间 = 上次实质动作/"
+    "回执时间），此后每 ≥10 分钟一次，或仅在有活动变化时立即合并更新；**防刷屏**：心跳与已报过的最后状态合并"
     "（无新进展不重复整段，只声明「仍空闲在线」），与执行中的 5-10 分钟中途状态错峰不叠加；"
     "阻塞态按转派链「仍阻塞」心跳 ≤5 分钟优先，空闲心跳仅在其缺席时兜底；\n"
-    "  c 自检/自测透明：非任务动作（bootstrap 校验、通道自检、仓库体检等）**可选**发「自检状态」回报"
+    "  c 自检/自测透明：非任务动作（bootstrap 校验、通道自检、仓库体检等）**可选**发「自检状态」回执"
     "（做了 X / 结果 OK），同样走 --report；不强制、不打断任务主线，多个动作可合并一条；"
     "自检不计入也不替代空闲心跳（自检是范围外透明，缺席不触发违约；空闲心跳是必定义务）；\n"
     "  与静默=违规（既有违约条款）衔接：正常空闲与静默等待/失联的区别 = 空闲心跳是否发出——**空闲也要报**；"
-    "无心跳且无回报 → 派发方按既有「疑似失联」流程处理不变。\n"
+    "无心跳且无回执 → 派发方按既有「疑似失联」流程处理不变。\n"
 )
 
 
 def run_report(args) -> int:
-    """--report 模式：把回报文本投递到派发方会话收件箱（RPC 主通道），
+    """--report 模式：把回执文本投递到派发方会话收件箱（RPC 主通道），
     失败 / 无目标时降级写收件箱文件。不派发任务、不改目标仓库业务文件。"""
     text = (args.text or "").strip()
     if not text:
-        # 第一个位置参数即回报文本（与 `--report "<回报文本>"` 的宣传形式一致）
+        # 第一个位置参数即回执文本（与 `--report "<回执文本>"` 的宣传形式一致）
         text = (args.target or "").strip()
     if not text and not sys.stdin.isatty():
         text = sys.stdin.read().strip()
     if not text:
-        raise DispatchError("--report 需要回报文本：用 --text / 第一个位置参数提供，或经 stdin 管道传入")
+        raise DispatchError("--report 需要回执文本：用 --text / 第一个位置参数提供，或经 stdin 管道传入")
     source = (args.from_id or dispatcher_session_env() or "").strip()
     target_session = (args.to or "").strip()
     ticket = (args.ticket or "").strip()
@@ -1010,7 +1010,7 @@ def run_report(args) -> int:
     message = render_report_message(source, target_session, ticket, text,
                                     source_label=source_label, target_label=target_label)
     if args.dry_run:
-        emit("dry-run：回报投递通道（DISPATCH-146），未实际发送", args.json)
+        emit("dry-run：回执投递通道（DISPATCH-146），未实际发送", args.json)
         emit("投递目标：%s" % (target_session or "未指定（将降级写收件箱文件）"), args.json)
         print(message)
         return 0
@@ -1020,14 +1020,14 @@ def run_report(args) -> int:
             report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
                                             target_session=target_session, body=text,
                                             source_label=source_label, target_label=target_label)
-            emit("回报已落盘：%s（DEV-170 数据与渲染分离）" % report_path, args.json)
+            emit("回执已落盘：%s（DEV-170 数据与渲染分离）" % report_path, args.json)
         except DispatchError as error:
             emit("RPC 投递到 %s 失败，降级写收件箱文件：%s" % (target_session, error), args.json)
             append_inbox(source, ticket, text, fallback_note=str(error))
             report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
                                             target_session=target_session, body=text,
                                             source_label=source_label, target_label=target_label)
-            emit("已写入收件箱文件：%s（派发方可查）；回报已落盘 %s" % (inbox_path_for(source, ticket), report_path), args.json)
+            emit("已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (inbox_path_for(source, ticket), report_path), args.json)
             return 0
         emit("已投递到派发方会话 %s 收件箱（inbox；触发其回合处理，派发方无需轮询即可收到）"
              % target_session, args.json)
@@ -1036,7 +1036,7 @@ def run_report(args) -> int:
     report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
                                     target_session=target_session, body=text,
                                     source_label=source_label, target_label=target_label)
-    emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）；回报已落盘 %s" % (path, report_path), args.json)
+    emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (path, report_path), args.json)
     return 0
 
 
@@ -1050,7 +1050,7 @@ TEAM_SECTION = (
     "- 若任务包含文档或契约步骤，按「文档 → 实现 → 独立复核」的顺序组织子任务；"
     "复核必须独立重跑验证命令，不能只看实现者的自述。\n"
     "- 任务账本只由一个 Owner 写入；并行子任务只返回结果，汇总时再统一记账，避免多写者冲突。\n"
-    "- 完成后把验收证据（命令输出、目标 HEAD）写回任务包要求的回报格式。\n"
+    "- 完成后把验收证据（命令输出、目标 HEAD）写回任务包要求的回执格式。\n"
     "- 如果团队协作插件不可用，直接忽略本节，在普通会话中按任务包完成，不需要额外说明。\n"
 )
 
@@ -1066,8 +1066,8 @@ def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = Fa
         "补充约定：\n"
         "- 目标项目的任务账本由你维护；派发方不会改你的 current.md / status.md。\n"
         "- 只允许本地 commit，禁止 push；仓库里的验证命令必须实际执行。\n"
-        "- **回报规则总表（DISPATCH-145；统一并入 DISPATCH-133 必有回报 / DISPATCH-141 决策回派发端 / "
-        "DISPATCH-143 远程办公 / DISPATCH-144 状态透明化）**——以下**必报点**任一触发**必须回报派发方**（主动、不迟到、不拖到下一步）"
+        "- **回执规则总表（DISPATCH-145；统一并入 DISPATCH-133 必有回执 / DISPATCH-141 决策回派发端 / "
+        "DISPATCH-143 远程办公 / DISPATCH-144 状态透明化）**——以下**必报点**任一触发**必须回执派发方**（主动、不迟到、不拖到下一步）"
         "（沿用「派发方 / 目标会话」表述；异步派发同样适用，DISPATCH-148 的 mid-status "
         "只覆盖 `--wait` 等待超时前，本条款覆盖异步派发全程状态转换；**适用于链条每一跳**，见下「转派链卡点必报」）：\n"
         "  1 受理任务（会话打开）：已受理 + 对任务的理解一句话 + 计划/预计；\n"
@@ -1085,35 +1085,35 @@ def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = Fa
         "  10 完成（最终）：状态 / 产物 / commit / 验证结果 / review 结论。\n"
         "  11 空闲/收尾（DISPATCH-147 追加；无任务发生时也报平安）：必报点 10 完成后追加收尾句"
         "「任务完成，会话空闲，可续发（来源会话：<会话ID>）」；完成收尾后或等待外部已报阻塞后，会话仍存活但 >10 分钟"
-        "无新必报点回报时发空闲心跳（空闲+仍在线+上次动作时间+无卡死声明），间隔 ≥10 分钟或仅在有活动变化时；"
-        "非任务动作（bootstrap 校验/通道自检/仓库体检）可选发「自检状态」回报（细则见下）。\n"
-        "- **回报时机（定死）**：① 任一必报点触发后**一回合内**必须回报，不许拖到下一步；"
-        "② 执行中途长时间无里程碑时，**每 5-10 分钟回报一次中途状态**（当前在做 X / 已完成 Y / 预计 Z / 未卡死声明），"
+        "无新必报点回执时发空闲心跳（空闲+仍在线+上次动作时间+无卡死声明），间隔 ≥10 分钟或仅在有活动变化时；"
+        "非任务动作（bootstrap 校验/通道自检/仓库体检）可选发「自检状态」回执（细则见下）。\n"
+        "- **回执时机（定死）**：① 任一必报点触发后**一回合内**必须回执，不许拖到下一步；"
+        "② 执行中途长时间无里程碑时，**每 5-10 分钟回执一次中途状态**（当前在做 X / 已完成 Y / 预计 Z / 未卡死声明），"
         "杜绝「闷头做完才报」——不因「还在修复 / 还没最终成功」而沉默；"
-        "③ 等待外部（派发方/用户）时回报「阻塞等待中」+ 已等时长，不静默。\n"
-        "- **回报字段（固定，一项不能少）**：当前状态（哪个必报点 / 任务状态字段 active/review/blocked…）+ "
+        "③ 等待外部（派发方/用户）时回执「阻塞等待中」+ 已等时长，不静默。\n"
+        "- **回执字段（固定，一项不能少）**：当前状态（哪个必报点 / 任务状态字段 active/review/blocked…）+ "
         "执行内容（完成的工作、成功与否）+ 下一步（将做什么）+ 预计（时间 / 是否等待外部）+ "
         "（如适用）commit / 验证结果 / review 结论。\n"
-        "- **违约后果（定死）**：不按必报点回报 / 超时无中途状态 → 派发方按「疑似失联」处理：主动追问"
-        "（`awf-dispatch --session` 发「状态在哪里？按必报点回报」）→ 追问无果登记滞留 → 上报用户决定重派/干预；"
-        "「完成才报、中途全沉默」视为违约，review 时连坐；派发方同样被约束：收到回报必须核验 + 转达用户（如适用）+ 归档，"
+        "- **违约后果（定死）**：不按必报点回执 / 超时无中途状态 → 派发方按「疑似失联」处理：主动追问"
+        "（`awf-dispatch --session` 发「状态在哪里？按必报点回执」）→ 追问无果登记滞留 → 上报用户决定重派/干预；"
+        "「完成才报、中途全沉默」视为违约，review 时连坐；派发方同样被约束：收到回执必须核验 + 转达用户（如适用）+ 归档，"
         "不许只轮询不读会话。\n"
-        "- **转派链卡点必报（DISPATCH-145 追加；回报链跟随派发链）**：框架支持再次转发（多层转派：A 派 B、B 再转派 C，DEV-128），必报点总表对**链条上每一跳**都适用（C 报 B、B 报 A、最终汇到源头派发方/用户），不是只有最后完成才报。**转派不断链**：转派方（B）收到 C 的卡点/完成回报后**必须继续向上游 A 汇报状态**（「已转派 C 处理，C 回报 X」），汇聚职责不消失；转派后 A 仍对该任务负责（跟进/追问/兜底），不能认为「转出去就与我无关」。**卡点必报**：卡点 = 阻塞（依赖缺失/外部输入/范围不清/需确认/工具失效/冲突待决/进程等待）——一旦进入等待，立即按必报点表回报上游：卡点类型 + 原因 + 已尝试 + 解除条件 + 预计；**不静默铁律**：卡点/等待态不允许只在会话内等待，必须发出回报消息，即使没有新进展也按 **≤5 分钟**间隔发「仍阻塞」心跳；**静默等待 = 违规**：卡点不回报 / 静默等待超过约定心跳 = 违规，记入任务账本，派发方按「疑似失联」升级（追踪 → 汇报 → 必要时上报用户决定重派 / 处分记档）。需用户确认（DISPATCH-141）/ 远程办公（DISPATCH-143）在转派链中：卡点上抛到需要用户决策的层级，该层负责沿派发链汇到用户（最终统一经 IM 送达用户，符合 CONVENTION.md 决策汇聚）。\n"
+        "- **转派链卡点必报（DISPATCH-145 追加；回执链跟随派发链）**：框架支持再次转发（多层转派：A 派 B、B 再转派 C，DEV-128），必报点总表对**链条上每一跳**都适用（C 报 B、B 报 A、最终汇到源头派发方/用户），不是只有最后完成才报。**转派不断链**：转派方（B）收到 C 的卡点/完成回执后**必须继续向上游 A 回执状态**（「已转派 C 处理，C 回执 X」），汇聚职责不消失；转派后 A 仍对该任务负责（跟进/追问/兜底），不能认为「转出去就与我无关」。**卡点必报**：卡点 = 阻塞（依赖缺失/外部输入/范围不清/需确认/工具失效/冲突待决/进程等待）——一旦进入等待，立即按必报点表回执上游：卡点类型 + 原因 + 已尝试 + 解除条件 + 预计；**不静默铁律**：卡点/等待态不允许只在会话内等待，必须发出回执消息，即使没有新进展也按 **≤5 分钟**间隔发「仍阻塞」心跳；**静默等待 = 违规**：卡点不回执 / 静默等待超过约定心跳 = 违规，记入任务账本，派发方按「疑似失联」升级（追踪 → 回执 → 必要时上报用户决定重派 / 处分记档）。需用户确认（DISPATCH-141）/ 远程办公（DISPATCH-143）在转派链中：卡点上抛到需要用户决策的层级，该层负责沿派发链汇到用户（最终统一经 IM 送达用户，符合 CONVENTION.md 决策汇聚）。\n"
         "- 远程办公状态判定（DISPATCH-143 定义升级：熄屏＝远程办公，非「离线」）：需用户确认/决策前，先运行 `awf-dispatch --screen-state`"
         "判定本机显示器状态；`off`（熄屏）/`locked`（锁屏）= 远程办公状态（remote）——用户不在电脑前，但经远程 IM 通道"
-        "（飞书小迪司）在线、随时可决策 → **照常回报**「阻塞：需用户确认 X（远程办公状态，请派发端经 IM 通知用户决策）」"
+        "（飞书小迪司）在线、随时可决策 → **照常回执**「阻塞：需用户确认 X（远程办公状态，请派发端经 IM 通知用户决策）」"
         "并保持会话等待、不擅自决策；派发端会**主动、立即**经 IM 通知用户（用户手机即可决策）——这是远程办公正常流程的一部分，"
         "不存在「等待用户回来」的被动态；`on`（亮屏，用户在电脑前）= 按上述原路径（DISPATCH-141）；"
-        "`unknown` = 照常回报阻塞并注明「远程办公状态未知」，由派发端酌情经 IM 通知。\n"
+        "`unknown` = 照常回执阻塞并注明「远程办公状态未知」，由派发端酌情经 IM 通知。\n"
         "- **状态透明化（DISPATCH-144）**（并入总表）：中间状态转换（review 不通过 / 修复开始 / 修复完成待复审 / "
-        "复审通过或再次不通过 / 归档完成 + 最终回报）均落上述必报点 4-7/10；回报时机不得晚于状态转换后一回合内，"
+        "复审通过或再次不通过 / 归档完成 + 最终回执）均落上述必报点 4-7/10；回执时机不得晚于状态转换后一回合内，"
         "异步派发同样适用（DISPATCH-148 的 mid-status 只覆盖 `--wait` 等待超时前，本条款覆盖异步派发全程状态转换）；"
-        "派发方收回报后按远程办公状态（remote，DISPATCH-143）判定是否经 IM 主动通知用户。\n"
+        "派发方收回执后按远程办公状态（remote，DISPATCH-143）判定是否经 IM 主动通知用户。\n"
     )
     prompt += report_channel_section(dispatcher_session)
     prompt += IDLE_REPORT_SECTION
     prompt += (
-        "- 完成后按任务文件要求的回报格式回复，并保留本会话（多轮续跑）；"
+        "- 完成后按任务文件要求的回执格式回复，并保留本会话（多轮续跑）；"
         "用户后续细节与决策经派发端转达（`awf-dispatch --session <会话ID>` 续发）。\n"
     )
     if team:
@@ -1270,8 +1270,8 @@ def git_head_short(target) -> str:
 
 
 def report_mid_status(api, session_id, target, waited, head_before=None, json_mode=False):
-    """等待超时前的中途状态回报（DISPATCH-139 P0）：已等 Xs、目标 HEAD 是否变化、
-    会话最近产出；不静默超时——呼应 DISPATCH-134 必有回报。"""
+    """等待超时前的中途状态回执（DISPATCH-139 P0）：已等 Xs、目标 HEAD 是否变化、
+    会话最近产出；不静默超时——呼应 DISPATCH-134 必有回执。"""
     if json_mode:
         return
     head_now = git_head_short(target)
@@ -1604,7 +1604,7 @@ def log_entry(alias: str, target: Path, title: str, session_id: str, session_tit
               next_step: str = "", reused=None, session_note: str = "",
               module: str = "", report_to: str = "") -> str:
     flat = re.sub(r"\s+", " ", final_text or "").strip()
-    excerpt = flat[:300] + ("…（已截断，完整回报见会话）" if len(flat) > 300 else "")
+    excerpt = flat[:300] + ("…（已截断，完整回执见会话）" if len(flat) > 300 else "")
     workspace_title = (workspace or {}).get("title", "未知工作区")
     workspace_id = (workspace or {}).get("workspaceId", "-")
     if isinstance(reused, str):
@@ -1618,20 +1618,19 @@ def log_entry(alias: str, target: Path, title: str, session_id: str, session_tit
         + (f"- 模块：{module}\n" if module else "")
         + f"- 工作区：{workspace_title}（{workspace_id}）\n"
         f"- 会话：{session_id}（{session_title_value or title}）\n"
-        + (f"- 回报通道：派发方会话 {report_to}（目标回报经 `awf-dispatch --report` 投递该会话收件箱）\n"
+        + (f"- 回执通道：派发方会话 {report_to}（目标回执经 `awf-dispatch --report` 投递该会话收件箱）\n"
            if report_to else "")
         + (f"- 会话来源：{source}\n" if reused is not None else "")
         + (f"- 会话提示：{session_note}\n" if session_note else "")
         + f"- 状态：{status}\n"
         f"- 目标 HEAD：{git_head(target)}\n"
         + (f"- 回到会话：{next_step}\n" if next_step else "")
-        + (f"- 回报节选：{excerpt}\n" if excerpt else "")
+        + (f"- 回执节选：{excerpt}\n" if excerpt else "")
     )
 
 
-# ---------------------------------------------------------------- 票据归档（--prune）
+# ---------------------------------------------------------------- 票据清理（--prune，用完即删）
 
-ARCHIVE_ROOT = "dispatch/archive"
 TICKET_ID_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]+-[0-9]+(?![0-9])")
 TICKET_TARGET_RE = re.compile(
     r"^\s*[-*]\s*目标项目\s*[：:]\s*(.+?)\s*[（(]\s*(.+?)\s*[）)]\s*$", re.M
@@ -1717,7 +1716,6 @@ def ledger_has_id(target: Path, task_id: str) -> bool:
                 return True
         except OSError:
             continue
-
     listing = run_git(
         [
             "git",
@@ -1743,37 +1741,28 @@ def ledger_has_id(target: Path, task_id: str) -> bool:
 
 
 def judge_ticket(target, task_id: str):
-    """判定票据：completed / pending / unknown，并给出归档月份与原因。"""
+    """判定票据：completed / pending / unknown（只读，不写文件）。"""
     if target is None:
-        return "unknown", None, "缺少「目标项目」行或路径不是绝对路径"
+        return "unknown", "缺少「目标项目」行或路径不是绝对路径"
     if not target.is_dir():
-        return "unknown", None, f"目标路径不存在：{target}"
+        return "unknown", f"目标路径不存在：{target}"
     if not is_git_repo(target):
-        return "unknown", None, f"目标不是 git 仓库：{target}"
-
+        return "unknown", f"目标不是 git 仓库：{target}"
     dates = commit_dates(target, task_id)
     if dates:
-        return "completed", dates[0][:7], f"commit 命中 {dates[0]}"
+        return "completed", f"commit 命中 {dates[0]}"
     if ledger_has_id(target, task_id):
-        return (
-            "completed",
-            datetime.date.today().strftime("%Y-%m"),
-            "目标账本 done/ 已归档（提交消息不含 ID，月份按当天）",
-        )
-    return "pending", None, "commit 消息与账本 done/ 都未命中"
-
-
-def archive_relpath(alias: str, month: str, filename: str) -> str:
-    return f"{ARCHIVE_ROOT}/{alias}/{month}/{filename}"
+        return "completed", "目标账本 done/ 已归档（提交消息不含 ID）"
+    return "pending", "commit 消息与账本 done/ 都未命中"
 
 
 def scan_tickets(root: Path):
-    """扫描 ./dispatch/tasks/*.md 并逐个判定；只读，不移动文件。"""
+    """扫描 ./dispatch/tasks/（含子目录，如 upgrade-v<版本>/）的票据并逐个判定；只读，不删除。"""
     tasks_dir = root / "dispatch/tasks"
     items = []
     if not tasks_dir.is_dir():
         return items
-    for ticket in sorted(tasks_dir.glob("*.md")):
+    for ticket in sorted(tasks_dir.rglob("*.md")):
         if not ticket.is_file():
             continue
         item = {
@@ -1782,8 +1771,6 @@ def scan_tickets(root: Path):
             "target": None,
             "taskId": None,
             "status": "unknown",
-            "month": None,
-            "archive": None,
             "reason": "",
         }
         try:
@@ -1809,12 +1796,9 @@ def scan_tickets(root: Path):
             items.append(item)
             continue
 
-        status, month, reason = judge_ticket(target, task_id)
+        status, reason = judge_ticket(target, task_id)
         item["status"] = status
-        item["month"] = month
         item["reason"] = reason
-        if status == "completed":
-            item["archive"] = archive_relpath(alias, month, ticket.name)
         items.append(item)
     return items
 
@@ -1824,55 +1808,62 @@ def git_tracked(root: Path, rel: str) -> bool:
     return proc.returncode == 0
 
 
-def move_ticket(root: Path, source: Path, rel_dest: str) -> str:
-    """移动票据：git 索引里的用 git mv，否则 os.rename；目标已存在时返回 conflict。"""
-    dest = root / rel_dest
-    if dest.exists() or dest.is_symlink():
-        return "conflict"
-    dest.parent.mkdir(parents=True, exist_ok=True)
+def delete_ticket(root: Path, source: Path) -> str:
+    """删除票据文件（用完即删，不留存根）：git 索引里的用 git rm，其余直接 unlink。
+
+    删除后向上清理空目录（如 dispatch/tasks/upgrade-v<版本>/），不留空壳。
+    """
     rel_src = source.relative_to(root).as_posix()
     if git_tracked(root, rel_src):
-        proc = run_git(["git", "-C", str(root), "mv", rel_src, rel_dest])
+        proc = run_git(["git", "-C", str(root), "rm", "-q", "--", rel_src])
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout).strip()
-            raise DispatchError(f"git mv 失败：{rel_src} → {rel_dest}：{detail}")
+            raise DispatchError(f"git rm 失败：{rel_src}：{detail}")
     else:
         try:
-            os.rename(source, dest)
+            source.unlink()
         except OSError as error:
-            raise DispatchError(f"移动失败：{rel_src} → {rel_dest}：{error}")
-    return "moved"
+            raise DispatchError(f"删除失败：{rel_src}：{error}")
+    _prune_empty_parents(source.parent)
+    return "deleted"
+
+
+def _prune_empty_parents(start: Path) -> None:
+    """自票据所在目录向上删除空目录，直到 dispatch/tasks 为止（tasks 本身保留）。"""
+    cur = start
+    while cur.name != "tasks":
+        try:
+            if cur.is_dir() and not any(cur.iterdir()):
+                cur.rmdir()
+            else:
+                return
+        except OSError:
+            return
+        cur = cur.parent
 
 
 def run_prune(args) -> int:
     root = Path.cwd().resolve()
     tasks_dir = root / "dispatch/tasks"
-    archive_dir = root / ARCHIVE_ROOT
     items = scan_tickets(root)
     apply = bool(args.apply)
     counts = {"completed": 0, "pending": 0, "unknown": 0}
-    moved = 0
-    conflicts = 0
+    deleted = 0
     errors = 0
 
     if apply:
         for item in items:
-            if item["status"] != "completed" or not item["archive"]:
+            if item["status"] != "completed":
                 continue
             try:
-                outcome = move_ticket(root, root / item["file"], item["archive"])
+                delete_ticket(root, root / item["file"])
             except DispatchError as error:
                 item["error"] = str(error)
                 errors += 1
                 emit(f"FAIL  {error}", args.json)
                 continue
-            if outcome == "conflict":
-                conflicts += 1
-                item["conflict"] = True
-                item["reason"] = item["reason"] + "；目标已存在，跳过（不覆盖）"
-            else:
-                moved += 1
-                item["moved"] = True
+            deleted += 1
+            item["deleted"] = True
 
     for item in items:
         counts[item["status"]] = counts.get(item["status"], 0) + 1
@@ -1886,13 +1877,11 @@ def run_prune(args) -> int:
                     "dryRun": not apply,
                     "root": str(root),
                     "tasks": str(tasks_dir),
-                    "archive": str(archive_dir),
                     "items": items,
                     "summary": dict(
                         counts,
                         total=len(items),
-                        moved=moved,
-                        conflicts=conflicts,
+                        deleted=deleted,
                         errors=errors,
                     ),
                 },
@@ -1900,10 +1889,9 @@ def run_prune(args) -> int:
             )
         )
     else:
-        mode = "apply（会移动文件）" if apply else "dry-run（只读；加 --apply 才移动文件）"
+        mode = "apply（会删除文件）" if apply else "dry-run（只读；加 --apply 才删除文件）"
         print(f"prune：{mode}")
         print(f"票据目录：{tasks_dir}")
-        print(f"归档目录：{archive_dir}")
         if not items:
             print("没有票据：dispatch/tasks 为空或不存在。")
         for item in items:
@@ -1912,12 +1900,10 @@ def run_prune(args) -> int:
             print(f"  目标项目：{item['alias'] or '-'} → {item['target'] or '-'}")
             print(f"  任务ID：{item['taskId'] or '-'}")
             print(f"  判定：{item['status']}（{item['reason']}）")
-            if item["archive"]:
-                print(f"  {'归档' if apply else '将移往'}：{item['archive']}")
-            if item.get("moved"):
-                print("  移动：已完成")
-            elif item.get("conflict"):
-                print("  移动：跳过（目标已存在，不覆盖）")
+            if item.get("deleted"):
+                print("  删除：已完成")
+            elif item["status"] != "completed":
+                print("  保留：未完成（pending/unknown 不删，核验后重跑 --prune --apply）")
         print()
         print(
             "合计：completed {c} / pending {p} / unknown {u}（共 {n}）".format(
@@ -1925,9 +1911,9 @@ def run_prune(args) -> int:
             )
         )
         if apply:
-            print(f"已移动 {moved} 个票据；冲突 {conflicts} 个；失败 {errors} 个。")
+            print(f"已删除 {deleted} 个票据；失败 {errors} 个。")
         else:
-            print("dry-run：未移动任何文件；确认后加 --apply 执行。")
+            print("dry-run：未删除任何文件；确认后加 --apply 执行。")
     return 2 if errors else 0
 
 
@@ -2071,7 +2057,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                 raise DispatchError(
                     f"该派发者「{sender_key}」在 {target.name} 已有 {pool_count} 个 [awf] 会话"
                     f"（上限 {MAX_SENDER_SESSIONS}）——达到数量上限：请复用空闲会话、"
-                    "或清理（--prune / GUI 归档）后重试；确需强制新建加 --force"
+                    "或清理（--prune / GUI 删除票据）后重试；确需强制新建加 --force"
                 )
             # DEV-183：全局 [awf] 会话总数上限（按项目可配：项目专属环境变量 > 通用 > 默认 3）。
             # 走到新建路径说明没有可复用会话（复用池全忙或不存在）——全局已达上限时
@@ -2169,7 +2155,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             emit("提示：目标不是 git 仓库，--wait 落地判定仅看 done.md 归档", args.json)
 
     # 握手（DEV-136）：先在目标工作区确认会话（复用/新建/改名），把「连接成功」
-    # 明确回报出来，再派发任务——像 TCP 握手一样先建立连接、再传数据。
+    # 明确回执出来，再派发任务——像 TCP 握手一样先建立连接、再传数据。
     if reused:
         emit(f"连接成功：会话 {session_id}（{session_name or shown_title}；复用）", args.json)
     else:
@@ -2178,7 +2164,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
 
     prompt_ms = int(time.time() * 1000)
     # DISPATCH-146：派发方会话 = 派发方运行本命令时所在会话（env DSH_SESSION_ID），
-    # 注入目标提示（目标回报经 --report 投递回该会话），同时写入 dispatch/log.md 供审计。
+    # 注入目标提示（目标回执经 --report 投递回该会话），同时写入 dispatch/log.md 供审计。
     dispatcher = dispatcher_session_env()
     try:
         api.prompt(
@@ -2369,7 +2355,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             print(message, file=sys.stderr)
             print(f"目标 HEAD：{head}")
             if final_text:
-                print(f"\n--- 目标 agent 回报（节选）---\n{final_text.strip()[:900]}")
+                print(f"\n--- 目标 agent 回执（节选）---\n{final_text.strip()[:900]}")
             print(f"\n已记录：{log_path}")
         return EXIT_TIMEOUT
 
@@ -2406,8 +2392,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         if final_text:
             excerpt = final_text.strip()
             if len(excerpt) > 900:
-                excerpt = excerpt[:900] + "\n…（完整回报见会话）"
-            print("\n--- 目标 agent 回报（节选）---")
+                excerpt = excerpt[:900] + "\n…（完整回执见会话）"
+            print("\n--- 目标 agent 回执（节选）---")
             print(excerpt)
         print(f"\n已记录：{log_path}")
         print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{final_title}」继续提细节。")
@@ -2613,7 +2599,7 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
         if final_text:
             excerpt = final_text.strip()
             if len(excerpt) > 900:
-                excerpt = excerpt[:900] + "\n…（完整回报见输出文件）"
+                excerpt = excerpt[:900] + "\n…（完整回执见输出文件）"
             print("\n--- headless 输出（节选）---")
             print(excerpt)
         print(f"输出：{out_path}")
@@ -2660,14 +2646,13 @@ def main(argv=None) -> int:
             "  awf-dispatch demo02 task.md --headless\n"
             "  awf-dispatch demo02 task.md --handoff\n"
             "  awf-dispatch demo02 task.md --team\n"
-            "  awf-dispatch --prune                                  # dry-run：打印归档计划\n"
-            "  awf-dispatch --prune --apply                          # 真正移动已完成票据\n"
+            "  awf-dispatch --prune                                  # dry-run：打印清理计划\n"
+            "  awf-dispatch --prune --apply                          # 真正删除已完成票据（用完即删）\n"
             "  awf-dispatch --prune --json                           # 结构化输出\n"
-            "\n--prune：扫描 ./dispatch/tasks/*.md，从正文「- 目标项目：<别名>（<路径>）」取别名与路径、\n"
-            "        从文件名取任务 ID；git log --all 命中 ID，或目标账本 done.md 已含 ID → completed。\n"
-            "        归档到 dispatch/archive/<别名>/<YYYY-MM>/<原文件名>（月份取提交 %cs，取不到用当天）；\n"
-            "        默认 dry-run 只打印计划，--apply 才移动；git 索引里的票据用 git mv，其余 os.rename；\n"
-            "        目标已存在则跳过并报冲突（不覆盖）。无票据或全部 pending 时退出码 0。\n"
+            "\n--prune：扫描 ./dispatch/tasks/（含子目录，如 upgrade-v<版本>/）下的票据，从正文「- 目标项目：<别名>（<路径>）」\n"
+            "        取别名与路径、从文件名取任务 ID；git log --all 命中 ID，或目标账本 done.md 已含 ID → completed。\n"
+            "        默认 dry-run 只打印计划，--apply 才删除（git 索引里的票据用 git rm，其余直接删除），\n"
+            "        删除后向上清空目录留下空壳（dispatch/tasks 本身保留）。无票据或全部 pending 时退出码 0。\n"
             "        --prune 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。\n"
             "\n激活式路由（票据来源，DEV-115 定义 / DEV-128 放开转派）：读取任务文件头部的「来源：用户 | 工作流」；\n"
             "        缺省视为用户来源（旧票据兼容）；「来源：工作流」的票据是已派发任务，\n"
@@ -2703,8 +2688,8 @@ def main(argv=None) -> int:
             "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
             "        先拆 2–3 个可并行子任务、声明依赖、队长汇总；插件不可用时目标 agent\n"
             "        忽略该节，按普通会话完成。缺省不追加，任务包与旧版一致。\n"
-            "\n--report（DISPATCH-146 回报投递通道）：目标会话在任一必报点/中途状态回报时，把回报文本\n"
-            "        投递到派发方会话收件箱——`awf-dispatch --report --to <派发方会话ID> \"<回报文本>\"`\n"
+            "\n--report（DISPATCH-146 回执投递通道）：目标会话在任一必报点/中途状态回执时，把回执文本\n"
+            "        投递到派发方会话收件箱——`awf-dispatch --report --to <派发方会话ID> \"<回执文本>\"`\n"
             "        （--from 默认取当前会话 env DSH_SESSION_ID，--ticket 可带派发单号；--dry-run 只渲染不发送）；\n"
             "        经 RPC 推送进派发方会话 inbox 并触发其回合处理，派发方无需轮询即可收到；\n"
             "        RPC 不可达（GUI 关闭 / 无凭证）或未指定 --to 时降级写收件箱文件\n"
@@ -2725,12 +2710,12 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="归档已完成票据：扫描 ./dispatch/tasks/*.md 并打印计划（默认 dry-run）",
+        help="清理已完成票据：扫描 ./dispatch/tasks/（含子目录）并打印计划（默认 dry-run）",
     )
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="配合 --prune：真正移动文件到 dispatch/archive/（默认只打印计划）",
+        help="配合 --prune：真正删除已完成票据文件，不留存根（默认只打印计划）",
     )
     parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
     parser.add_argument("--handoff", action="store_true", help="只生成交接单，不执行")
@@ -2779,7 +2764,7 @@ def main(argv=None) -> int:
         "--queue-timeout",
         type=int,
         default=DEFAULT_QUEUE_TIMEOUT,
-        help="会话繁忙时的队列等待上限秒数（默认 180；超时前回报中途状态，建议 --new 或稍后重试）",
+        help="会话繁忙时的队列等待上限秒数（默认 180；超时前回执中途状态，建议 --new 或稍后重试）",
     )
     parser.add_argument(
         "--timeout",
@@ -2793,7 +2778,7 @@ def main(argv=None) -> int:
         dest="wait",
         action="store_true",
         default=DEFAULT_WAIT,
-        help="等待回合结束并打印回报；默认不等待（发送后立即返回会话 ID）",
+        help="等待回合结束并打印回执；默认不等待（发送后立即返回会话 ID）",
     )
     wait_group.add_argument(
         "--no-wait",
@@ -2834,18 +2819,18 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--report",
         action="store_true",
-        help="回报投递模式（DISPATCH-146）：把回报文本经通道投递到派发方会话收件箱"
+        help="回执投递模式（DISPATCH-146）：把回执文本经通道投递到派发方会话收件箱"
              "（RPC 推送，派发方无需轮询即可收到），RPC 不可达 / 未指定 --to 时降级写"
              "收件箱文件 dispatch/reports/inbox/；不派发任务",
     )
     parser.add_argument("--text", default="",
-                        help="--report 模式的回报文本（缺省取第一个位置参数，或经 stdin 读取）")
+                        help="--report 模式的回执文本（缺省取第一个位置参数，或经 stdin 读取）")
     parser.add_argument("--to", default="",
                         help="--report 模式：派发方会话 ID（投递目标；缺省则降级写收件箱文件）")
     parser.add_argument("--from", dest="from_id", default="",
                         help="--report 模式：来源会话 ID（默认取 env DSH_SESSION_ID）")
     parser.add_argument("--ticket", default="",
-                        help="--report 模式：关联派发单/任务编号（写入回报消息便于派发方归因）")
+                        help="--report 模式：关联派发单/任务编号（写入回执消息便于派发方归因）")
     # DISPATCH-139 P1：--allow-dirty[=tasks] 范围豁免——把 `--allow-dirty=<scope>` 归一为
     # 裸 `--allow-dirty`（store_true），scope 单独记录；裸 --allow-dirty 向后兼容全豁免。
     allow_dirty_scope = ""
@@ -2876,15 +2861,15 @@ def main(argv=None) -> int:
         )
     if args.apply and not args.prune:
         parser.error("--apply 只能配合 --prune 使用")
-    # DISPATCH-146：--report 与其它模式互斥（回报投递独立于派发）。第一个位置
-    # 参数即回报文本（与 `--report "<回报文本>"` 命令形式一致）；第二个位置参数
+    # DISPATCH-146：--report 与其它模式互斥（回执投递独立于派发）。第一个位置
+    # 参数即回执文本（与 `--report "<回执文本>"` 命令形式一致）；第二个位置参数
     # （task）仍不允许。
     if args.report and (args.prune or args.session or args.headless or args.handoff
                         or args.wait or args.task):
         parser.error(
-            "--report 只用于回报投递（DISPATCH-146 回报投递通道），不能与 --prune/--session/"
-            "--headless/--handoff/--wait 或第二个位置参数（task）同用；回报投递示例："
-            "awf-dispatch --report --to <派发方会话ID> \"<回报文本>\""
+            "--report 只用于回执投递（DISPATCH-146 回执投递通道），不能与 --prune/--session/"
+            "--headless/--handoff/--wait 或第二个位置参数（task）同用；回执投递示例："
+            "awf-dispatch --report --to <派发方会话ID> \"<回执文本>\""
         )
     if args.session and not args.reuse:
         parser.error("--session 与 --new 互斥：指定会话时不会再新建")

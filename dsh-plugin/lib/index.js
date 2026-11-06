@@ -26,7 +26,7 @@
 //     POST /awf/action/agent  body {path, type, id, action: return-todo|delete|progress-backfill,
 //                                   reason?, sessionId?}
 //                         → 宿主 agents 服务在位时 ctx.agents.create() 拉起动作子代理执行并
-//                           等待回报（meta.cwd=项目根，prompt 用 followup，dispose 于 finally）；
+//                           等待回执（meta.cwd=项目根，prompt 用 followup，dispose 于 finally）；
 //                           agents 服务不可用 → 降级注入主对话（team.prompted，旧路径保留）。
 //                         → {ok:true, channel:'agent'|'inject', action, task,
 //                            agent:{id,text,seq}? | failed:{code,error}? | team?}
@@ -46,7 +46,7 @@
 //         或等于客户端上报的当前工作区根 workspaceRoot。
 import { join, isAbsolute, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { readFile, stat, writeFile, mkdir, readdir } from 'node:fs/promises'
+import { readFile, stat, writeFile, mkdir } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
@@ -457,7 +457,7 @@ const INIT_AGENT_GUIDE = [
   '2. 生成文件（参照全局技能 agent-workflow-scaffold 的初始化产物）：agent-workflow/project.yaml（项目事实，唯一输入）；agent-workflow/README.md、agent-workflow/workflows/{dev,debug,docs,review,cross-project,release}.md（可参照 kit 模板）；agent-workflow/templates/AGENTS.md.tmpl；agent-workflow/bin/awf（+awf-dispatch 若有）；check_workflow.sh 兼容入口；tasks/{dev,debug,docs}/{todo,current,done}.md 骨架（todo.md 表格行=标准 4 列 `| 任务ID | 优先级 | 描述 | 登记日期 |`）；根目录 AGENTS.md 受控区块（由 bootstrap 生成）；CLAUDE.md 指针；',
   '3. 尽量从项目实际填充初始信息：todo.md 可写 1-3 条真实可行的初始任务（如「梳理项目现状并登记待办」），current.md 留空待认领，done.md 空表；project.yaml 填写真实 stack 与 purpose，不要默认 generic；',
   '4. 完成后运行 agent-workflow/bin/awf check 验证通过（或等价 bootstrap），再运行 awf status 刷新 status.md；',
-  '5. 用简洁文本回报：生成了哪些文件、project.yaml 的关键字段、check/status 结果；失败时说明原因与已写文件。',
+  '5. 用简洁文本回执：生成了哪些文件、project.yaml 的关键字段、check/status 结果；失败时说明原因与已写文件。',
 ].join('\n')
 export function buildActPrompt({ action, id, type, projectPath, reason, engine = 'inject' }) {
   const actionLine = {
@@ -472,7 +472,7 @@ export function buildActPrompt({ action, id, type, projectPath, reason, engine =
     start: `按阶段代理模型（DEV-038）：动作先派独立子代理分析（任务路由/可否执行）再处理，不占用主会话。该任务已登记在 agent-workflow/tasks/${type}/current.md（状态 active）。按 AGENTS.md 任务路由决定是否建队：可并行拆分才建队，小任务单会话直接完成并说明原因；approval=automatic（本仓库已授权）；完成后按团队流程回填账本（验证→review→归档）。`,
     'return-todo': `按阶段代理模型（DEV-038）：先派独立子代理分析（未提交改动/团队是否仍在执行/todo.md 是否有可恢复行），确认可放回才从 current.md 移除块并恢复 todo.md 行；不可则说明原因不改账本。`,
     delete: `按阶段代理模型（DEV-038）：先派独立子代理分析（修改范围/依赖/验收进度/git 未提交改动），可删除则移除块并在 done.md 追加[已撤销]行（需回退 git 修改时分析后执行）；不可则说明原因不改账本。`,
-    'progress-backfill': `面板检测到该任务可能未回填（原因：${reason || '信号未知'}）。按阶段代理模型（DEV-038）：状态字段应在启动阶段代理那一刻已流转（启动验证→verify、启动复核→review），回填只补验收勾选与证据，且由独立子代理执行、不占用主会话——优先派一个「账本回填子代理」处理（读账本→对照证据→改 current.md→跑 awf status→回报），子代理不可用时才自行处理。约束：
+    'progress-backfill': `面板检测到该任务可能未回填（原因：${reason || '信号未知'}）。按阶段代理模型（DEV-038）：状态字段应在启动阶段代理那一刻已流转（启动验证→verify、启动复核→review），回填只补验收勾选与证据，且由独立子代理执行、不占用主会话——优先派一个「账本回填子代理」处理（读账本→对照证据→改 current.md→跑 awf status→回执），子代理不可用时才自行处理。约束：
 1. 若状态未随阶段启动流转，先补状态（按实际阶段）；再对照任务块「验收标准」逐条判断：**判断型条目**已完成但未勾选的勾上 - [x]；**命令类 [cmd] 条目不要手动勾选**（由程序验证后带证据勾选，见任务块 awf:evidence 注释）；
 2. 按实际进展更新 | 状态 |（active/verify/review）与「最近更新」；
 3. 只回填事实，不虚构进度；无法判断的保持原样并说明。`,
@@ -483,7 +483,7 @@ export function buildActPrompt({ action, id, type, projectPath, reason, engine =
     start: `该任务已登记在 agent-workflow/tasks/${type}/current.md（状态 active）。由你作为本面板动作的阶段执行子代理推进：按 AGENTS.md 任务路由决定执行方式——可并行拆分才建队，小任务单会话直接完成并说明原因；approval=automatic（本仓库已授权）；完成后按团队流程回填账本（验证→review→归档）。`,
     'return-todo': `先由你分析（未提交改动/团队是否仍在执行/todo.md 是否有可恢复行），确认可放回才从 current.md 移除块并恢复 todo.md 行；不可则说明原因不改账本。`,
     delete: `先由你分析（修改范围/依赖/验收进度/git 未提交改动），可删除则移除块并在 done.md 追加[已撤销]行（需回退 git 修改时分析后执行）；不可则说明原因不改账本。`,
-    'progress-backfill': `面板检测到该任务可能未回填（原因：${reason || '信号未知'}）。由你作为「账本回填子代理」完成：读账本→对照证据→改 current.md→跑 awf status→回报。约束：
+    'progress-backfill': `面板检测到该任务可能未回填（原因：${reason || '信号未知'}）。由你作为「账本回填子代理」完成：读账本→对照证据→改 current.md→跑 awf status→回执。约束：
 1. 状态字段应在启动阶段代理那一刻已流转（启动验证→verify、启动复核→review）；若未流转，先按实际阶段补状态；再对照任务块「验收标准」逐条判断：**判断型条目**已完成但未勾选的勾上 - [x]；**命令类 [cmd] 条目不要手动勾选**（由程序验证后带证据勾选，见任务块 awf:evidence 注释）；
 2. 按实际进展更新 | 状态 |（active/verify/review）与「最近更新」；
 3. 只回填事实，不虚构进度；无法判断的保持原样并说明。`,
@@ -491,18 +491,18 @@ export function buildActPrompt({ action, id, type, projectPath, reason, engine =
   if (engine === 'subagent') {
     return [
       '【Agent Workflow 面板动作 · 服务端子代理】',
-      `你是 Agent Workflow 插件通过宿主 subagents.startActivation 注册的受管理子代理。由你执行任务，不把工作转交主会话；完成结果由宿主向主对话汇报。请执行面板动作：`,
+      `你是 Agent Workflow 插件通过宿主 subagents.startActivation 注册的受管理子代理。由你执行任务，不把工作转交主会话；完成结果由宿主向主对话回执。请执行面板动作：`,
       `动作：${actionLine}`,
       `执行约束：`,
       `1. ${constraintSubagent}`,
-      `2. 处理完成后更新项目 ${projectPath} 的任务账本，并用简洁文本回报执行结果（成功/失败与原因）；Agent Workflow 面板会因账本数据变化自动刷新。`,
+      `2. 处理完成后更新项目 ${projectPath} 的任务账本，并用简洁文本回执执行结果（成功/失败与原因）；Agent Workflow 面板会因账本数据变化自动刷新。`,
     ].join('\n')
   }
   return [
     `【Agent Workflow 动作指令】`,
     `请${actionLine}：`,
     `1. ${constraint}`,
-    `2. 处理完成后更新账本并回报结果（成功/原因）；Agent Workflow 面板会因账本数据变化自动刷新。`,
+    `2. 处理完成后更新账本并回执结果（成功/原因）；Agent Workflow 面板会因账本数据变化自动刷新。`,
   ].join('\n')
 }
 
@@ -690,51 +690,6 @@ export function apply(ctx) {
     },
   }), 'dsh-awf-dashboard: /awf/projects route')
 
-  // DEV-170：回报聚合路由（数据与渲染分离，AgentTeams 式）——读所有登记项目的 dispatch/reports/*.json
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact',
-    path: '/awf/reports',
-    handler: async (req, res) => {
-      try {
-        if (!fence(req)) {
-          forbidden(res)
-          return
-        }
-        if (req.method !== 'GET') {
-          writeError(res, 405, 'method-error', 'method not allowed')
-          return
-        }
-        const projects = await readIndex(AGENTS_HOME)
-        const reports = []
-        const seen = new Set()
-        for (const p of projects) {
-          if (!p || typeof p.path !== 'string' || !p.path) continue
-          const dir = join(p.path, 'dispatch', 'reports')
-          let names = []
-          try { names = await readdir(dir) } catch (e) { continue }
-          for (const name of names) {
-            if (!name.endsWith('.json')) continue
-            const abs = join(dir, name)
-            try {
-              const raw = await readFile(abs, 'utf-8')
-              const data = JSON.parse(raw)
-              if (!data || data.kind !== 'awf-report') continue
-              data.file = name
-              data.projectPath = p.path
-              const key = data.reportedAt + '|' + abs
-              if (!seen.has(key)) { seen.add(key); reports.push(data) }
-            } catch (e) { /* 单条回报损坏不影响聚合 */ }
-          }
-        }
-        reports.sort((a, b) => (b.reportedAt || 0) - (a.reportedAt || 0))
-        writeJson(res, 200, { ok: true, reports })
-      } catch (error) {
-        writeError(res, 500, 'internal', error instanceof Error ? error.message : String(error))
-      }
-    },
-  }), 'dsh-awf-dashboard: /awf/reports route')
-
-
 
   // DEV-033 块 B：账本变更 SSE 事件流（GET，认证后挂起）。
   // 前端 EventSource 订阅；账本文件变化（任何写者）→ 广播 → UI 立即刷新。
@@ -881,7 +836,7 @@ export function apply(ctx) {
         //   gitignore=true 时附加「把工作流写入 .gitignore」步骤（对应 awf init --gitignore / awf gitignore）。
         const gitignore = body && body.gitignore === true
         const initText = buildActPrompt({ action: 'init', id: 'INIT', type: 'dev', projectPath: path, reason: '', engine: 'inject' })
-          + (gitignore ? '\n\n附加步骤（gitignore）：初始化完成后把本机私有工作流写入项目 .gitignore——在 .gitignore 追加 `agent-workflow/`、`AGENTS.md`、`CLAUDE.md` 忽略块（对应 awf init --gitignore / awf gitignore；已含标记则跳过，末尾无换行先补换行再追加），并在回报里说明是否写入。' : '')
+          + (gitignore ? '\n\n附加步骤（gitignore）：初始化完成后把本机私有工作流写入项目 .gitignore——在 .gitignore 追加 `agent-workflow/`、`AGENTS.md`、`CLAUDE.md` 忽略块（对应 awf init --gitignore / awf gitignore；已含标记则跳过，末尾无换行先补换行再追加），并在回执里说明是否写入。' : '')
         const team = await promptSession(ctx, sessionId, initText, 'awf-init')
         writeJson(res, 200, { ok: true, channel: 'inject', gitignore, team })
       } catch (error) {
@@ -1004,7 +959,7 @@ export function apply(ctx) {
           '3. 完成后更新 project.yaml 的 scaffold_version，运行 agent-workflow/bin/awf check 验证通过；',
           '3b. 账本格式规范（升级必查，避免面板无法显示）：检查 agent-workflow/tasks/*/todo.md 的任务表格行统一为 4 列标准格式 `| 任务ID | 优先级 | 描述 | 登记日期 |`（表头/分隔行除外）；发现 5 列或畸形列（如 `| 任务ID | Priority | Title | Dependencies | Date |`）时，把依赖信息并入描述（形如 `描述（依赖 X）`）并转为标准 4 列，不要静默跳过；同时检查 current.md/done.md 任务块格式保持 `## [ID] 标题` + 字段表 + `### 下一步`；最后用 `awf status` 刷新摘要确认待办行能正常解析；',
           '4. 合并完成后调用插件完成接口：POST /awf/upgrade/complete，body {"path":"<项目绝对路径>","ok":true,"version":"v<目标版本>","note":"升级摘要"}，让面板立即刷新；失败时也调用（ok:false + note 说明原因）。',
-          '5. 回报升级结果（成功/失败原因）；若面板未自动刷新，提示用户刷新。',
+          '5. 回执升级结果（成功/失败原因）；若面板未自动刷新，提示用户刷新。',
         ].join('\n')
         const team = await promptSession(ctx, body.sessionId, text, 'awf-upgrade')
         writeJson(res, 200, { ok: true, versions: vs, team })
@@ -1123,7 +1078,7 @@ export function apply(ctx) {
   }), 'dsh-awf-dashboard: /awf/task/start route')
 
   // DEV-026：开始任务并以 AgentTeams 建队执行。
-  // 先登记账本，再由宿主注册受管理执行代理；只在执行结束后向父会话汇报。
+  // 先登记账本，再由宿主注册受管理执行代理；只在执行结束后向父会话回执。
   // 缺 live 父代理时明确返回 failed，不能以主会话注入指令冒充已经启动。
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
@@ -1222,7 +1177,7 @@ export function apply(ctx) {
     },
   }), 'dsh-awf-dashboard: /awf/agent/act route')
 
-  // 面板动作只走宿主管理器；运行列表可见、继承父预设、结束后向父会话汇报。
+  // 面板动作只走宿主管理器；运行列表可见、继承父预设、结束后向父会话回执。
   // 缺受管理接口时失败关闭，不创建无工具裸会话、不注入待执行指令。
   // /awf/backfill/agent：回填专用（action 固定 progress-backfill，前端回填按钮走这里）。
   ctx.effect(() => ctx.webServer.register({
