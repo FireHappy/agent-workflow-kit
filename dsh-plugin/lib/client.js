@@ -186,6 +186,24 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * DEV-179：阶段摘要（纯函数，可单测）——供当前任务行内联展示。
+     * @returns {null | {steps, index, total, paused, status, current, text}}
+     *   text = 「流程 · <当前阶段> · <当前位置>/<总步数>」（blocked 由调用方附加「暂停」标注）
+     */
+    function stageSummary(t) {
+      const info = inferWorkflowStage(t)
+      if (!info || !info.steps || !info.steps.length) return null
+      const { steps, paused, status } = info
+      const total = steps.length
+      const index = Math.max(0, Math.min(info.index, total - 1))
+      const current = steps[index]
+      return {
+        steps, index, total, paused, status, current,
+        text: '流程 · ' + current.label + ' · ' + (index + 1) + '/' + total,
+      }
+    }
+
     // 交互反馈（DEV-024）：:focus-visible 键盘焦点、:active 按压回弹。
     // 2026-11-02（DEV-026 观察项）：去掉全部 hover 位移/阴影/背景效果——
     // 鼠标移上去卡片上浮/行高亮会让列表布局跳动。保留焦点环（无障碍必需）
@@ -206,19 +224,14 @@ window.__ModuleLoader__.load({
     // 统一基础样式类（DEV-024 收敛零散 inline style 的根源）：
     // 所有组件只挂类名 + 少量主题变量，尺寸/圆角/间距走同一体系，杜绝「裁切/大小不一致」。
     const AWF_UI_CSS =
-      // 步骤条：节点 16px 圆（比 15px 更稳）、标签统一 11px、连线 2px 高
-      '.awf-step-node{width:16px;height:16px;border-radius:50%;flex-shrink:0;box-sizing:border-box;' +
-      'display:inline-flex;align-items:center;justify-content:center;position:relative;' +
-      'font-size:10px;font-weight:800;line-height:1;overflow:visible}' +
-      '.awf-step-node .awf-dot{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);' +
-      'width:7px;height:7px;border-radius:50%;display:block}' +
-      '.awf-step-label{margin-top:5px;font-size:11px;white-space:nowrap;line-height:14px}' +
-      // 关键修复（用户反馈「进行中的状态被裁剪」）：overflowX:auto 会强制 overflowY 也 auto，
-      // 纵向溢出的节点/光圈就被父容器裁掉。改为 overflow:visible，节点永不裁剪；
-      // 横向由 flex-shrink + 最小宽度控制，超出时节点压缩而不是裁剪。
-      '.awf-track-body{display:flex;align-items:flex-start;overflow:visible;padding-bottom:4px;min-width:0}' +
-      '.awf-step{flex:0 1 auto;min-width:0}' +
-      '.awf-step-line{flex:1 1 10px;min-width:6px;height:2px;border-radius:99px;align-self:flex-start;margin-top:7px}' +
+      // DEV-179：紧凑流程阶段（AgentTeams 参考布局）——阶段徽章 + 迷你分段进度。
+      // 类名契约：awf-stage / awf-stage-chip / awf-stage-segs / awf-stage-seg 供单测断言；
+      // 尺寸/圆角集中在这里，颜色走 inline 状态语义色（跟随主题令牌，不额外引入 CSS 类）。
+      '.awf-stage{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;min-width:0}' +
+      '.awf-stage-chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;' +
+      'font-size:11px;font-weight:600;line-height:16px;padding:1px 8px;white-space:nowrap;box-sizing:border-box}' +
+      '.awf-stage-segs{display:inline-flex;gap:3px;align-items:center;flex-shrink:0}' +
+      '.awf-stage-seg{width:5px;height:12px;border-radius:2px;flex-shrink:0;box-sizing:border-box}' +
       // 徽章统一尺寸：所有优先级/状态 Pill 同高同字号，仅用颜色/边框区分等级
       '.awf-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;' +
       'font-size:11px;font-weight:600;line-height:16px;padding:1px 8px;white-space:nowrap;box-sizing:border-box}' +
@@ -244,29 +257,15 @@ window.__ModuleLoader__.load({
       '.awf-icon-btn-ok{color:'+C.success+'!important;border-color:color-mix(in srgb,'+C.success+' 70%,transparent)!important}'
 
     // DEV-037 进行中动画 + 流程质感：纯装饰 CSS，不影响布局，不改变既有类名契约。
-    // 动画目标——① 当前步骤节点呼吸光圈（box-shadow 脉动，静态 2px 光圈无缝衔接）；
-    // ② 流入当前节点的连线流动高光（背景位置滑动）；③ 进行中徽章圆点呼吸；
-    // ④ 未完成进度条流光扫过（轨道内 ::after 滑动高光，利用已有 overflow:hidden 裁剪）；
-    // ⑤ 弹层遮罩淡入 + 卡片上浮入场。全部尊重 prefers-reduced-motion。
+    // 动画目标——① 进行中徽章圆点呼吸；② 未完成进度条流光扫过（轨道内 ::after
+    // 滑动高光，利用已有 overflow:hidden 裁剪）；③ 弹层遮罩淡入 + 卡片上浮入场。
+    // 全部尊重 prefers-reduced-motion。
     // 颜色只用 DSH 主题令牌（白天/暗色自动跟随），依赖现代 Chromium 的 var()+color-mix 支持。
-    // 步骤条相关动画统一锚定 brand-primary（与节点/连线静态用色 C.accent 同源，主题下不产生色差）。
+    // DEV-179：阶段渲染不再使用呼吸圆点/流动连线动画（用户反馈观感差），
+    // 迷你分段进度为纯静态强调（box-shadow 光圈，不影响布局、无动画）。
     const AWF_MOTION_CSS =
-      // 当前节点呼吸：0%/100% 回到静态光圈（2px/20% 透明度），50% 扩张到 5px/9%
-      '@keyframes awf-breathe{0%,100%{box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#4f8ef7) 20%,transparent)}' +
-      '50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--dsw-alias-brand-primary,#4f8ef7) 9%,transparent)}}' +
-      '.awf-step-cur:not(.awf-step-paused) .awf-step-node{animation:awf-breathe 2s ease-in-out infinite}' +
-      // 流入当前节点的连线：流动渐变（深→亮→深循环），模拟流程向前推进
-      '@keyframes awf-flow{0%{background-position:0% 0}100%{background-position:120% 0}}' +
-      '.awf-step-line-hot{background-image:linear-gradient(90deg,' +
-      'color-mix(in srgb,var(--dsw-alias-brand-primary,#4f8ef7) 22%,transparent),' +
-      'color-mix(in srgb,var(--dsw-alias-brand-primary,#4f8ef7) 72%,transparent) 50%,' +
-      'color-mix(in srgb,var(--dsw-alias-brand-primary,#4f8ef7) 22%,transparent));' +
-      'background-size:200% 100%;animation:awf-flow 2.4s linear infinite}' +
       // 徽章圆点 / 头部当前指示点：呼吸透明度（transform 会破坏居中，只动 opacity）
       '@keyframes awf-blip{0%,100%{opacity:1}50%{opacity:.32}}' +
-      '.awf-live-dot{width:6px;height:6px;border-radius:50%;' +
-      'background:var(--dsw-alias-brand-primary,#4f8ef7);flex-shrink:0;' +
-      'animation:awf-blip 1.6s ease-in-out infinite}' +
       '.awf-pill-live .awf-dot{animation:awf-blip 1.6s ease-in-out infinite}' +
       // DEV-041 升级中按钮旋转：引用同文件内其他动画命名风格（awf-* 前缀，跟随主题）
       '@keyframes awf-rot{from{transform:rotate(0)}to{transform:rotate(360deg)}}' +
@@ -283,9 +282,8 @@ window.__ModuleLoader__.load({
       '.awf-modal-card{animation:awf-pop .22s cubic-bezier(.18,.8,.28,1)}' +
       // 系统减弱动效：全部装饰动画关闭（静态光圈由 inline boxShadow 兜底，不依赖动画）
       '@media (prefers-reduced-motion:reduce){' +
-      '.awf-step-cur:not(.awf-step-paused) .awf-step-node,' +
-      '.awf-step-line-hot,.awf-live-dot,.awf-pill-live .awf-dot,' +
-      '.awf-progress-live::after,.awf-modal-mask,.awf-modal-card{animation:none}}'
+      '.awf-pill-live .awf-dot,.awf-progress-live::after,' +
+      '.awf-modal-mask,.awf-modal-card{animation:none}}'
 
     // 回退文件改动状态徽标（dry-run 返回 {path, status}）
     const FILE_STATUS_STYLE = {
@@ -1033,12 +1031,13 @@ window.__ModuleLoader__.load({
     }
 
     // DEV-041：面板收敛为纯看板——TaskCard 只读展示（ID/标题/徽章行/更新行），
-    // 移除编辑/暂停/删除/放回待办/回填/验证等全部操作交互与进度/步骤条渲染；
-    // 状态徽章（进行中/验证等）判断不准，一并移除——徽章行只保留账本事实：类型/优先级/Owner。
+    // 移除编辑/暂停/删除/放回待办/回填/验证等全部操作交互；状态徽章判断不准，
+    // 徽章行只保留账本事实：类型/优先级/Owner。
     // DEV-043：进行中任务可打开源文件（current.md）并编辑。徽章行只保留账本事实。
+    // DEV-179：行内联「流程阶段」——阶段徽章 + 迷你分段（StageInline），无需点击详情。
     /**
      * 当前任务行（DEV-044 对齐「最近完成」轻量行风格）：无卡片边框、hairline 分隔、
-     * 紧凑单行布局。徽章行只保留账本事实：类型 / 优先级 / Owner。
+     * 紧凑布局。徽章行只保留账本事实：类型 / 优先级 / Owner；阶段行内联展示当前流程阶段。
      */
     function TaskCard({ t, flush, onOpenSource }) {
       const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
@@ -1070,6 +1069,11 @@ window.__ModuleLoader__.load({
           h('span', { style: { color: C.faint } }, '↻'), h('span', {}, '更新 ' + t.updated)) : null,
         t.mode ? h('span', { style: { color: C.faint } }, t.mode) : null)
 
+      // DEV-179：当前任务行内联流程阶段——独立固定单行（阶段徽章 + 迷你分段），
+      // 无需点击详情即可一瞥即知；固定高度不随内容变化，不造成行高/布局跳动。
+      const stageLine = h('div', { style: { display: 'flex', alignItems: 'center', marginTop: 3, minWidth: 0 } },
+        h(StageInline, { t }))
+
       return h('div', {
         className: 'awf-row' + (clickable ? ' awf-row-clickable' : ''),
         title: clickable ? '点击查看/编辑源文件（' + t.id + ' → ' + (t.type || 'dev') + '/current/<ID>.md）' : undefined,
@@ -1085,7 +1089,8 @@ window.__ModuleLoader__.load({
         rowHead,
         h('div', { style: { fontSize: F(13), fontWeight: 600, color: C.text, lineHeight: 1.45 } },
           t.title || '（无标题）'),
-        meta)
+        meta,
+        stageLine)
     }
 
     /** 最近完成行：完成标记 / 日期 / ID / 描述，可点击查看归档（DEV-044：无源文件按钮）。 */
@@ -1235,121 +1240,48 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 工作流步骤条（AgentTeams 面板视觉语言，t8 重构）：
-     * 横向阶段轨道——圆形状态节点（完成=实心填充+✓、当前=强调色+光圈、未到=空心置灰）
-     * + 连接线（已完成段强调色、未到段灰）+ 节点下方标签；按任务类型（dev/debug/docs）展示，
-     * 当前阶段由状态推断；blocked 在当前位置标注「暂停」。
+     * DEV-179：紧凑流程阶段（替代旧大步骤条 WorkflowSteps，AgentTeams 参考布局）——
+     * 阶段徽章（「流程 · <当前阶段> · <当前位置>/<总步数>」）+ 迷你分段进度
+     * （完成段=状态色浅底、当前段=状态色实底+静态光圈、未到段=灰）。
+     * 纯静态强调、无动画、固定单行高度，不影响布局；blocked 徽章标注「暂停」。
+     * 类名契约：awf-stage / awf-stage-chip / awf-stage-segs / awf-stage-seg。
      */
-    function WorkflowSteps({ t }) {
-      const info = inferWorkflowStage(t)
-      if (!info || !info.steps || info.steps.length < 2) return null
-      const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
-      const { steps, index, paused } = info
-      const activeStep = steps[Math.min(index, steps.length - 1)] || steps[0]
-
-      const nodeStyle = (i) => {
-        const done = i < index
-        const cur = i === index
-        const base = {
-          // 集中类 awf-step-node 提供 16px 圆 + 相对定位；这里只给状态色/边框
-          border: '1px solid ',
-        }
-        if (cur) {
-          return Object.assign(base, {
-            // DEV-037 美化：当前节点渐变底（左上偏亮），呼吸光圈由 AWF_MOTION_CSS 动画接管
-            background: 'linear-gradient(135deg, ' + C.accent + ', color-mix(in srgb, ' + C.accent + ' 82%, #ffffff))',
-            borderColor: C.accent, color: '#fff',
-            // DEV-024：光圈 2px，紧凑布局减小「被裁剪」观感
-            boxShadow: '0 0 0 2px color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
-          })
-        }
-        if (done) {
-          return Object.assign(base, {
-            background: 'color-mix(in srgb, ' + C.accent + ' 22%, transparent)',
-            borderColor: 'color-mix(in srgb, ' + C.accent + ' 55%, transparent)',
-            color: C.accent,
-          })
-        }
-        return Object.assign(base, {
-          background: 'transparent',
-          borderColor: 'color-mix(in srgb, ' + C.faint + ' 45%, transparent)',
-          color: C.faint,
-        })
-      }
-      // 节点内 icon：CSS 绘制——当前=白色实心圆点（绝对定位居中，永不裁剪）、
-      // 完成=✓、暂停=⏸、未到=空。集中类 awf-step-node 保证容器不设 overflow 裁剪。
-      const nodeIcon = (i) => {
-        const done = i < index
-        const cur = i === index
-        if (cur && !paused) {
-          // 当前激活：绝对定位白点，translate(-50%,-50%) 严格居中，不依赖行高
-          return h('span', { className: 'awf-dot', style: { background: '#fff' } })
-        }
-        if (cur && paused) {
-          return h('span', { style: { fontSize: F(11), fontWeight: 900, lineHeight: 1 } }, '⏸')
-        }
-        if (done) {
-          return h('span', { style: { fontSize: F(11), fontWeight: 900, lineHeight: 1 } }, '✓')
-        }
-        // 未到：空心节点不放内容
-        return null
-      }
-      const lineStyle = (i) => ({
-        background: i < index
-          ? 'color-mix(in srgb, ' + C.accent + ' 50%, transparent)'
-          : 'color-mix(in srgb, ' + C.faint + ' 24%, transparent)',
-      })
-
-      const trackChildren = []
-      steps.forEach((s, i) => {
-        const done = i < index
-        const cur = i === index
-        if (i > 0) trackChildren.push(h('span', {
-          key: 'ln' + i,
-          // DEV-037：流入当前节点的连线挂 awf-step-line-hot（流动高光动画），paused 静止
-          className: 'awf-step-line' + (cur && !paused ? ' awf-step-line-hot' : ''),
-          style: lineStyle(i - 1) }))
-        trackChildren.push(h('div', {
-          key: s.key,
-          className: 'awf-step' + (cur ? ' awf-step-cur' + (paused ? ' awf-step-paused' : '') : done ? ' awf-step-done' : ' awf-step-pend'),
-          style: { display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '0 1 auto', minWidth: 0 },
-        },
-          h('span', { className: 'awf-step-node', style: nodeStyle(i), title: s.label }, nodeIcon(i)),
-          h('span', {
-            className: 'awf-step-label',
-            style: {
-              fontWeight: cur ? 700 : 600,
-              color: cur ? C.accent : done ? C.sub : C.faint,
-            },
-          }, s.label)))
-      })
-
-      return h('div', {
-        className: 'awf-track',
+    function StageInline({ t }) {
+      const s = stageSummary(t)
+      if (!s || !s.steps || s.steps.length < 2) return null
+      // 当前阶段状态色：verify=绿 / review=琥珀 / handoff=中性 / 其余（active/archived）=品牌蓝；
+      // blocked=琥珀 + 「暂停」标注（沿用既有「暂停」语义色 C.warn）
+      const color = s.paused
+        ? C.warn
+        : (s.status === 'verify' ? C.success : s.status === 'review' ? C.warn : s.status === 'handoff' ? C.idle : C.accent)
+      const chip = h('span', {
+        className: 'awf-stage-chip',
+        title: '流程阶段：' + s.current.label + (s.paused ? '（已暂停）' : ''),
         style: {
-          marginTop: 10, padding: '10px 12px', borderRadius: C.radius,
-          background: 'color-mix(in srgb, ' + C.surface + ' 45%, transparent)',
-          border: '1px solid ' + C.hairline,
+          color,
+          background: 'color-mix(in srgb, ' + color + ' 10%, transparent)',
+          border: '1px solid color-mix(in srgb, ' + color + ' 38%, transparent)',
         },
       },
-        h('div', { style: Object.assign({ justifyContent: 'space-between' }, row({ marginBottom: 8 })) },
-          h('span', { style: row({ gap: 6, fontSize: F(11), fontWeight: 700, color: C.dim }) },
-            h('span', { style: { color: type.color } }, type.label),
-            h('span', {}, '流程')),
-          h('span', { style: row({ gap: 8, fontSize: F(11) }) },
-            h('span', { style: { color: C.success, fontWeight: 600, whiteSpace: 'nowrap' } },
-              '✓ 已完成 ' + index),
-            paused
-              ? h('span', { style: { fontSize: F(11), fontWeight: 600, color: C.warn, whiteSpace: 'nowrap' } },
-                  '已暂停 · ' + activeStep.label)
-              : h('span', { style: row({ gap: 5, fontSize: F(11), color: C.accent, fontWeight: 600, whiteSpace: 'nowrap' }) },
-                  // DEV-037：进行中指示点（呼吸），与当前步骤文字联动
-                  h('span', { className: 'awf-live-dot' }),
-                  h('span', {}, '当前 · ' + activeStep.label)),
-            h('span', { style: { color: C.faint, fontWeight: 600, whiteSpace: 'nowrap' } },
-              '待办 ' + Math.max(0, steps.length - index - 1)))),
-        h('div', { className: 'awf-track-body', style: { display: 'flex', alignItems: 'flex-start', paddingBottom: 4, minWidth: 0 } },
-          trackChildren))
+        s.text,
+        s.paused ? h('span', { style: { fontWeight: 700 } }, ' ⏸ 暂停') : null)
+      const segStyle = (i) => {
+        if (i < s.index) return { background: 'color-mix(in srgb, ' + color + ' 45%, transparent)' }
+        if (i === s.index) {
+          const c = s.paused ? C.warn : color
+          return { background: c, boxShadow: '0 0 0 2px color-mix(in srgb, ' + c + ' 22%, transparent)' }
+        }
+        return { background: 'color-mix(in srgb, ' + C.faint + ' 26%, transparent)' }
+      }
+      return h('span', { className: 'awf-stage' },
+        chip,
+        h('span', { className: 'awf-stage-segs' },
+          s.steps.map((st, i) => h('span', {
+            key: st.key,
+            className: 'awf-stage-seg',
+            style: segStyle(i),
+            title: st.label + (i === s.index && s.paused ? '（暂停）' : ''),
+          }))))
     }
 
     /**
@@ -3073,6 +3005,7 @@ window.__ModuleLoader__.load({
     exports.copyText = copyText
     exports.WORKFLOW_STEPS = WORKFLOW_STEPS
     exports.inferWorkflowStage = inferWorkflowStage
+    exports.stageSummary = stageSummary
     return module.exports
   },
 })

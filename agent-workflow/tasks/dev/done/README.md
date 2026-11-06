@@ -84,3 +84,4 @@
 | DEV-175 | P1 | init 流程支持 git 忽略本工作流（--gitignore + awf gitignore 子命令） | 2026-11-06 |
 | DEV-176 | P1 | release-prep 1.1.7 | 2026-11-06 |
 | DEV-178 | P1 | 看板插件 0.3.4：版本锚点读取适配 version_file（kit 锚点迁移后不再硬编码根 VERSION） | 2026-11-06 |
+| DEV-179 | P1 | 看板插件 0.3.5：当前任务行内联显示流程阶段 + 流程渲染重做（参考 AgentTeams 布局） | 2026-11-06 |

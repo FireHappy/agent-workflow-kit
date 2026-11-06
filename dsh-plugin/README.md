@@ -46,7 +46,7 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 打开页签即自动加载**当前会话项目**的账本（无项目下拉选择器、无顶部工具条，不看其他项目）。DEV-044 起面板统一为**轻量行风格**：当前任务 / 待办 / 最近完成三区都是紧凑行（hairline 分隔、无卡片边框），只读展示账本事实，无任何操作按钮；写操作由 agent 在对话中执行，面板经 SSE/轮询自动反映账本变化。
 
 - 项目卡：名称（右侧带**版本号** chip：latest 绿点 / outdated 黄点可点击升级）+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
-- 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）
+- 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）· **流程阶段行**（DEV-179：阶段徽章「流程 · 当前阶段 · 位置/总步数」+ 迷你分段进度，一瞥即知当前到哪个流程；blocked 徽章标注「暂停」；无需点击详情）
 - 待办（行）：类型 chip + ID + 描述 + 优先级，dev/debug/docs 三态切换；每个类型 tab 显示该类型未开始任务数量徽章（如「开发 2」「调试 0」，数据取自 `ledger.todoRows` 过滤计数），标题「未开始任务 · 类型」不再重复数量（tab 徽章一处即可）；数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」），解析层兼容 4/5 列任务表格
 - 最近完成（行）：✓ 日期 ID 描述，点击查看归档
 - **未初始化引导**：所选项目尚未初始化 agent-workflow 时，页签显示引导卡（图标 + 文案 + 「初始化工作流」按钮）。点击调用 `/awf/init` 生成骨架（project.yaml + tasks/*/{todo,current,done}.md + status.md），成功后自动重新加载账本显示正常看板；`already-initialized` 等错误有友好提示
@@ -92,7 +92,7 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
   `collectTodoRows`（todo 行兜底解析）、`buildDeleteView` / `deleteReasonText`（删除回退视图）、
   `runDeleteFlow`（确认后才 execute 的流程）、`runTodoAction` / `runTaskAction`（todo/任务 CRUD 请求封装）、
   `apiErrorText`（错误码 → 友好文案）、`postJson` / `getJson`（fetchImpl 可注入，mock 测试）、
-  `WORKFLOW_STEPS` / `inferWorkflowStage`（工作流步骤条定义与阶段推断，纯函数）
+  `WORKFLOW_STEPS` / `inferWorkflowStage` / `stageSummary`（流程步骤定义、阶段推断与内联摘要，纯函数）
 - 测试：`node --test test/ledger.test.js test/client-chunk.test.js`（无需 GUI）
 - 开发中改动同步到已安装副本：`./scripts/sync-profile.sh`；刷新/重启宿主后生效
 
@@ -103,6 +103,17 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 - 所有路由都与平台一致走宿主 Connection 认证围栏（同 /api 网关准入），未授权请求返回 403
 
 ## 变更记录
+
+- **0.3.5（DEV-179）**：当前任务行内联显示流程阶段 + 流程渲染重做（参考 AgentTeams 布局）
+  - 背景：用户反馈 ①「当前任务要点击进度详情才能看到当前到哪个流程了」——阶段信息不在行内；②「流程画得太难看，参考 agent-team 的布局优化」——旧大步骤条（横向节点轨道 + 呼吸圆点/流动连线）观感差。
+  - 现状核对：`WorkflowSteps` 大步骤条组件为死代码（全仓库未被调用），当前任务行（TaskCard）确实不渲染任何阶段。
+  - 实现（仅前端 `lib/client.js` + 单测 + 版本号）：
+    - TaskCard 行内新增固定单行「流程阶段」：阶段徽章（`流程 · <当前阶段> · <位置>/<总步数>`，如「流程 · 验证 · 4/6」）+ 迷你分段进度（完成段=状态色浅底、当前段=状态色实底+静态光圈、未到段=灰）；blocked 徽章标注「⏸ 暂停」。一瞥即知，无需点击详情。
+    - 删除死代码大步骤条及其呼吸/流动动画 CSS（awf-breathe/awf-flow/awf-live-dot 等），阶段渲染为纯静态强调（无动画、box-shadow 光圈不影响布局），尊重 `prefers-reduced-motion`；状态色随账本状态语义（verify=绿 / review=琥珀 / active=品牌蓝 / blocked=琥珀暂停）。
+    - 新增 `stageSummary` 纯函数（导出，供单测）：由 `inferWorkflowStage` 派生「流程 · 阶段 · 位置/总步数」摘要；`WORKFLOW_STEPS`/`inferWorkflowStage` 契约不变。
+    - 回归不破坏：整行点击仍打开源文件详情；行高固定（阶段行为固定单行），无 hover 位移/布局跳动（DEV-026 约束）；`awf-*` 类名契约（`awf-stage`/`awf-stage-chip`/`awf-stage-segs`/`awf-stage-seg`）供断言。
+  - 新增 `test/client-chunk.test.js`（ModuleLoader 桩加载 client.js，覆盖 inferWorkflowStage 各类型/状态映射与 stageSummary 摘要文本）；`node --test` 40/40 全绿。
+  - 版本 0.3.4 → 0.3.5；宿主副本经 `./scripts/sync-profile.sh` 同步，重启 DSH 后生效。
 
 - **0.3.4（DEV-178）**：版本锚点读取适配 `version_file`（kit v1.1.7 锚点迁移后不再硬编码根 VERSION）
   - 背景：kit v1.1.7（DEV-174）把版本锚点迁移为「读 project.yaml 的 `version_file`，默认根 VERSION；kit 自身 = `agent-workflow/VERSION`」。插件此前在两处硬编码根 `VERSION`（`readProjectRelease` 读项目、`kitVersions` 读 kit），锚点迁移后 kit 根 VERSION 已删——kit 最新发布版读成 null、kit 面板只显示框架代次、登记时 `scaffold_version` 无法补齐。

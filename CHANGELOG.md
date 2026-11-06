@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Changed
+- **看板插件 0.3.5（DEV-179）**：当前任务行内联显示流程阶段（阶段徽章「流程 · 当前阶段 · 位置/总步数」+ 迷你分段进度，blocked 标注「暂停」），无需点击详情；流程渲染重做参考 AgentTeams 布局——删除死代码大步骤条（WorkflowSteps）及其呼吸圆点/流动连线动画，改为紧凑静态阶段行（状态色徽章 + 当前阶段强调，无布局跳动）；新增 `stageSummary` 纯函数与 `test/client-chunk.test.js` 单测（40/40 全绿）
 - **看板插件 0.3.4（DEV-178）**：版本锚点读取适配 `version_file`——v1.1.7 锚点迁移（DEV-174，kit 自身 = `agent-workflow/VERSION`）后插件不再硬编码根 `VERSION`，项目已装发布版与 kit 最新发布版均按 project.yaml 的 `version_file` 解析（未配置默认根 VERSION，向后兼容）；新增 `scripts/sync-profile.sh` 一键同步宿主副本，重启生效
 
 ## [1.1.7] - 2026-11-06
