@@ -9,6 +9,7 @@
 | 工作流 | 任务ID | 优先级 | 状态 | Owner | 任务 |
 |--------|--------|--------|------|-------|------|
 | dev | DEV-194 | P1 | active | lead | 派发 v1.4.0 升级至全部登记项目（10 目标） |
+| dev | DEV-196 | P1 | blocked | lead | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） |
 
 ## 待处理
 
@@ -27,5 +28,5 @@
 | dev | DEV-179 | P1 | 看板插件 0.3.5：当前任务行内联显示流程阶段 + 流程渲染重做（参考 AgentTeams 布局） | 2026-11-06 |
 | dev | DEV-182 | P1 | 看板移除「流程阶段」行内展示（status 静态映射非真实流程数据） | 2026-11-06 |
 
-*最后更新：2026-11-07 01:00*
+*最后更新：2026-11-07 01:07*
 <!-- awf:status:end -->
