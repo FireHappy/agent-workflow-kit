@@ -91,7 +91,37 @@ MAX_SENDER_SESSIONS = 3
 # DEV-183：全局 [awf] 会话总数上限（所有项目合计，用户要求：跨会话派发总数 ≤ 3）。
 # 复用不受此限（复用不新增会话）；仅「需要新建」时检查：已达全局上限 → 报错要求
 # 复用空闲会话 / 清理归档，--force 为逃生口。
-MAX_GLOBAL_AWF_SESSIONS = 3
+# 可配置（按项目不同，DEV-183 环境变量方案）：
+#   AWF_MAX_SESSIONS_<项目ID>（项目专属，如 AWF_MAX_SESSIONS_UXRSAMPLE=5）>
+#   AWF_MAX_SESSIONS（通用）> 默认 3。
+DEFAULT_MAX_GLOBAL_AWF_SESSIONS = 3
+
+
+def resolve_max_global_sessions(target) -> int:
+    """按目标项目解析 [awf] 会话总数上限（每项目可不同）。
+
+    优先级：项目专属环境变量 AWF_MAX_SESSIONS_<项目ID> > 通用 AWF_MAX_SESSIONS >
+    DEFAULT_MAX_GLOBAL_AWF_SESSIONS（3）。项目ID = 目标目录名，大写并 - → _。
+    非法值（非正整数）回退下一级并告警，不抛错。
+    """
+    base = os.path.basename(os.path.realpath(str(target)))
+    proj_key = (base or "project").upper().replace("-", "_")
+    candidates = [
+        (f"AWF_MAX_SESSIONS_{proj_key}", True),
+        ("AWF_MAX_SESSIONS", False),
+    ]
+    for var, is_proj in candidates:
+        raw = (os.environ.get(var) or "").strip()
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+            if value >= 1:
+                return value
+            emit(f"环境变量 {var}={raw} 非正整数，忽略（回退下一级/默认）", False)
+        except ValueError:
+            emit(f"环境变量 {var}={raw} 无法解析为整数，忽略（回退下一级/默认）", False)
+    return DEFAULT_MAX_GLOBAL_AWF_SESSIONS
 # 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
 # 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
 DEFAULT_QUEUE_TIMEOUT = 180
@@ -2041,18 +2071,20 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                     f"（上限 {MAX_SENDER_SESSIONS}）——达到数量上限：请复用空闲会话、"
                     "或清理（--prune / GUI 归档）后重试；确需强制新建加 --force"
                 )
-            # DEV-183：全局 [awf] 会话总数上限（所有项目合计 ≤ 3，用户要求）。
+            # DEV-183：全局 [awf] 会话总数上限（按项目可配：项目专属环境变量 > 通用 > 默认 3）。
             # 走到新建路径说明没有可复用会话（复用池全忙或不存在）——全局已达上限时
-            # 必须等待空闲/清理，不允许再新建第 4 个；--force 逃生口保留。
+            # 必须等待空闲/清理，不允许再新建；--force 逃生口保留。
             global_count = sum(
                 1 for row in rows
                 if session_title(row).startswith(AWF_TITLE_PREFIX)
             )
-            if global_count >= MAX_GLOBAL_AWF_SESSIONS:
+            max_global = resolve_max_global_sessions(target)
+            if global_count >= max_global:
                 raise DispatchError(
-                    f"全局 [awf] 会话已达 {global_count} 个（上限 {MAX_GLOBAL_AWF_SESSIONS}，"
-                    "所有项目合计）——无可复用空闲会话，请等待现有会话空闲（--queue-timeout）"
-                    "或清理归档后重试；确需强制新建加 --force"
+                    f"全局 [awf] 会话已达 {global_count} 个（上限 {max_global}，"
+                    f"项目 {target.name} 可经 AWF_MAX_SESSIONS_{os.path.basename(os.path.realpath(str(target))).upper().replace('-', '_')}"
+                    " 或 AWF_MAX_SESSIONS 调整）——无可复用空闲会话，请等待现有会话空闲"
+                    "（--queue-timeout）或清理归档后重试；确需强制新建加 --force"
                 )
         # 新建路径：--new 直接建会话，不碰 session/list；自动新建时才做同名保护。
         # 显式 --new 跳过复用检查与同名保护（用户已明确要新会话）。

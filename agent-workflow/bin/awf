@@ -796,6 +796,8 @@ EOF
   if [ "$gitignore" -eq 1 ]; then
     append_gitignore "$target"
   fi
+  # DEV-183：本机派发产物忽略段默认写入（dispatch 流水/回报/运行时状态，任何项目都不该入库）
+  append_dispatch_gitignore "$target"
 
   (
     cd "$target"
@@ -821,6 +823,7 @@ EOF
     say "  已写入 .gitignore：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
     say ""
   fi
+  say "  已写入 .gitignore：派发流水/回报/运行时状态不入库（dispatch/log.md、reports/、headless/、.agent-teams/）"
   say "下一步：编辑 agent-workflow/project.yaml，然后运行"
   say "  ./agent-workflow/bin/awf bootstrap"
   say ""
@@ -846,6 +849,9 @@ EOF
 
 # 本机私有工作流忽略块：固定标记行（幂等锚点）+ 三条根锚定路径
 GITIGNORE_MARK='# agent-workflow（本机私有工作流，不入库）'
+# 本机派发产物忽略块（DEV-183 追加）：跨项目派发的流水/回报/运行时状态，任何项目都不该入库。
+# 与 --gitignore（忽略整个工作流）独立：本段由 init 默认写入，--gitignore 仍按需单独启用。
+DISPATCH_GITIGNORE_MARK='# agent-workflow（本机派发产物，不入库）'
 
 # 把忽略块写入 $1/.gitignore；已含标记则跳过，末尾无换行先补换行再追加。
 append_gitignore() {
@@ -865,6 +871,26 @@ append_gitignore() {
     printf '%s\n' '/CLAUDE.md'
   } >> "$gi"
   say "已写入 $gi：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
+}
+
+# 把本机派发产物忽略段写入 $1/.gitignore（init 默认执行；已含标记则跳过）。
+# 覆盖：派发流水 log、回报 reports（含 inbox）、headless 输出、AgentTeams 运行时状态。
+append_dispatch_gitignore() {
+  local gi="$1/.gitignore"
+  if [ -f "$gi" ] && grep -qF "$DISPATCH_GITIGNORE_MARK" "$gi"; then
+    return 0
+  fi
+  if [ -s "$gi" ] && [ -n "$(tail -c 1 "$gi")" ]; then
+    printf '\n' >> "$gi"
+  fi
+  {
+    printf '%s\n' "$DISPATCH_GITIGNORE_MARK"
+    printf '%s\n' '/dispatch/log.md'
+    printf '%s\n' '/dispatch/reports/'
+    printf '%s\n' '/dispatch/headless/'
+    printf '%s\n' '/.agent-teams/'
+  } >> "$gi"
+  say "已写入 $gi：派发流水/回报/运行时状态不入库"
 }
 
 cmd_gitignore() {

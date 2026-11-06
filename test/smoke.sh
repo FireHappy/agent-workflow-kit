@@ -45,7 +45,12 @@ GI_MARK="# agent-workflow（本机私有工作流，不入库）"
 
 NOGI_PROJ="$TMP/nogi-proj"
 "$KIT_DIR/bin/awf" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
-[ ! -f "$NOGI_PROJ/.gitignore" ] && ok "init 缺省不写 .gitignore" || bad "init 缺省不应写 .gitignore"
+# DEV-183：init 缺省写「本机派发产物」忽略段（dispatch 流水/回报/运行时状态，任何项目都不入库）；
+# 但缺省不写「工作流私有」段（--gitignore 才写 agent-workflow/ 整体）。
+assert_grep '^/dispatch/log.md$' "$NOGI_PROJ/.gitignore" "init 缺省写派发流水忽略"
+DISP_MARK="# agent-workflow（本机派发产物，不入库）"
+[ "$(grep -cF "$DISP_MARK" "$NOGI_PROJ/.gitignore")" = "1" ] && ok "init 缺省写派发产物标记（唯一）" || bad "init 缺省派发产物标记异常"
+[ "$(grep -cF "$GI_MARK" "$NOGI_PROJ/.gitignore")" = "0" ] && ok "init 缺省不写工作流私有段（--gitignore 专属）" || bad "init 缺省不应写工作流私有段"
 printf '/node_modules/' > "$NOGI_PROJ/.gitignore"
 ( cd "$NOGI_PROJ" && ./agent-workflow/bin/awf gitignore ) >/dev/null
 assert_grep '^/node_modules/$' "$NOGI_PROJ/.gitignore" "既有内容不被粘连（无换行先补行）"
