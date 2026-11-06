@@ -150,11 +150,11 @@ awf — agent workflow framework
       刷新 AGENTS.md 入口 → check 校验；保留 project.yaml、tasks/**、
       memory/**、tools/** 与账本历史。旧账本格式问题（归档块缺「状态」、
       旧英文表头 | Status |）由 check 输出修复指引。
-      详细步骤与验收见 docs/upgrade.md。
+      详细步骤与验收见 skills/release/UPGRADE.md。
 
   awf-dispatch <别名|目录> <任务文件>
       跨项目派发（DSH 会话适配）：检查目标工作流/工作区后，在目标工作区创建会话执行。
-      另见 docs/dispatch.md 与 agent-workflow/workflows/cross-project.md。
+      另见 skills/cross-project/DISPATCH.md 与 skills/cross-project/DISPATCH.md。
 
 说明:
   init 之后请编辑 agent-workflow/project.yaml，再运行 awf bootstrap。
@@ -1751,11 +1751,13 @@ cmd_upgrade() {
 
   # 版本锚点路径在 dry-run 与执行两处共用（DEV-145）：读目标 project.yaml 的 version_file，
   # 默认仓库根 VERSION；锚点不得放进 clang 头文件搜索路径（macOS IL2CPP 撞名，见 project_version_file）。
-  # 源版本读取（DISPATCH-155）：kit 自身锚点已迁移到 version_file 指向（agent-workflow/VERSION），
-  # 从 kit 自身 version_file 动态读取（KVF），不再硬编码根目录的 VERSION 路径。
+  # 源版本读取（DISPATCH-155 / DEV-193）：kit 自身锚点已迁移到技能实体版本
+  # （~/.dsh/skills/agent-workflow-scaffold/VERSION，install.sh 安装时同步 agent-workflow/VERSION），
+  # 从技能实体读（KVF）——技能实体是安装后的唯一事实源；未安装时回退仓库 agent-workflow/VERSION。
   local VF KVF
   VF="$(project_version_file "$target")"
-  KVF="$(project_version_file "$KIT_DIR")"
+  KVF="$HOME/.dsh/skills/agent-workflow-scaffold/VERSION"
+  [ -f "$KVF" ] || KVF="$(project_version_file "$KIT_DIR")"
 
   if [ "$dry_run" -eq 1 ]; then
     say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"

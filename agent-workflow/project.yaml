@@ -23,5 +23,5 @@ test: bash test/smoke.sh
 scopes: 生成器与模板(bin/ templates/), 工作流规范(agent-workflow/README.md agent-workflow/workflows/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
 
 # 并行时任何单元都不许同时修改的文件或目录
-serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, agent-workflow/workflows/cross-project.md
+serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, skills/cross-project-dispatch/SKILL.md
 role: 擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版

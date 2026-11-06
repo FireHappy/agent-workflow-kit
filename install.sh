@@ -35,20 +35,31 @@ install_skill() {
     ln -s "$src" "$dest"
     echo "已安装（link）：${dest}"
   else
-    # 实体化：只复制技能内容（SKILL.md + skills/ + bin/ + templates/ + test/ + docs/），
-    # 不包含项目本体（AGENTS.md/README.md 是 kit 项目自己的入口，不进技能）
+    # 实体化：只复制技能内容。主技能复制 SKILL.md + skills/ + bin/ + templates/ + test/；
+    # 纯流程技能（skills/*/）只有 SKILL.md，其余子目录存在才复制。
+    # kit 的 docs/ 是项目文档（design/arch-review），不进技能（DEV-191）。
     mkdir -p "$dest"
     cp "$src/SKILL.md" "$dest/SKILL.md"
-    cp -R "$src/skills" "$dest/skills"
-    cp -R "$src/bin" "$dest/bin"
-    cp -R "$src/templates" "$dest/templates"
-    cp -R "$src/test" "$dest/test"
-    [ -d "$src/docs" ] && cp -R "$src/docs" "$dest/docs"
+    # 技能版本锚点：主技能的版本 = 仓库 agent-workflow/VERSION（脚手架自身版本），落到实体根 VERSION
+    [ -f "$src/agent-workflow/VERSION" ] && cp "$src/agent-workflow/VERSION" "$dest/VERSION"
+    for sub in skills bin templates test; do
+      [ -d "$src/$sub" ] && cp -R "$src/$sub" "$dest/$sub"
+    done
     echo "已安装（copy）：${dest}"
   fi
 }
 
 install_skill "agent-workflow-scaffold" "$REPO"
+
+# DEV-192 技能库顶层化：把 skills/*/ 每个流程技能同时安装为 DSH 顶层技能
+# （~/.dsh/skills/<name>/，DSH 启动注入 frontmatter，凭 whenToUse 自动匹配）——
+# 这样 AGENTS.md 不必列举技能清单，DSH 原生语义匹配即完成路由。
+for sk in "$REPO"/skills/*/; do
+  [ -d "$sk" ] || continue
+  sk_name="$(basename "$sk")"
+  [ "$sk_name" = "README.md" ] && continue
+  install_skill "$sk_name" "$sk" || exit 1
+done
 
 # DEV-186 工具技能化：bin/awf、bin/awf-dispatch 是技能的一部分。
 # 项目内命令用技能路径：

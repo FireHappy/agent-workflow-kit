@@ -21,7 +21,7 @@ whenToUse: 用户要求发版/升级版本号/打 tag/更新 CHANGELOG、或需 
 > 默认落点：`VERSION`（版本号）、`CHANGELOG.md`（变更记录）、tag 前缀 `v`；
 > 均可在 `../project.yaml` 用 `version_file` / `changelog` / `tag_prefix` 覆盖。
 > 落点不固定：实际用哪套版本管理方案，以 Step 0 的探测结论为准。
-> 已有发版手册时先读对应章节（范例：agent-workflow-kit 的 `docs/release.md` §0 版本方案探测表）。
+> 已有发版手册时先读对应章节（范例：agent-workflow-kit 的 `../.release.md` §0 版本方案探测表）。
 
 ---
 

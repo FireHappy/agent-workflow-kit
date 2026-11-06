@@ -445,7 +445,7 @@ async function isDirectory(p) {
 
 // DEV-026/DEV-033：动作指令构建器（唯一入口）。
 // 程序只传意图：动作枚举（start/return-todo/delete/progress-backfill）+ 任务引用 + 一句话约束。
-// 详细执行规则由 agent 读 AGENTS.md 与 docs/team-flow.md 自行展开——程序不重复业务细节。
+// 详细执行规则由 agent 读 AGENTS.md 与 SKILL.md 团队协作节 自行展开——程序不重复业务细节。
 // DEV-039：engine 区分执行框架——'subagent'=服务端子代理通道（指令即子代理任务书，
 // 由宿主 ctx.agents.create() 拉起，全程不经主会话）；'inject'=注入主对话降级路径（旧路径保留）。
 

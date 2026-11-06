@@ -134,7 +134,7 @@
 5. 子任务先 `verify/review`，再由主任务 Owner 合流归档
 6. 实现与复核尽量由不同会话/角色承担；复核必须独立重跑验证命令，不接受只读自述
 
-> 任务路由先判目标仓库：目标仓库 == 当前工作区时，小任务单会话、**可并行拆分才用团队**（三轨流程见 kit 的 `docs/team-flow.md`）；目标仓库 ≠ 当前工作区时默认 `awf-dispatch` 派到目标项目自己的工作区会话，**团队不承载跨仓库任务**。本模板不绑定具体 harness。
+> 任务路由先判目标仓库：目标仓库 == 当前工作区时，小任务单会话、**可并行拆分才用团队**（三轨流程见 kit 的 `skills/dev/TEAM-FLOW.md`）；目标仓库 ≠ 当前工作区时默认 `awf-dispatch` 派到目标项目自己的工作区会话，**团队不承载跨仓库任务**。本模板不绑定具体 harness。
 
 ---
 
@@ -204,4 +204,4 @@
 /path/to/awf-kit/bin/awf upgrade <项目目录> --dry-run   # 只预览变更/保留
 ```
 
-`awf upgrade` 覆盖框架文件（bin/awf、bin/awf-dispatch、templates/AGENTS.md.tmpl、README.md、workflows/*.md、check_workflow.sh 入口），**保留** `project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 AGENTS.md 区块外内容；旧账本格式问题（归档块缺「状态」、旧英文表头 `| Status |`）由 `check` 输出修复指引。步骤与验收见 kit 的 `docs/upgrade.md`。
+`awf upgrade` 覆盖框架文件（bin/awf、bin/awf-dispatch、templates/AGENTS.md.tmpl、README.md、workflows/*.md、check_workflow.sh 入口），**保留** `project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 AGENTS.md 区块外内容；旧账本格式问题（归档块缺「状态」、旧英文表头 `| Status |`）由 `check` 输出修复指引。步骤与验收见 kit 的 `skills/release/UPGRADE.md`。

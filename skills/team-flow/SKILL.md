@@ -1,4 +1,17 @@
-# 团队执行流程（AgentTeams 适配层）
+---
+name: team-flow
+description: agent-workflow 团队执行流程（AgentTeams 适配）：三轨（docs/dev/debug）、质量合同、两级复核与队长职责。
+whenToUse: 任务需多角色/多会话协办、可并行拆分、需独立复核，或按 AgentTeams 三轨组织团队执行时——自动加载本技能。
+---
+
+# agent-workflow · 团队执行（技能）
+
+> 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
+> 团队任务和 awf 账本是两套状态，必须显式对齐（先登记、再建队）。
+
+## 团队协作（可选）
+
+目标 harness 支持多角色/多会话时，可按三条轨道组织团队（docs / dev / debug）；完整流程见下节。`awf-dispatch --team` 可在任务包尾部附加拆分建议，插件不可用时自动降级为普通会话。本技能不依赖任何团队插件，本节只在目标 harness 具备该能力时生效。
 
 > 本文件随 `agent-workflow-scaffold` 技能分发（仓库根即技能目录），但不进入 `templates/`、不随 `awf init` 写进每个新项目——由使用方按需采用。
 > 主规范仍是 `agent-workflow/README.md` 与 `agent-workflow/workflows/*.md`；本文件只规定"什么时候、怎么把主线流程交给团队"。
