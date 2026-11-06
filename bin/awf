@@ -1743,7 +1743,8 @@ cmd_upgrade() {
     if [ "$dry_run" -eq 1 ]; then
       say "  将覆盖 ${shim}（标准兼容入口）"
     else
-      printf '%s\n' '#!/bin/sh' '# 兼容入口：等价于 agent-workflow/bin/awf check' 'exec "$(dirname "$0")/bin/awf" check "$@"' > "$shim"
+      # DEV-188 修复：覆盖分支与 shim_std 一致——写技能路径 shim（此前误写旧内容指向已删的 bin/awf）
+      printf '%s\n' '#!/bin/sh' '# 兼容入口（DEV-186 工具技能化）：等价于技能 agent-workflow-scaffold 的 bin/awf check' 'exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"' > "$shim"
       chmod +x "$shim"
     fi
   fi
@@ -1759,8 +1760,8 @@ cmd_upgrade() {
   if [ "$dry_run" -eq 1 ]; then
     say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
     [ -f "$KVF" ] && say "  将写版本锚点 $VF = $(cat "$KVF")（对外发布版；路径 = 目标 project.yaml 的 version_file）"
-    say "  将运行：$awf_dir/bin/awf bootstrap（刷新 AGENTS.md 入口）"
-    say "  将运行：$awf_dir/bin/awf check（校验；退出码 = 失败项数量）"
+    say "  将运行：$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap（刷新 AGENTS.md 入口；工具在技能，项目内无副本）"
+    say "  将运行：$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check（校验；退出码 = 失败项数量）"
     return 0
   fi
 
@@ -1781,11 +1782,11 @@ cmd_upgrade() {
     say "已写版本锚点 ${VF} = $(cat "$KVF")"
   fi
 
-  ( cd "$target" && "$awf_dir/bin/awf" bootstrap ) || die "bootstrap 失败：$target"
+  ( cd "$target" && $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap ) || die "bootstrap 失败：$target（技能工具不可用，请先运行 ./install.sh 安装技能）"
   say "已刷新 AGENTS.md 入口（bootstrap）"
 
   local rc=0
-  ( cd "$target" && "$awf_dir/bin/awf" check ) || rc=$?
+  ( cd "$target" && $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check ) || rc=$?
   if [ "$rc" -eq 0 ]; then
     say ""
     say "升级完成：${target}（check 全部通过）"
