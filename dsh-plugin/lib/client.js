@@ -2699,22 +2699,17 @@ window.__ModuleLoader__.load({
       // ---- 项目卡（DEV-044 简洁版）：名称（+版本号）/ 路径 + 复制按钮（无账本状态徽章）
       const proj = ledger.project || {}
       const vs = U.versions || null
-      // 版本号并入第一栏：latest → 绿点 + 骨架版；outdated → 黄点 + 可升级（点击去升级）。
-      // 双版本模型（DEV-205/DEV-209）：项目卡版本显示收敛为「技能版本 chip + 骨架状态 chip」——
-      // 技能版本（skillVersion = 技能实体 VERSION）以独立 chip 突出显示（插件显示技能版本）；
-      // 骨架状态 chip 只显示骨架版本号/升级状态，**不再展示项目残留发布版号**
-      // （installedRelease = 旧 upgrade 同步进项目锚点的 kit 版本残留，如 1.4.0/1.4.1）——
-      // 存量未迁移项目（无 FRAMEWORK_VERSION）不显示版本数字，仅给状态/迁移提示。
+      // 单一版本 chip：沿用原版本显示位置，版本号只显示技能版本；
+      // Framework-Version 只决定状态颜色、title、升级点击，不作为用户看到的版本号。
+      // 不新增 skillChip，不展示项目残留发布版号/骨架版本号。
       const upgradable = vs && (vs.status === 'outdated' || vs.status === 'unknown') && typeof U.onUpgrade === 'function'
-      const versionChip = vs
+      const versionChip = vs && vs.skillVersion
         ? h('button', {
             onClick: upgradable ? U.onUpgrade : undefined,
             disabled: !upgradable || !!U.upgrading,
-            title: vs.status === 'latest' ? '工作流已最新（骨架版本 ' + (vs.installedFramework || '?') + '）'
+            title: vs.status === 'latest' ? '工作流已最新（由 Framework-Version 对比）'
               : (vs.status === 'outdated'
-                ? ((vs.installedFramework && vs.latestFramework)
-                  ? '工作流可升级（骨架 ' + vs.installedFramework + ' → ' + vs.latestFramework + '）：点击升级'
-                  : '工作流可升级（骨架未登记，点击升级补写 FRAMEWORK_VERSION）')
+                ? '工作流可升级（由 Framework-Version 对比决定）：点击升级'
                 : '骨架版本未知（未登记 agent-workflow-kit 或版本不可读）'),
             style: {
               display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -2727,9 +2722,7 @@ window.__ModuleLoader__.load({
           },
             vs.status === 'latest' ? h('span', { style: { color: C.success, fontWeight: 700 } }, '●') : null,
             vs.status === 'outdated' ? h('span', { style: { color: C.warn, fontWeight: 700 } }, '⚠') : null,
-            vs.installedFramework ? String(vs.installedFramework)
-              : (vs.status === 'latest' ? '已最新'
-                : (vs.status === 'outdated' ? '可升级' : '')))
+            String(vs.skillVersion))
         : null
       // DEV-205：技能版本 chip（Skill-Version = kit agent-workflow/VERSION；插件显示用，不参与 outdated 判定）
       const skillChip = vs && vs.skillVersion
@@ -2764,7 +2757,7 @@ window.__ModuleLoader__.load({
           h('div', { style: { fontSize: 14, fontWeight: 800, color: C.text, lineHeight: 1.3, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             proj.name || '未命名项目'),
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
-            skillChip, versionChip)),
+            versionChip)),
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 6,

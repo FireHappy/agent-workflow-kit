@@ -149,7 +149,7 @@ test('DEV-205 renderLedgerBody：技能版本 chip 常显 + outdated 按骨架�
     project: { name: 'demo', path: '/tmp/demo' },
     current: [], todo: [], recent: [],
   }
-  // outdated：技能版本 chip + 骨架版落后 → 「工作流可升级（骨架 v0.9.0 → v1.0.0）」
+  // outdated：唯一 chip 显示技能版本；Framework-Version 只决定黄色状态与升级提示
   const outdatedItems = mod.renderLedgerBody(ledger, {
     onOpenSource: () => {},
     versions: {
@@ -158,29 +158,30 @@ test('DEV-205 renderLedgerBody：技能版本 chip 常显 + outdated 按骨架�
     },
     onUpgrade: () => {},
   })
-  const skillChips = findNodes(outdatedItems, (n) => n && n.props && String(n.props.title || '').includes('技能版本'))
-  assert.equal(skillChips.length, 1, '技能版本 chip 常显')
-  assert.match(textOf(skillChips[0]), /技能版本 v1\.4\.1/)
-  const chip = findNodes(outdatedItems, (n) => n && n.props && n.props.title && String(n.props.title).includes('工作流可升级'))
-  assert.equal(chip.length, 1)
-  assert.match(String(chip[0].props.title), /工作流可升级（骨架 v0\.9\.0 → v1\.0\.0）/)
+  const chips = findNodes(outdatedItems, (n) => n && n.type === 'button' && n.props && String(n.props.title || '').includes('工作流可升级'))
+  assert.equal(chips.length, 1, '只保留原版本位置的单一 chip')
+  assert.match(textOf(chips[0]), /v1\.4\.1/, '唯一 chip 显示技能版本')
+  assert.doesNotMatch(textOf(chips[0]), /0\.9\.0|1\.0\.0/, '唯一 chip 不显示 Framework-Version')
+  assert.match(String(chips[0].props.title), /Framework-Version/)
 
-  // latest：installed 展示骨架版（v1.0.0），技能版本 chip 仍在
+  // latest：唯一 chip 仍显示技能版本（v1.4.1），不显示骨架版本
   const latestItems = mod.renderLedgerBody(ledger, {
     onOpenSource: () => {},
     versions: { status: 'latest', installed: 'v1.0.0', installedFramework: 'v1.0.0', latestFramework: 'v1.0.0', skillVersion: 'v1.4.1' },
   })
   const latestChip = findNodes(latestItems, (n) => n && n.props && String(n.props.title || '').includes('工作流已最新'))
   assert.equal(latestChip.length, 1)
-  const latestSkill = findNodes(latestItems, (n) => n && n.props && String(n.props.title || '').includes('技能版本'))
-  assert.equal(latestSkill.length, 1)
+  const latestButtons = findNodes(latestItems, (n) => n && n.type === 'button' && n.props && String(n.props.title || '').includes('工作流已最新'))
+  assert.equal(latestButtons.length, 1)
+  assert.match(textOf(latestButtons[0]), /v1\.4\.1/)
+  assert.doesNotMatch(textOf(latestButtons[0]), /1\.0\.0/)
 
-  // 无版本信号 → 无任何版本 chip（兼容旧 client 契约）
+  // 无版本信号 → 无版本 chip（兼容旧 client 契约）
   const noVs = mod.renderLedgerBody(ledger, { onOpenSource: () => {} })
-  assert.equal(findNodes(noVs, (n) => n && n.props && String(n.props.title || '').includes('技能版本')).length, 0)
+  assert.equal(findNodes(noVs, (n) => n && n.type === 'button' && n.props && String(n.props.title || '').includes('工作流')).length, 0)
 })
 
-test('DEV-209 项目卡不显示项目残留发布版号：无骨架版（存量未迁移）时仅显示状态文字', async () => {
+test('DEV-209 项目卡单一 chip 显示技能版：不显示项目残留版号或骨架版', async () => {
   const mod = loadClient()
   const ledger = { project: { name: 'demo', path: '/tmp/demo' }, current: [], todo: [], recent: [] }
   // 存量项目：无 FRAMEWORK_VERSION（installedFramework=null），installed 回退到残留发布版 1.4.0 → 不显示该数字
@@ -190,19 +191,18 @@ test('DEV-209 项目卡不显示项目残留发布版号：无骨架版（存量
   })
   const chip = findNodes(items, (n) => n && n.props && String(n.props.title || '').includes('工作流已最新'))
   assert.equal(chip.length, 1, 'latest 状态 chip 存在')
-  assert.ok(!/1\.4\.0/.test(textOf(chip[0])), '不显示残留发布版号 1.4.0（实际: ' + textOf(chip[0]) + '）')
-  assert.match(textOf(chip[0]), /已最新/)
-  // outdated 存量未迁移：显示「可升级」而非残留版本号
+  assert.match(textOf(chip[0]), /v1\.5\.0/, '单一 chip 显示技能版本')
+  assert.ok(!/1\.4\.0|1\.5\.0.*骨架/.test(textOf(chip[0])), '不显示项目残留版号或骨架标签')
+  // outdated 存量未迁移：仍显示技能版本，黄色状态只由 Framework-Version 决定
   const items2 = mod.renderLedgerBody(ledger, {
     onOpenSource: () => {},
     versions: { status: 'outdated', installed: 'v1.4.0', installedFramework: null, latestFramework: 'v1.5.0', skillVersion: 'v1.5.0', upgradeTo: 'v1.5.0（骨架升级）' },
   })
   const chip2 = findNodes(items2, (n) => n && n.props && String(n.props.title || '').includes('工作流可升级'))
   assert.equal(chip2.length, 1)
-  assert.ok(!/1\.4\.0/.test(textOf(chip2[0])), 'outdated 也不显示残留发布版号 1.4.0（实际: ' + textOf(chip2[0]) + '）')
-  assert.match(textOf(chip2[0]), /可升级|⚠/)
-  // 技能版本 chip 常显（显示技能版本而非任何项目残留）
-  const skillChips = findNodes(items, (n) => n && n.props && String(n.props.title || '').includes('技能版本'))
-  assert.equal(skillChips.length, 1)
-  assert.match(textOf(skillChips[0]), /技能版本 v1\.5\.0/)
+  assert.match(textOf(chip2[0]), /v1\.5\.0/, 'outdated 也显示技能版本')
+  assert.doesNotMatch(textOf(chip2[0]), /1\.4\.0/, 'outdated 不显示残留发布版号')
+  // 不存在第二个技能版本 chip；项目卡只有上面的单一版本 chip
+  const duplicateSkillChips = findNodes(items, (n) => n && n.props && String(n.props.title || '').includes('技能版本'))
+  assert.equal(duplicateSkillChips.length, 0, '不得新增技能版本 chip')
 })

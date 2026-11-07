@@ -46,7 +46,7 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 
 打开页签即自动加载**当前会话项目**的账本（无项目下拉选择器、无顶部工具条，不看其他项目）。DEV-044 起面板统一为**轻量行风格**：当前任务 / 待办 / 最近完成三区都是紧凑行（hairline 分隔、无卡片边框），只读展示账本事实，无任何操作按钮；写操作由 agent 在对话中执行，面板经 SSE/轮询自动反映账本变化。
 
-- 项目卡：名称（右侧带**版本号** chips：**技能版本** chip（`技能版本 vX.Y.Z`，= 技能实体 `~/.dsh/skills/agent-workflow-scaffold/VERSION`（实体优先，回退 kit 仓库），常显）+ **骨架版本** chip（`v{installedFramework}`，latest 绿点 / outdated 黄点可点击升级，= `agent-workflow/FRAMEWORK_VERSION`（实体优先，同回退），upgrade 判定依据；存量项目无骨架版时回退展示发布版/代次））+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
+- 项目卡：名称（右侧沿用原有**单一版本 chip**，显示技能版本 `v{skillVersion}`；绿色/黄色状态与点击升级仅由 `FRAMEWORK_VERSION` 对比决定，不新增技能版本 chip、不显示骨架版本号或项目残留发布版号）+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
 - 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）
 - 待办（行）：类型 chip + ID + 描述 + 优先级，dev/debug/docs 三态切换；每个类型 tab 显示该类型未开始任务数量徽章（如「开发 2」「调试 0」，数据取自 `ledger.todoRows` 过滤计数），标题「未开始任务 · 类型」不再重复数量（tab 徽章一处即可）；数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」），解析层兼容 4/5 列任务表格
 - 最近完成（行）：✓ 日期 ID 描述，点击查看归档
