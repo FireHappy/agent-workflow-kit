@@ -1733,6 +1733,20 @@ export async function readProjectAWFVersion(projectPath) {
 }
 
 /**
+ * 读取项目 agent-workflow/FRAMEWORK_VERSION（骨架版本，双版本模型 DEV-205）。
+ * 骨架版本 = 独立文件 agent-workflow/FRAMEWORK_VERSION（semver，kit 与每个框架项目各一份），
+ * 是 upgrade/outdated 判定依据；读不到/内容为空 → null（走回退链兼容存量/未迁移项目）。
+ */
+export async function readProjectFrameworkVersion(projectPath) {
+  try {
+    const v = String(await readFile(join(projectPath, 'agent-workflow', 'FRAMEWORK_VERSION'), 'utf8')).trim()
+    return v || null
+  } catch {
+    return null
+  }
+}
+
+/**
  * 版本锚点路径（DEV-178，与 bin/awf project_version_file 同口径）：读项目 project.yaml 的
  * version_file，相对项目根解析；未配置默认仓库根 VERSION（向后兼容）。
  * DEV-174 迁移后 kit 自身 project.yaml 设 version_file: agent-workflow/VERSION。

@@ -117,7 +117,7 @@ test('DEV-179 stageSummary：内联阶段摘要文本（「流程 · <阶段> ·
   assert.equal(stageSummary(null), null)
 })
 
-test('DEV-179 renderLedgerBody：当前任务行内联流程阶段 + 点击详情回归', () => {
+test('DEV-179 renderLedgerBody：当前任务行保持可点击（DEV-182 起无内联阶段徽章）+ DEV-205 版本 chip', () => {
   const mod = loadClient()
   const ledger = {
     project: { name: 'demo', path: '/tmp/demo' },
@@ -131,20 +131,51 @@ test('DEV-179 renderLedgerBody：当前任务行内联流程阶段 + 点击详�
   }
   const items = mod.renderLedgerBody(ledger, { onOpenSource: () => {}, onOpenArchive: () => {} })
 
-  // 每个当前任务行都渲染一个阶段徽章（awf-stage-chip），无需点击详情即可见
+  // DEV-182：静态流程阶段徽章/迷你分段已移除（status 静态映射无真实数据监控意义）
   const chips = findNodes(items, (n) => clsHas(n, 'awf-stage-chip'))
-  assert.equal(chips.length, 3, '3 个当前任务 → 3 个阶段徽章')
-  assert.match(textOf(chips[0]), /流程 · 验证 · 4\/6/) // dev verify
-  assert.match(textOf(chips[1]), /流程 · 认领 · 1\/6/) // dev blocked 停在 active 阶段
-  assert.match(textOf(chips[1]), /暂停/)               // blocked 标注「暂停」
-  assert.match(textOf(chips[2]), /流程 · 认领 · 1\/5/) // docs active
-
-  // 迷你分段数量 = 各类型步骤总数（dev 6 + dev 6 + docs 5 = 17）
+  assert.equal(chips.length, 0, 'DEV-182 起不再渲染 awf-stage-chip')
   const segs = findNodes(items, (n) => n && n.props && n.props.className === 'awf-stage-seg')
-  assert.equal(segs.length, 17)
+  assert.equal(segs.length, 0, 'DEV-182 起不再渲染 awf-stage-seg')
 
   // 回归：点击任务行仍打开详情（onClick 保留在 awf-row-clickable 上）
   const rows = findNodes(items, (n) => clsHas(n, 'awf-row-clickable'))
   assert.ok(rows.length >= 3, '当前任务行保持可点击')
   assert.equal(typeof rows[0].props.onClick, 'function')
+})
+
+test('DEV-205 renderLedgerBody：技能版本 chip 常显 + outdated 按骨架差量文案', () => {
+  const mod = loadClient()
+  const ledger = {
+    project: { name: 'demo', path: '/tmp/demo' },
+    current: [], todo: [], recent: [],
+  }
+  // outdated：技能版本 chip + 骨架版落后 → 「工作流可升级（骨架 v0.9.0 → v1.0.0）」
+  const outdatedItems = mod.renderLedgerBody(ledger, {
+    onOpenSource: () => {},
+    versions: {
+      status: 'outdated', installed: 'v0.9.0', installedFramework: 'v0.9.0', latestFramework: 'v1.0.0',
+      upgradeTo: 'v1.0.0（骨架升级）', skillVersion: 'v1.4.1', latestAWF: 'v2', latestRelease: '1.4.1',
+    },
+    onUpgrade: () => {},
+  })
+  const skillChips = findNodes(outdatedItems, (n) => n && n.props && String(n.props.title || '').includes('技能版本'))
+  assert.equal(skillChips.length, 1, '技能版本 chip 常显')
+  assert.match(textOf(skillChips[0]), /技能版本 v1\.4\.1/)
+  const chip = findNodes(outdatedItems, (n) => n && n.props && n.props.title && String(n.props.title).includes('工作流可升级'))
+  assert.equal(chip.length, 1)
+  assert.match(String(chip[0].props.title), /工作流可升级（骨架 v0\.9\.0 → v1\.0\.0）/)
+
+  // latest：installed 展示骨架版（v1.0.0），技能版本 chip 仍在
+  const latestItems = mod.renderLedgerBody(ledger, {
+    onOpenSource: () => {},
+    versions: { status: 'latest', installed: 'v1.0.0', installedFramework: 'v1.0.0', latestFramework: 'v1.0.0', skillVersion: 'v1.4.1' },
+  })
+  const latestChip = findNodes(latestItems, (n) => n && n.props && String(n.props.title || '').includes('工作流已最新'))
+  assert.equal(latestChip.length, 1)
+  const latestSkill = findNodes(latestItems, (n) => n && n.props && String(n.props.title || '').includes('技能版本'))
+  assert.equal(latestSkill.length, 1)
+
+  // 无版本信号 → 无任何版本 chip（兼容旧 client 契约）
+  const noVs = mod.renderLedgerBody(ledger, { onOpenSource: () => {} })
+  assert.equal(findNodes(noVs, (n) => n && n.props && String(n.props.title || '').includes('技能版本')).length, 0)
 })

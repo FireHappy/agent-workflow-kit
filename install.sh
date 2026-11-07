@@ -42,6 +42,9 @@ install_skill() {
     cp "$src/SKILL.md" "$dest/SKILL.md"
     # 技能版本锚点：主技能的版本 = 仓库 agent-workflow/VERSION（脚手架自身版本），落到实体根 VERSION
     [ -f "$src/agent-workflow/VERSION" ] && cp "$src/agent-workflow/VERSION" "$dest/VERSION"
+    # DEV-205 双版本模型：骨架版本同步到实体根（awf upgrade 判定与插件 outdated 消费的源）；
+    # install_skill 被 skills/*/ 循环调用，子技能缺该文件必须跳过不报错
+    [ -f "$src/agent-workflow/FRAMEWORK_VERSION" ] && cp "$src/agent-workflow/FRAMEWORK_VERSION" "$dest/FRAMEWORK_VERSION"
     for sub in skills bin templates test scripts; do
       [ -d "$src/$sub" ] && cp -R "$src/$sub" "$dest/$sub"
     done

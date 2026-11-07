@@ -135,6 +135,10 @@ git tag --list --sort=-v:refname
   # agent-workflow/project.yaml 设 version_file: agent-workflow/VERSION
   ```
   纯脚本/文档项目无 clang 头文件搜索路径问题，可保持默认根 `VERSION`（向后兼容）。根目录残留 `VERSION` 时 `awf check` 会给出迁移软提示。
+- **双版本模型（DEV-205，适用于 agent-workflow-kit 自身与派生框架）**：技能版本 Skill-Version（`agent-workflow/VERSION`，semver，每次发版 bump；插件显示、技能实体安装消费）与骨架版本 Framework-Version（`agent-workflow/FRAMEWORK_VERSION`，固定路径；仅骨架契约变化时 bump；`awf upgrade` 判定与插件 outdated 消费）解耦：
+  - **骨架契约变化**（bin/awf、AGENTS.md.tmpl、project.yaml.tmpl、账本结构、check 门禁、pre-commit、README.md 骨架文件）→ **两版同升**：`FRAMEWORK_VERSION` 升一个 minor 级（1.0.0 → 1.1.0），`VERSION` 正常按版本位 bump——存量项目需 `awf upgrade` 迁移。
+  - **纯技能更新**（流程细节、SKILL.md、插件注入文本、install.sh）→ **只升技能版 `VERSION`**，`FRAMEWORK_VERSION` 不动——项目零升级（重跑 `./install.sh` 即同步技能实体）。
+  - `FRAMEWORK_VERSION` 落点规范：固定 `agent-workflow/FRAMEWORK_VERSION`，**勿放项目根**（与锚点铁律同位置规范）；不进 project.yaml 键、不走 `version_file` 机制，由 init/upgrade 自动登记，本流程不手动改。
 - 版本号变更要能单独审阅，不要夹带无关改动
 - 计划 tag 名与版本号一致；重名处理见 Step 5（同版本内、本地未推送才允许移动；否则升版本）
 

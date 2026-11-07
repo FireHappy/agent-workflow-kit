@@ -54,6 +54,7 @@ import {
   ledgerOf, readIndex, initSkeleton, startTask, archiveTask, isWhitelistedPath, TASK_TYPES,
   parseTodoRows, todoEdit, taskEdit, revertPreview, readSource, writeSource, SOURCE_FILES,
   writeProjectRegistration, readProjectMetaFile, readProjectAWFVersion, readProjectRelease,
+  readProjectFrameworkVersion,
   setProjectTrack, setScaffoldVersion, writeLocalGitignore, semverLt,
   parseCheckItems, findBlock, cmdCriterion, isSafeCommand, applyCmdEvidence,
   replaceBlockInMd, taskLedgerOverdue, classifyFreshness, isOpenTaskStatus,
@@ -67,6 +68,8 @@ export const inject = ['webServer', 'connection']
 
 // DEV-033 块 B：测试可观测的监听/广播（挂起连接数、手动触发广播）
 export { watchProjectLedger, broadcastLedgerChange, sseClients, ledgerWatchers }
+// DEV-205：版本判定纯函数导出（供单测直接断言双版本模型判定链，无需 cordis 上下文）
+export { versionStatus, kitVersions, projectVersions }
 
 const AGENTS_HOME = process.env.DSH_AGENTS_HOME || join(homedir(), '.agents')
 
@@ -270,7 +273,7 @@ function queryOf(req) {
   return q
 }
 
-// ---- 框架版本信号（DEV-035：AWF_VERSION 代次 + 发布版本双信号） --------------
+// ---- 框架版本信号（DEV-035：AWF_VERSION 代次 + 发布版本双信号；DEV-205：双版本模型） --------------
 
 /** kit（agent-workflow-kit）项目在全局索引里的登记行；未登记返回 null。 */
 async function findKitProject() {
@@ -280,63 +283,92 @@ async function findKitProject() {
     String(p.aliases || '').split(/[,\s]+/).includes('agent-workflow-kit')) || null
 }
 
-/** kit 侧最新版本信号（代次 + 发布版）；kit 未登记/不可读时对应字段为 null。 */
+/**
+ * kit 侧最新版本信号（双版本模型 DEV-205）：
+ *   - latestFramework = agent-workflow/FRAMEWORK_VERSION（骨架版本，semver，upgrade/outdated 判定依据）
+ *   - skillVersion    = agent-workflow/VERSION（技能版本，插件显示；技能更新不触发项目 outdated）
+ * 兼容旧信号 latestAWF（代次）/ latestRelease（发布版，读 kit 自身 version_file）。
+ * kit 未登记/不可读时对应字段为 null。
+ */
 async function kitVersions() {
   const kit = await findKitProject()
-  if (!kit || !kit.path) return { kitPath: null, latestAWF: null, latestRelease: null }
+  if (!kit || !kit.path) return { kitPath: null, latestAWF: null, latestRelease: null, latestFramework: null, skillVersion: null }
   const latestAWF = await readProjectAWFVersion(kit.path)
   // DEV-178：读 kit 自身 project.yaml 的 version_file（was 硬编码根 VERSION；DEV-174 迁移后
-  // kit 锚点 = agent-workflow/VERSION），与 bin/awf upgrade 源版本读取（KVF）口径一致。
+  // kit 锚点 = agent-workflow/VERSION），即技能版本（Skill-Version，DEV-205 双版本模型）。
   const latestRelease = await readProjectRelease(kit.path)
-  return { kitPath: kit.path, latestAWF, latestRelease }
+  // DEV-205：骨架版本 = kit agent-workflow/FRAMEWORK_VERSION（独立文件，决策 1）；
+  // 技能版本 = kit agent-workflow/VERSION（Skill-Version，插件显示用）。
+  const latestFramework = await readProjectFrameworkVersion(kit.path)
+  let skillVersion = null
+  try {
+    skillVersion = String(await readFile(join(kit.path, 'agent-workflow', 'VERSION'), 'utf8')).trim() || null
+  } catch { /* 读不到技能版本 → null */ }
+  return { kitPath: kit.path, latestAWF, latestRelease, latestFramework, skillVersion }
 }
 
-/** 项目侧已安装版本信号（代次 + scaffold_version）。 */
+/** 项目侧已安装版本信号（双版本模型 DEV-205：installedFramework 骨架版优先；兼容旧信号）。 */
 async function projectVersions(projectPath) {
   const installedAWF = await readProjectAWFVersion(projectPath)
   const meta = await readProjectMetaFile(projectPath)
-  return { installedAWF, scaffoldVersion: (meta && meta.scaffold_version) || null, installedRelease: await readProjectRelease(projectPath) }
+  return { installedAWF, scaffoldVersion: (meta && meta.scaffold_version) || null, installedRelease: await readProjectRelease(projectPath), installedFramework: await readProjectFrameworkVersion(projectPath) }
 }
 
 /**
  * 汇总版本状态：latest（已最新）/ outdated（落后，给出 upgradeTo）/ unknown（kit 或版本不可读）。
- * DEV-184（v1.2.0 骨架化）：升级判定基于**骨架契约版本（AWF_VERSION 代次）**——
- *   骨架（bin/awf 结构、账本格式、AGENTS.md 模板）变化才提示 upgrade；
- *   发布版 semver（细节流程更新）只作显示，不再触发 outdated（细节在技能，符号链接自动生效）。
- * 规则：AWF 代次可读 → 优先代次比对；代次缺失 → 回退发布版 semver（兼容存量全量副本项目）。
+ * 双版本模型（DEV-205，取代 DEV-184 单一 AWF 代次判定）：
+ *   - 技能版本 Skill-Version = kit agent-workflow/VERSION（skillVersion）：插件显示用，技能更新不触发项目 outdated。
+ *   - 骨架版本 Framework-Version = agent-workflow/FRAMEWORK_VERSION（kit 与项目各一份，semver）：
+ *     upgrade/outdated 判定的唯一依据。
+ * 判定链：
+ *   1) 双方骨架版（installedFramework/latestFramework）均可读 → 骨架 semver 差量判定
+ *      （semverLt 解析失败视为不可比 → 走下一链）；
+ *   2) 回退链（存量/未迁移项目，无 FRAMEWORK_VERSION）：AWF 代次 → 发布版 semver → scaffold_version。
+ * 返回字段只加不减（client 兼容）：新增 latestFramework / installedFramework / skillVersion。
  */
 async function versionStatus(projectPath) {
   const p = await projectVersions(projectPath)
   const k = await kitVersions()
   let status = 'unknown'
   let upgradeTo = null
-  if (p.installedAWF !== null && k.latestAWF !== null) {
-    // 骨架契约版本（DEV-184）：AWF_VERSION 代次是结构性版本，+1 才意味着骨架变更
+  // 骨架链（DEV-205）：双方 FRAMEWORK_VERSION 均可读且 semver 可比 → 差量判定
+  const fwLt = (p.installedFramework !== null && k.latestFramework !== null)
+    ? semverLt(p.installedFramework, k.latestFramework)
+    : null
+  if (fwLt !== null) {
+    status = fwLt === true ? 'outdated' : 'latest'
+  } else if (p.installedAWF !== null && k.latestAWF !== null) {
+    // 回退链 1（存量项目无骨架版）：骨架契约代次（DEV-184 语义保留）
     status = p.installedAWF < k.latestAWF ? 'outdated' : 'latest'
   } else if (p.installedRelease && k.latestRelease) {
-    // 代次缺失（旧项目未带 AWF_VERSION）回退发布版 semver 判定
+    // 回退链 2：发布版 semver 判定
     status = semverLt(p.installedRelease, k.latestRelease) === true ? 'outdated' : 'latest'
   } else if (status !== 'outdated' && !p.installedRelease && k.latestRelease && p.scaffoldVersion) {
     const lt = semverLt(p.scaffoldVersion, k.latestRelease)
     if (lt === true) status = 'outdated'
   }
   if (status === 'outdated') {
-    if (p.installedAWF !== null && k.latestAWF !== null && p.installedAWF < k.latestAWF) {
-      upgradeTo = `v${k.latestAWF}（骨架契约升级）`
+    if (fwLt === true) {
+      upgradeTo = `v${k.latestFramework}（骨架升级）`
+    } else if (p.installedAWF !== null && k.latestAWF !== null && p.installedAWF < k.latestAWF) {
+      upgradeTo = `v${k.latestAWF}（骨架契约升级；骨架版本迁移，awf upgrade 补写）`
     } else if (k.latestRelease) {
-      upgradeTo = k.latestRelease
+      upgradeTo = `${k.latestRelease}（骨架版本迁移，awf upgrade 补写）`
     } else {
       upgradeTo = '最新'
     }
   }
   return {
     status, upgradeTo,
-    installed: p.installedRelease ? `v${p.installedRelease}` : (p.installedAWF === null ? null : `v${p.installedAWF}`),
+    installed: p.installedFramework ? `v${p.installedFramework}` : (p.installedRelease ? `v${p.installedRelease}` : (p.installedAWF === null ? null : `v${p.installedAWF}`)),
     installedRelease: p.installedRelease || null,
     scaffold: p.scaffoldVersion || null,
     latestAWF: k.latestAWF === null ? null : `v${k.latestAWF}`,
     latestRelease: k.latestRelease || null,
     kitPath: k.kitPath,
+    latestFramework: k.latestFramework === null ? null : `v${k.latestFramework}`,
+    installedFramework: p.installedFramework === null ? null : `v${p.installedFramework}`,
+    skillVersion: k.skillVersion === null ? null : `v${k.skillVersion}`,
   }
 }
 

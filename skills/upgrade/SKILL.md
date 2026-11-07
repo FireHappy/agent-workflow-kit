@@ -1,6 +1,6 @@
 ---
 name: upgrade
-description: agent-workflow 升级已有项目的工作流（awf upgrade）：定位/预览/执行/修复/提交，保留项目事实与账本历史。
+description: agent-workflow 升级已有项目的工作流（awf upgrade）：定位/预览/执行/修复/提交，保留项目事实与账本历史；升级判定 = 骨架版本差量（FRAMEWORK_VERSION），技能更新不需升级项目。
 whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流、批量升级多个登记项目时——自动加载本技能。
 ---
 
@@ -10,42 +10,54 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 
 # 升级已有项目的工作流（awf upgrade）
 
-> 适用：项目已用旧版 agent-workflow 框架（生成物过期、校验规则变化、模板漂移），需要升级到当前 kit 版本。
+> 适用：项目已用旧版 agent-workflow 框架（生成物过期、校验规则变化、模板漂移），需要升级到当前骨架版本。
 > 工具：`awf upgrade`（一等操作；本文是它的规范与验收标准）。
 > 背景：2026-11-01 批量升级 6 个项目时，各执行者自行推断拷贝范围（有人覆盖了项目自定义的 check_workflow.sh、有人改 done.md 表头），说明「升级」必须显式化为可执行流程。
 
 ## 一句话
 
-用 kit 的框架文件覆盖项目的 `agent-workflow/` 生成物，再 `bootstrap` 刷新入口、`check` 校验；**项目事实与账本历史一律保留**。
+用 kit 的骨架文件覆盖项目的 `agent-workflow/` 生成物，再 `bootstrap` 刷新入口、`check` 校验；**项目事实与账本历史一律保留**。升级判定只看**骨架版本**（`agent-workflow/FRAMEWORK_VERSION`）差量：相同默认跳过，不同/缺失才复制。
+
+## 双版本模型（DEV-205，必读）
+
+- **技能版本 Skill-Version** = `agent-workflow/VERSION`：每次发版 bump（semver）；插件显示、技能实体安装消费。
+- **骨架版本 Framework-Version** = `agent-workflow/FRAMEWORK_VERSION`：固定路径，仅骨架契约（bin/awf、AGENTS.md.tmpl、project.yaml.tmpl、账本结构、check 门禁、pre-commit、README.md 骨架文件）变化时 bump。
+- **升级判定 = 骨架版差量**：目标 `agent-workflow/FRAMEWORK_VERSION` 与源相同 → 默认跳过（打印「骨架已最新」后退出，不复制、不跑 bootstrap/check；`--force` 可强制刷新框架文件）；不同/缺失 → 复制骨架 + 登记目标骨架版。
+- **技能更新不需升级项目**：技能更新只发生在技能实体（重跑 `./install.sh`），项目零升级；upgrade 不再把 kit 技能版写目标版本锚点（`version_file` 指向的文件由项目自身发版流程维护）。
+- **存量迁移**：未登记骨架版本（缺 `agent-workflow/FRAMEWORK_VERSION`）的项目，upgrade 视为「迁移补写」，复制骨架并写目标骨架版；`awf check` 对缺失项目给软提示（不阻塞）。
 
 ## 什么时候用
 
-- 项目仍在用旧版本（`check` 提示入口过期 / 模板漂移 / 校验规则不符）
+- 项目仍在用旧版骨架（`check` 提示入口过期 / 模板漂移 / 校验规则不符，或目标骨架版落后）
 - 批量升级多个项目：**每个目标项目在自己的工作区会话里执行**，调度方不代写（见技能 `skills/cross-project-dispatch/SKILL.md` 的「任务路由」——团队不承载跨仓库任务）
-- **不要用**：项目完全没有 agent-workflow（→ `awf init`）；只想改某份工作流内容（→ 直接编辑该项目文件）
+- **不要用**：项目完全没有 agent-workflow（→ `awf init`）；只想改某份工作流内容（→ 直接编辑该项目文件）；只是技能更新（→ 重跑 `./install.sh`，项目无需升级）
 
 ## 显式步骤
 
 1. **定位与归属**：确认目标项目有 `agent-workflow/project.yaml`；在目标项目自己的工作区会话执行，调度方不直接改目标仓库。
-2. **预览**：`/path/to/kit/bin/awf upgrade <项目目录> --dry-run` —— 只打印将变更/保留的文件，不改写任何文件。
-3. **执行**：`/path/to/kit/bin/awf upgrade <项目目录>` —— 依次自动完成：
-   - 复制框架文件（见下「变更清单」）；
+2. **预览**：`/path/to/kit/bin/awf upgrade <项目目录> --dry-run` —— 只打印将变更/保留的文件，不改写任何文件。骨架已最新时 dry-run 直接打印「骨架已最新」并退出（不列变更）。
+3. **执行**：`/path/to/kit/bin/awf upgrade <项目目录>` —— 骨架差量（不同/缺失/`--force`）时依次自动完成：
+   - 复制框架文件（见下「变更清单」）+ 登记目标骨架版（写 `agent-workflow/FRAMEWORK_VERSION`）；
    - `~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap` 刷新 `AGENTS.md` 受控区块（区块外内容保留）；
    - `~/.dsh/skills/agent-workflow-scaffold/bin/awf check` 校验（退出码 = 失败项数量）。
+   - 骨架相同（非 `--force`）时跳过上述全部，打印「骨架已最新」后退出。
 4. **修复**：`check` 的 FAIL 按输出自解释处理；旧账本迁移问题见「旧账本迁移」节。
 5. **提交**：目标项目只本地 commit（消息含任务 ID），**禁止 push**。
 
-## 变更清单（覆盖为 kit 版本）
+## 变更清单（覆盖为 kit 骨架版本）
 
 | 文件 | 说明 |
 |---|---|
 | `~/.dsh/skills/agent-workflow-scaffold/bin/awf` | 生成/校验工具（新增 `upgrade`、check 迁移修复指引随版本生效） |
 | `~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch` | 跨项目派发器 |
 | `agent-workflow/templates/AGENTS.md.tmpl` | 入口模板（任务路由等规则随之更新） |
+| `agent-workflow/templates/pre-commit` | git pre-commit 钩子模板 |
 | `agent-workflow/README.md` | 规范正文 |
-| `agent-workflow/templates/AGENTS.md.tmpl` 等稳定契约 | 技能化后工作流细节在技能，项目内无 workflows/ 副本 |
+| `agent-workflow/FRAMEWORK_VERSION` | **骨架版本登记**（固定路径；落后/缺失/`--force` 时写入目标骨架版；相同则跳过） |
 | `agent-workflow/check_workflow.sh` | 标准 3 行兼容入口（自定义门禁见下节） |
 | `AGENTS.md` 受控区块 | 由 `awf bootstrap` 重建（区块外内容保留） |
+
+不再写：目标 `version_file` 指向的版本锚点（DEV-205：技能版由项目自身发版流程维护，upgrade 不再覆写）。
 
 ## 保留清单（一律不动）
 
@@ -99,7 +111,8 @@ cd <项目目录> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf status       
 
 ## 验收标准
 
-- [ ] `upgrade --dry-run` 与实际执行打印的变更/保留清单一致
+- [ ] `upgrade --dry-run` 与实际执行打印的变更/保留清单一致；骨架相同（非 `--force`）时 dry-run 与执行均打印「骨架已最新」且不触碰目标
+- [ ] 升级后目标 `agent-workflow/FRAMEWORK_VERSION` = 源骨架版（落后/缺失迁移补写）；`version_file` 锚点未被改写
 - [ ] 升级后技能路径 `~/.dsh/skills/agent-workflow-scaffold/bin/awf` 可用、`templates/AGENTS.md.tmpl` 与 kit 一致
 - [ ] `project.yaml` / `tasks/**` / `memory/**` / `tools/**` 逐字节保留
 - [ ] `check` 退出码 0；旧账本格式问题输出含可直接执行的修复指引
@@ -108,6 +121,6 @@ cd <项目目录> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf status       
 
 - 项目内不再有 `agent-workflow/workflows/` 目录：流程细节全部在技能 agent-workflow-scaffold（`skills/` 各流程技能），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
 - 存量项目（带 workflows/ 副本）：`./bin/awf upgrade <项目> --slim` 清理副本迁移到技能化形态（细节已在技能，副本不再需要）。
-- 骨架版本（agent-workflow/VERSION）只管 bin/awf、AGENTS.md.tmpl、账本结构等稳定契约；流程细节更新只改技能仓库（符号链接自动生效），项目零升级。
+- 骨架版本（`agent-workflow/FRAMEWORK_VERSION`）只管 bin/awf、AGENTS.md.tmpl、账本结构等稳定契约；流程细节更新只改技能仓库（重跑 install.sh 更新技能实体），项目零升级（DEV-205：技能版 = `agent-workflow/VERSION` 与骨架版解耦）。
 
 ---

@@ -50,6 +50,7 @@ assert_grep 'awf:begin v1 digest:' "$PROJ/AGENTS.md" "入口含 digest"
 assert_grep '（未配置' "$PROJ/AGENTS.md" "空校验命令有回退提示"
 assert_grep '技能库' "$PROJ/AGENTS.md" "入口含技能库表述（技能化形态）"
 [ ! -d "$PROJ/agent-workflow/workflows" ] && ok "init 不生成 workflows/ 目录（技能化：细节在技能）" || bad "init 不应生成 workflows/ 目录"
+assert_file "$PROJ/agent-workflow/FRAMEWORK_VERSION" "agent-workflow/FRAMEWORK_VERSION（init 登记骨架版）"
 assert_file "$DISPATCH_CLI" "awf-dispatch"
 assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
 
@@ -312,6 +313,31 @@ if printf '%s\n' "$chk_vf_def_out" | grep -q '默认根 VERSION' \
   ok "DEV-198 check 对默认根 VERSION 项目给迁移软提示（不阻塞）"
 else
   bad "DEV-198 check 未对默认根 VERSION 项目给软提示：$(printf '%s\n' "$chk_vf_def_out" | grep -i 'VERSION' | head -3)"
+fi
+
+# DEV-205 双版本模型：源持骨架版本 FRAMEWORK_VERSION（单行 semver，无 v 前缀）
+KFF_SRC="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
+[ -f "$KFF_SRC" ] || KFF_SRC="$KIT_DIR/FRAMEWORK_VERSION"
+if [ -f "$KFF_SRC" ] \
+  && [ "$(wc -l < "$KFF_SRC" | tr -d ' ')" = "1" ] \
+  && grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$KFF_SRC"; then
+  ok "DEV-205 源持骨架版本 FRAMEWORK_VERSION（单行 semver，无 v 前缀）"
+else
+  bad "DEV-205 源 FRAMEWORK_VERSION 缺失或格式错误：$(cat "$KFF_SRC" 2>/dev/null)"
+fi
+
+# DEV-205：项目缺 agent-workflow/FRAMEWORK_VERSION → check 软提示「未登记骨架版本」（不阻塞、不增 FAIL）
+HINT_PROJ="$TMP/hint-proj"
+"$KIT_DIR/bin/awf" init "$HINT_PROJ" --name "软提示" --no-register >/dev/null
+rm -f "$HINT_PROJ/agent-workflow/FRAMEWORK_VERSION"
+if hint_out="$(cd "$HINT_PROJ" && "$KIT_DIR/bin/awf" check 2>&1)"; then
+  if printf '%s\n' "$hint_out" | grep -q '未登记骨架版本'; then
+    ok "DEV-205 check 对缺骨架版本项目给软提示（不阻塞）"
+  else
+    bad "DEV-205 check 未给缺骨架版本项目软提示：$(printf '%s\n' "$hint_out" | grep -i '骨架\|FRAMEWORK' | head -3)"
+  fi
+else
+  bad "DEV-205 check 对缺骨架版本项目不应 FAIL（软提示不阻塞）"
 fi
 
 # 没有 Unreleased 且没有目标版本：提示手动，不报错

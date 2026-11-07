@@ -1,3 +1,8 @@
+## [Unreleased]
+
+### Added
+- **双版本模型（DEV-205）**：技能版本 Skill-Version（`agent-workflow/VERSION`，发版即 bump，插件显示、技能实体安装消费）与骨架版本 Framework-Version（`agent-workflow/FRAMEWORK_VERSION` 新增=1.0.0，仅骨架契约 bin/awf、AGENTS.md.tmpl、project.yaml.tmpl、账本结构、check 门禁、pre-commit、README.md 骨架文件变化时 bump）解耦——`awf upgrade` 改按骨架版差量判定（相同默认跳过、`--force` 强刷；不同/缺失复制骨架并登记目标骨架版），不再把 kit 技能版写项目版本锚点（version_file 锚点由项目自身发版流程维护）；技能更新只在技能实体 install.sh，不再触发项目全量升级；`init` 登记当前骨架版、`check` 对缺骨架版项目给迁移软提示（不阻塞）、`install.sh` 同步 FRAMEWORK_VERSION 到技能实体、模板/技能文档（upgrade/release）/README/CHANGELOG 同步双版说明与 bump 规则
+
 ## [1.4.1] - 2026-11-07
 
 ### Added

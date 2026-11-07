@@ -84,6 +84,15 @@ project_version_file() {
   fi
 }
 
+# 骨架版本（DEV-205 双版本模型）：读 $1/agent-workflow/FRAMEWORK_VERSION，无 → 空。
+# 与技能版本（agent-workflow/VERSION，发版即 bump，插件显示、技能实体安装消费）解耦：
+# 骨架版本固定路径 agent-workflow/FRAMEWORK_VERSION，仅骨架契约变化时 bump，
+# awf upgrade 判定与插件 outdated 消费；不走 version_file、不进 project.yaml 键。
+project_framework_version() {
+  local f="$1/agent-workflow/FRAMEWORK_VERSION"
+  if [ -f "$f" ]; then cat "$f"; fi
+}
+
 usage() {
   cat <<'EOF'
 awf — agent workflow framework
@@ -685,6 +694,13 @@ check_growth_hints() {
       say "提示：项目根存在残留 VERSION 文件（version_file 已指向 $vf_root）——仍可能遮蔽 libc++ <version> 头，建议 git mv VERSION agent-workflow/VERSION 或删除；纯脚本项目可忽略"
     fi
   fi
+
+  # DEV-205 双版本模型：项目缺 agent-workflow/FRAMEWORK_VERSION → 软提示迁移补写（只提示不 FAIL）。
+  # 骨架版本 = 固定路径 FRAMEWORK_VERSION（仅骨架契约变化时 bump），与技能版本（version_file
+  # 锚点，发版即 bump）解耦；存量项目未登记骨架版时 upgrade 会按迁移补写（不写技能版锚点）。
+  if [ ! -f agent-workflow/FRAMEWORK_VERSION ]; then
+    say "提示：未登记骨架版本（agent-workflow/FRAMEWORK_VERSION 缺失）——建议运行 awf upgrade 补写（双版本模型迁移：骨架版 = 固定 FRAMEWORK_VERSION，技能版 = version_file 锚点，两版解耦；技能更新不需升级项目）"
+  fi
 }
 
 cmd_init() {
@@ -748,6 +764,16 @@ cmd_init() {
            "$target/agent-workflow/tools" \
            "$target/agent-workflow/bin" \
            "$target/agent-workflow/templates"
+
+  # DEV-205 双版本模型：init 登记当前骨架版本（固定路径 agent-workflow/FRAMEWORK_VERSION）。
+  # 源 = 技能实体（安装后的唯一事实源），未安装回退 kit 仓库。技能版本（VERSION）由发版
+  # 流程维护，init 不写——骨架版与技能版解耦，技能更新不需项目升级。
+  local kff_src
+  kff_src="$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION"
+  [ -f "$kff_src" ] || kff_src="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
+  if [ -f "$kff_src" ]; then
+    cp "$kff_src" "$target/agent-workflow/FRAMEWORK_VERSION"
+  fi
 
   if [ "$keep_docs" -eq 1 ] && [ -f "$target/agent-workflow/README.md" ]; then
     say "skip  已存在，保留：agent-workflow/README.md"
@@ -1639,7 +1665,7 @@ upgrade_usage() {
   cat <<'EOF'
 用法：awf upgrade [目录] [--dry-run] [--force] [--slim]
 
-升级已有项目的 agent-workflow 框架到当前 kit 版本（一等操作，取代“自行推断
+升级已有项目的 agent-workflow 框架到当前骨架版本（一等操作，取代“自行推断
 拷贝哪些文件”的隐式流程）。在 kit 根目录运行本命令（项目内副本无 templates
 源，不能执行 upgrade）：
 
@@ -1648,6 +1674,11 @@ upgrade_usage() {
      check_workflow.sh 兼容入口（自定义门禁默认保留，见下）
   2. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap  刷新 AGENTS.md 受控区块（区块外保留）
   3. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check      校验（退出码 = 失败项数量）
+
+DEV-205 双版本模型：升级判定 = 骨架版本（agent-workflow/FRAMEWORK_VERSION）差量——
+目标骨架版与源相同 → 默认跳过（打印「骨架已最新」后退出，不复制、不跑 bootstrap/check，
+--force 可强制刷新框架文件）；不同/缺失 → 复制骨架 + 登记目标骨架版。技能更新只在
+技能实体（install.sh 重装），不需升级项目；upgrade 不再把 kit 技能版写目标版本锚点。
 
 v1.2.0 彻底技能化：完整流程细节在技能 agent-workflow-scaffold（skills/ 各流程技能），
 项目内无 workflows/ 副本——AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
@@ -1659,7 +1690,8 @@ upgrade 只同步骨架契约（bin/awf/tmpl/锚点）；存量项目带 workflo
 
 --dry-run   只打印将变更/保留的文件，不改写任何文件
 --force     覆盖目标自定义的 check_workflow.sh（默认：与标准 3 行兼容入口
-            不同时保留原文件并告警，避免静默丢失项目自定义门禁）
+            不同时保留原文件并告警，避免静默丢失项目自定义门禁）；骨架相同
+            时强制刷新框架文件
 
 说明：升级不 bump 版本号、不改写账本内容；旧账本格式问题（归档块缺「状态」
 字段、旧英文表头 | Status |）由 check 输出修复指引。只本地 commit，不 push。
@@ -1694,6 +1726,22 @@ cmd_upgrade() {
   local awf_dir="$target/agent-workflow"
 
   say "== awf upgrade $target =="
+
+  # DEV-205 双版本模型：升级判定 = 骨架版本（agent-workflow/FRAMEWORK_VERSION）差量，
+  # 不再是技能版本。技能版本（agent-workflow/VERSION，发版即 bump，插件显示、技能实体
+  # 安装消费）不参与升级判定，upgrade 也不再把它写目标 version_file 锚点——技能更新只
+  # 发生在技能实体（install.sh 重装），无需项目升级。骨架源读技能实体（安装后的唯一
+  # 事实源），未安装时回退 kit 仓库 agent-workflow/FRAMEWORK_VERSION。
+  local KFF cur_kff
+  KFF="$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION"
+  [ -f "$KFF" ] || KFF="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
+  cur_kff="$(project_framework_version "$target")"
+
+  # 骨架已最新：dry-run 与执行均跳过（不复制、不写锚点、不跑 bootstrap/check）；--force 强刷
+  if [ "$force" -eq 0 ] && [ -f "$KFF" ] && [ -n "$cur_kff" ] && [ "$cur_kff" = "$(cat "$KFF")" ]; then
+    say "骨架已最新 v$(cat "$KFF")（技能更新只在技能实体 install.sh，无需项目升级；--force 可强制刷新框架文件）"
+    return 0
+  fi
 
   local item src dst
   # DEV-186 工具技能化：变更清单不再含 bin/awf、bin/awf-dispatch（工具在技能
@@ -1767,19 +1815,15 @@ cmd_upgrade() {
     fi
   fi
 
-  # 版本锚点路径在 dry-run 与执行两处共用（DEV-145）：读目标 project.yaml 的 version_file，
-  # 默认仓库根 VERSION；锚点不得放进 clang 头文件搜索路径（macOS IL2CPP 撞名，见 project_version_file）。
-  # 源版本读取（DISPATCH-155 / DEV-193）：kit 自身锚点已迁移到技能实体版本
-  # （~/.dsh/skills/agent-workflow-scaffold/VERSION，install.sh 安装时同步 agent-workflow/VERSION），
-  # 从技能实体读（KVF）——技能实体是安装后的唯一事实源；未安装时回退仓库 agent-workflow/VERSION。
-  local VF KVF
-  VF="$(project_version_file "$target")"
-  KVF="$HOME/.dsh/skills/agent-workflow-scaffold/VERSION"
-  [ -f "$KVF" ] || KVF="$(project_version_file "$KIT_DIR")"
-
   if [ "$dry_run" -eq 1 ]; then
     say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
-    [ -f "$KVF" ] && say "  将写版本锚点 $VF = $(cat "$KVF")（对外发布版；路径 = 目标 project.yaml 的 version_file）"
+    if [ -f "$KFF" ]; then
+      if [ -n "$cur_kff" ]; then
+        say "  将写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = $cur_kff）"
+      else
+        say "  将写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（迁移补写：存量项目未登记骨架版本）"
+      fi
+    fi
     say "  将运行：$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap（刷新 AGENTS.md 入口；工具在技能，项目内无副本）"
     say "  将运行：$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check（校验；退出码 = 失败项数量）"
     return 0
@@ -1789,17 +1833,16 @@ cmd_upgrade() {
   say "保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
   say ""
 
-  # DEV-133/DEV-145：版本锚点——把 kit 的对外发布版（自身 version_file 指向的锚点文件，
-  # DISPATCH-155 起为 agent-workflow/VERSION）同步到目标的 version_file 路径；
-  # 看板按它显示 v1.2.3 这类具体版本。源路径读 kit 自身 project.yaml 的 version_file（KVF，
-  # 默认仓库根 VERSION），不再硬编码根 VERSION；目标写入路径读目标 project.yaml 的
-  # version_file（VF，默认仓库根 VERSION），避免在 macOS 大小写不敏感 FS 上把锚点放进
-  # clang 头文件搜索路径（-I"."）导致 IL2CPP 编译撞名。
-  local cur_ver=""
-  [ -f "$VF" ] && cur_ver="$(cat "$VF")"
-  if [ -f "$KVF" ] && [ "$cur_ver" != "$(cat "$KVF")" ]; then
-    cp "$KVF" "$VF"
-    say "已写版本锚点 ${VF} = $(cat "$KVF")"
+  # DEV-205：登记目标骨架版本（落后升级 / 存量迁移补写；相同已在上面跳过，--force 强刷也走到这里）。
+  # 固定路径 agent-workflow/FRAMEWORK_VERSION（不走 version_file、不进 project.yaml 键，
+  # 与锚点铁律同位置规范）；技能版本锚点（version_file 指向）由项目自身发版流程维护，upgrade 不写。
+  if [ -f "$KFF" ]; then
+    cp "$KFF" "$target/agent-workflow/FRAMEWORK_VERSION"
+    if [ -n "$cur_kff" ]; then
+      say "已写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = $cur_kff）"
+    else
+      say "已写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（迁移补写：存量项目未登记骨架版本）"
+    fi
   fi
 
   ( cd "$target" && $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap ) || die "bootstrap 失败：$target（技能工具不可用，请先运行 ./install.sh 安装技能）"

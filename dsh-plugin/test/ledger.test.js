@@ -656,10 +656,154 @@ test('DEV-178 readProjectRelease 已配置：version_file 指向的相对文件�
     const meta = await readProjectMetaFile(root)
     assert.equal(projectVersionFile(root, meta), join(root, 'agent-workflow', 'VERSION'))
     assert.equal(await readProjectRelease(root), '1.1.7')
-    // 指向文件不存在 → null（不回退根 VERSION，与 bin/awf upgrade 的 KVF 语义一致）
+    // 指向文件不存在 → null（不回退根 VERSION，与 bin/awf upgrade 锚点语义一致）
     await rm(join(root, 'agent-workflow', 'VERSION'))
     assert.equal(await readProjectRelease(root), null)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+// ---- DEV-205 双版本模型：readProjectFrameworkVersion 骨架版读取 ----
+
+test('DEV-205 readProjectFrameworkVersion：存在 → trim 后的骨架 semver；缺失/空 → null', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { readProjectFrameworkVersion } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-fwv-'))
+  try {
+    // 缺失 → null
+    assert.equal(await readProjectFrameworkVersion(root), null)
+    // 存在 → trim 后原样返回
+    await mkdir(join(root, 'agent-workflow'), { recursive: true })
+    await writeFile(join(root, 'agent-workflow', 'FRAMEWORK_VERSION'), '  1.0.0\n')
+    assert.equal(await readProjectFrameworkVersion(root), '1.0.0')
+    // 空内容 → null（骨架版不存在等价于未迁移）
+    await writeFile(join(root, 'agent-workflow', 'FRAMEWORK_VERSION'), '  \n')
+    assert.equal(await readProjectFrameworkVersion(root), null)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+
+// ---- DEV-205 双版本模型：versionStatus 骨架版判定链（lib/index.js 导出，纯函数无 cordis 上下文） ----
+// lib/index.js 的模块级 AGENTS_HOME 在首次 import 时固化 → 本区块在模块顶层
+// 一次性创建受控 DSH_AGENTS_HOME + kit 夹具，各用例只建自己的项目子目录；
+// 不依赖真实全局索引 / 真实 kit 仓库状态。
+import { mkdtemp } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+// 构造受控全局索引：AGENTS.md 内登记 agent-workflow-kit → kitPath。
+async function writeAgentsIndex(agentsHome, kitPath) {
+  const { mkdir, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  await mkdir(agentsHome, { recursive: true })
+  await writeFile(join(agentsHome, 'AGENTS.md'), [
+    '# 测试索引',
+    '<!-- awf:projects:begin -->',
+    '| 项目ID | 别名 | 路径 | 入口 |',
+    '|--------|------|------|------|',
+    `| agent-workflow-kit | agent-workflow-kit | ${kitPath} | AGENTS.md |`,
+    '<!-- awf:projects:end -->',
+  ].join('\n') + '\n')
+}
+
+// kit 夹具：骨架版 1.0.0 / 技能版 1.4.1 / AWF 代次 2 / version_file → agent-workflow/VERSION。
+async function writeKitFixture(kitPath) {
+  const { mkdir, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  await mkdir(join(kitPath, 'agent-workflow', 'bin'), { recursive: true })
+  await writeFile(join(kitPath, 'agent-workflow', 'project.yaml'),
+    'id: agent-workflow-kit\nname: agent-workflow-kit\nversion_file: agent-workflow/VERSION\n')
+  await writeFile(join(kitPath, 'agent-workflow', 'FRAMEWORK_VERSION'), '1.0.0\n')
+  await writeFile(join(kitPath, 'agent-workflow', 'VERSION'), '1.4.1\n')
+  await writeFile(join(kitPath, 'agent-workflow', 'bin', 'awf'), '#!/usr/bin/env bash\nAWF_VERSION=2\n')
+}
+
+// 项目夹具：按 opts 写入可选版本信号。
+async function writeProjectFixture(projPath, opts) {
+  const { mkdir, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  await mkdir(join(projPath, 'agent-workflow'), { recursive: true })
+  if (opts.framework) await writeFile(join(projPath, 'agent-workflow', 'FRAMEWORK_VERSION'), opts.framework + '\n')
+  if (opts.awf) {
+    await mkdir(join(projPath, 'agent-workflow', 'bin'), { recursive: true })
+    await writeFile(join(projPath, 'agent-workflow', 'bin', 'awf'), '#!/usr/bin/env bash\nAWF_VERSION=' + opts.awf + '\n')
+  }
+  if (opts.release) await writeFile(join(projPath, 'VERSION'), opts.release + '\n')
+  if (opts.scaffold) {
+    await writeFile(join(projPath, 'agent-workflow', 'project.yaml'),
+      'id: proj\nname: proj\nscaffold_version: ' + opts.scaffold + '\n')
+  }
+}
+
+const awfAgentsHome = await mkdtemp(join(tmpdir(), 'awf-agents-'))
+process.env.DSH_AGENTS_HOME = awfAgentsHome // 必须在 import ../lib/index.js 前设置（模块级 AGENTS_HOME）
+const awfKitPath = join(awfAgentsHome, 'kit')
+await writeAgentsIndex(awfAgentsHome, awfKitPath)
+await writeKitFixture(awfKitPath)
+
+test('DEV-205 versionStatus 骨架链：骨架落后 → outdated（upgradeTo=v最新（骨架升级））；installed 优先骨架版', async () => {
+  const { versionStatus } = await import('../lib/index.js')
+  // 骨架落后（0.9.0 < 1.0.0）+ 项目同时有发布版 5.5.5 → installed 必须优先骨架版 v0.9.0
+  const projPath = join(awfAgentsHome, 'proj-lag')
+  await writeProjectFixture(projPath, { framework: '0.9.0', release: '5.5.5', awf: 2 })
+  const vs = await versionStatus(projPath)
+  assert.equal(vs.status, 'outdated')
+  assert.equal(vs.upgradeTo, 'v1.0.0（骨架升级）')
+  assert.equal(vs.installed, 'v0.9.0')
+  assert.equal(vs.installedFramework, 'v0.9.0')
+  assert.equal(vs.latestFramework, 'v1.0.0')
+  assert.equal(vs.skillVersion, 'v1.4.1')
+  assert.equal(vs.installedRelease, '5.5.5')
+})
+
+test('DEV-205 versionStatus 骨架链：骨架相同 → latest（技能更新不触发 outdated）', async () => {
+  const { versionStatus } = await import('../lib/index.js')
+  // 骨架相同 1.0.0；项目发布版 1.3.9 落后于 kit 技能版 1.4.1 —— 技能差量不判 outdated
+  const projPath = join(awfAgentsHome, 'proj-same')
+  await writeProjectFixture(projPath, { framework: '1.0.0', release: '1.3.9', awf: 2 })
+  const vs = await versionStatus(projPath)
+  assert.equal(vs.status, 'latest')
+  assert.equal(vs.upgradeTo, null)
+  assert.equal(vs.installed, 'v1.0.0')
+  assert.equal(vs.skillVersion, 'v1.4.1')
+})
+
+test('DEV-205 versionStatus 回退链 1：无骨架版 → AWF 代次落后判 outdated（提示骨架版本迁移补写）', async () => {
+  const { versionStatus } = await import('../lib/index.js')
+  // 存量项目：无 FRAMEWORK_VERSION，AWF 代次 1 < kit 2 → 回退链判 outdated
+  const projPath = join(awfAgentsHome, 'proj-awf1')
+  await writeProjectFixture(projPath, { awf: 1 })
+  const vs = await versionStatus(projPath)
+  assert.equal(vs.status, 'outdated')
+  assert.match(vs.upgradeTo, /v2（骨架契约升级；骨架版本迁移，awf upgrade 补写）/)
+  assert.equal(vs.latestFramework, 'v1.0.0')
+  assert.equal(vs.installedFramework, null)
+  assert.equal(vs.skillVersion, 'v1.4.1')
+  // AWF 代次相同 → latest
+  const projPath2 = join(awfAgentsHome, 'proj-awf2')
+  await writeProjectFixture(projPath2, { awf: 2 })
+  const vs2 = await versionStatus(projPath2)
+  assert.equal(vs2.status, 'latest')
+})
+
+test('DEV-205 versionStatus 回退链 2：无骨架版 + 无 AWF 代次 → 发布版 semver 判定（outdated 带迁移提示）', async () => {
+  const { versionStatus } = await import('../lib/index.js')
+  // 无 FRAMEWORK_VERSION、无 bin/awf，发布版 0.5.0 < kit 1.4.1 → 回退链 2 判 outdated
+  const projPath = join(awfAgentsHome, 'proj-rel')
+  await writeProjectFixture(projPath, { release: '0.5.0' })
+  const vs = await versionStatus(projPath)
+  assert.equal(vs.status, 'outdated')
+  assert.equal(vs.upgradeTo, '1.4.1（骨架版本迁移，awf upgrade 补写）')
+  assert.equal(vs.installed, 'v0.5.0')
+})
+
+test('DEV-205 夹具清理', async () => {
+  const { rm } = await import('node:fs/promises')
+  delete process.env.DSH_AGENTS_HOME
+  await rm(awfAgentsHome, { recursive: true, force: true })
 })

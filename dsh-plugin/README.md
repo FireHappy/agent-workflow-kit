@@ -23,7 +23,7 @@ agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，�
   - `POST /awf/task/delete/dry-run` / `POST /awf/task/delete/execute`（删除任务回退：dry-run 文件清单 → 前端弹框二次确认 → execute）
   - `POST /awf/register`（DEV-035 登记当前项目：已有 agent-workflow/ 直接写全局索引；没有则先初始化骨架再登记；body `{path, workspaceRoot, local}`，白名单与 `/awf/init` 相同；`local: true` → project.yaml 写 `track: false` + `.gitignore` 追加 `# awf:local-begin` 忽略区块 `/agent-workflow/` `/AGENTS.md` `/CLAUDE.md`；顺带补齐缺失的 `scaffold_version`）
   - `POST /awf/upgrade`（DEV-035 框架升级：版本落后时向 agent 注入升级意图（不直接改文件），409 up-to-date 表示已最新；升级由 agent 执行并跑 `awf check` 验证，插件经 SSE/轮询刷新状态）
-  - `GET  /awf/ledger` 响应附带 `versions`（DEV-035 版本监测：`{status: latest|outdated|unknown, installed, scaffold, latestAWF, latestRelease, upgradeTo}`，双信号 = 项目 `AWF_VERSION` 代次 + `scaffold_version` 发布号，与 kit `VERSION`/`AWF_VERSION` 比对）
+  - `GET  /awf/ledger` 响应附带 `versions`（DEV-035 版本监测；DEV-205 双版本模型：`{status: latest|outdated|unknown, installed, scaffold, latestAWF, latestRelease, latestFramework, installedFramework, skillVersion, upgradeTo}`，技能版本 `skillVersion` = kit `agent-workflow/VERSION`（显示用），骨架版本 `latestFramework`/`installedFramework` = `agent-workflow/FRAMEWORK_VERSION`（outdated/upgrade 判定依据；双方骨架版可读 → 骨架差量判定，存量无骨架版 → 回退 `AWF_VERSION` 代次 → 发布版 semver → `scaffold_version`））
 - 客户端：右侧边栏页签，15s 自动刷新 + 手动刷新；只跟随当前会话项目，无项目下拉选择器
 - 默认锚定：页签打开即自动选中当前 DSH 会话所属项目（见「默认锚定」一节），无需手动选择
 
@@ -46,7 +46,7 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 
 打开页签即自动加载**当前会话项目**的账本（无项目下拉选择器、无顶部工具条，不看其他项目）。DEV-044 起面板统一为**轻量行风格**：当前任务 / 待办 / 最近完成三区都是紧凑行（hairline 分隔、无卡片边框），只读展示账本事实，无任何操作按钮；写操作由 agent 在对话中执行，面板经 SSE/轮询自动反映账本变化。
 
-- 项目卡：名称（右侧带**版本号** chip：latest 绿点 / outdated 黄点可点击升级）+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
+- 项目卡：名称（右侧带**版本号** chips：**技能版本** chip（`技能版本 vX.Y.Z`，= kit `agent-workflow/VERSION`，常显）+ **骨架版本** chip（`v{installedFramework}`，latest 绿点 / outdated 黄点可点击升级，= `agent-workflow/FRAMEWORK_VERSION`，upgrade 判定依据；存量项目无骨架版时回退展示发布版/代次））+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
 - 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）
 - 待办（行）：类型 chip + ID + 描述 + 优先级，dev/debug/docs 三态切换；每个类型 tab 显示该类型未开始任务数量徽章（如「开发 2」「调试 0」，数据取自 `ledger.todoRows` 过滤计数），标题「未开始任务 · 类型」不再重复数量（tab 徽章一处即可）；数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」），解析层兼容 4/5 列任务表格
 - 最近完成（行）：✓ 日期 ID 描述，点击查看归档
@@ -55,7 +55,7 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 - **源文件面板**（`GET /awf/source?path=&type=&file=`，服务端能力保留）：面板可查看/编辑 `.md` 原文并保存写回；DEV-044 起看板行上不再暴露「源文件」按钮（纯看板），面板仅由内部程序逻辑触发
 - 最近完成：done.md 归档记录（**行式** 4/5/6 列摘要行 + **块式** `## [ID]` 任务块合并去重、块式优先；块仅统计状态=完成/取消，日期取 归档日期 > 完成日期 > 最近更新/Last Updated）全局按完成日期倒序**仅显示前 5 条**（日期 / ID / 描述排版），每条可点击弹出**归档查看**弹层（done 表格行 + 完整任务块 markdown 原文；归档未保留任务块的显示「该任务归档时未保留详细任务块，仅摘要」并仍展示摘要行与日期），可关闭返回
 - **登记当前项目**（DEV-035，`POST /awf/register`）：空索引 / 未命中态不再只提示「先运行 awf register」——面板直接给出「登记当前项目」按钮（带当前会话目录提示）。已有 `agent-workflow/` 直接登记进全局索引；没有则服务端先初始化骨架再登记；成功后自动选中并加载账本。旁路「仅本地（不推送到远端）」勾选：登记时写 `track: false` + `.gitignore` 忽略区块，工作流痕迹不进 git。手动「刷新」按钮现在同时重取项目索引（修复挂载后索引陈旧不更新的问题）
-- **框架版本监测**（DEV-035）：账本头部状态条显示项目工作流与 kit 框架的版本关系（`latest` 绿点「工作流已最新」/ `outdated` 黄条「工作流可升级 X → Y」/ `unknown` 灰字提示登记 kit）。「去升级」只注入 agent 升级意图（`POST /awf/upgrade`），升级由 agent 执行并跑 `awf check` 验证；面板不执行升级，经 SSE/轮询在 `versions.status` 变 `latest` 时自动退出「升级中」态
+- **版本监测（双版本模型，DEV-205）**：账本头部项目卡显示项目工作流与 kit 框架的版本关系（技能版本 chip 常显 `技能版本 v{skillVersion}`；骨架版本 chip `latest` 绿点「工作流已最新」/ `outdated` 黄点「工作流可升级（骨架 vX → vY）」/ `unknown` 提示登记 kit）。outdated 判定只看**骨架版本差量**（`FRAMEWORK_VERSION` semver），技能更新不触发项目 outdated；存量项目无骨架版时回退 `AWF_VERSION` 代次 → 发布版 semver 判定，upgradeTo 提示「骨架版本迁移，awf upgrade 补写」。「去升级」只注入 agent 升级意图（`POST /awf/upgrade`），升级由 agent 执行并跑 `awf check` 验证；面板不执行升级，经 SSE/轮询在 `versions.status` 变 `latest` 时自动退出「升级中」态
 
 ## 默认锚定（DEV-019）
 

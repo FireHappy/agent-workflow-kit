@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # awf upgrade 回归测试：验证「升级已有项目的工作流」是一等操作。
 #
-# 场景（对应 docs/upgrade.md 验收标准）：
-#   A. 干净升级：init 项目 → 制造存量旧项目（旧模板/旧 README/旧 workflows/ 副本/旧 bin
-#      工具副本）→ upgrade --dry-run 只预览不改写 → upgrade 执行 → 断言升级后骨架模板
-#      与 kit 一致、project.yaml/tasks/** 保留、AGENTS.md 入口按新模板重建、
-#      --slim 清理存量副本、check 通过。
+# 场景（对应 docs/upgrade.md 验收标准；DEV-205 双版本模型翻新）：
+#   A. 干净升级：init 项目 → 制造存量旧项目（旧骨架版/旧模板/旧 README/旧 workflows/
+#      副本/旧 bin 工具副本）→ upgrade --dry-run 只预览不改写 → upgrade 执行 → 断言
+#      升级后骨架模板与 kit 一致、目标 FRAMEWORK_VERSION = kit 骨架版、project.yaml/
+#      tasks/** 保留、AGENTS.md 入口按新模板重建、--slim 清理存量副本、check 通过。
 #   B. 旧账本迁移兼容：归档块用旧英文表头（| Status |）→ check FAIL 且输出含
 #      「| Status | → | 状态 |」修复指引；current.md 用 | Status | 时 awf status
 #      仍正确读取状态列；按指引修复后 check 通过。
 #   C. 自定义 check_workflow.sh：默认保留并告警，--force 才覆盖为标准入口。
 #   D. 非 agent-workflow 目标拒绝；upgrade --help 可读；项目内无工具副本。
+#   E. 已配置 version_file 的目标：upgrade 写 agent-workflow/FRAMEWORK_VERSION = kit
+#      骨架版；项目版本锚点（agent-workflow/VERSION 与根 VERSION）不被改写（不再写锚点）。
+#   F. 默认目标（未配置 version_file）：同样写 FRAMEWORK_VERSION；根 VERSION 不生成。
+#   G. 目标 FRAMEWORK_VERSION == kit：dry-run 与执行均「骨架已最新」且不覆盖文件/不写锚点。
+#   H. 存量目标（无 FRAMEWORK_VERSION）：迁移补写 = kit 骨架版。
 #
 # 隔离：DSH_AGENTS_HOME 重定向到临时目录，不触碰真实 ~/.agents，可重跑。
 # 用法：bash test/upgrade.sh
@@ -38,9 +43,17 @@ fi
 [ -f "$HOME/.dsh/skills/agent-workflow-scaffold/templates/AGENTS.md.tmpl" ] \
   && cmp -s "$HOME/.dsh/skills/agent-workflow-scaffold/templates/AGENTS.md.tmpl" "$KIT/templates/AGENTS.md.tmpl" \
   || { echo "FAIL  全局技能模板与 checkout 不一致；请先运行 ./install.sh" >&2; exit 1; }
+# DEV-205 隔离守卫：upgrade 的骨架源读技能实体 FRAMEWORK_VERSION——实体与 checkout 必须一致
+[ -f "$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION" ] \
+  && cmp -s "$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION" "$KIT/agent-workflow/FRAMEWORK_VERSION" \
+  || { echo "FAIL  全局技能骨架版本与 checkout 不一致（FRAMEWORK_VERSION）；请先运行 ./install.sh" >&2; exit 1; }
 
 fail() { echo "FAIL  $*" >&2; exit 1; }
 ok()   { echo "ok    $*"; }
+
+# kit 骨架版（upgrade 判定与断言期望的源）
+KIT_KFF="$(cat "$KIT/agent-workflow/FRAMEWORK_VERSION")"
+[ -n "$KIT_KFF" ] || fail "kit agent-workflow/FRAMEWORK_VERSION 缺失或为空"
 
 echo "# awf upgrade 回归测试"
 
@@ -53,7 +66,8 @@ PA="$WORK/projA"
 printf '\n# upgrade-marker-keep-project-yaml\n' >> "$PA/agent-workflow/project.yaml"
 printf '\n<!-- upgrade-marker-keep-ledger-marker -->\n' >> "$PA/agent-workflow/tasks/dev/current.md"
 
-# 制造存量旧项目：旧模板 / 旧 README / 旧 workflows/ 副本 / 旧 bin 工具副本 / 旧 check_workflow.sh 桩
+# 制造存量旧项目：旧骨架版 / 旧模板 / 旧 README / 旧 workflows/ 副本 / 旧 bin 工具副本 / 旧 check_workflow.sh 桩
+printf '0.9.0\n' > "$PA/agent-workflow/FRAMEWORK_VERSION"   # 旧骨架版：触发 upgrade 复制路径
 printf '# 旧模板 v0.3（无任务路由）\n## 铁律\n- 旧\n' > "$PA/agent-workflow/templates/AGENTS.md.tmpl"
 printf '# OLD-README\n' > "$PA/agent-workflow/README.md"
 mkdir -p "$PA/agent-workflow/workflows"
@@ -76,6 +90,7 @@ ok "A 制造旧版框架后 check 失败（旧模板触发入口过期）"
 dry="$("$AWF" upgrade "$PA" --dry-run)"
 grep -q '将覆盖' <<<"$dry" || fail "A dry-run 未打印变更清单：$dry"
 grep -q '将保留' <<<"$dry" || fail "A dry-run 未打印保留清单：$dry"
+grep -q '将写骨架版 agent-workflow/FRAMEWORK_VERSION' <<<"$dry" || fail "A dry-run 未打印骨架版登记：$dry"
 grep -q 'OLD-GATE' "$PA/agent-workflow/check_workflow.sh" || fail "A dry-run 竟覆盖了 check_workflow.sh"
 grep -q 'upgrade-marker-keep-project-yaml' "$PA/agent-workflow/project.yaml" \
   || fail "A dry-run 竟改写了 project.yaml"
@@ -99,6 +114,11 @@ cmp -s "$PA/agent-workflow/README.md" "$KIT/templates/README.md" || fail "A READ
 grep -q 'OLD-GATE' "$PA/agent-workflow/check_workflow.sh" || fail "A 自定义门禁被静默覆盖"
 ok "A 升级后骨架模板与 kit 一致，自定义门禁保留"
 
+# DEV-205：升级登记目标骨架版 = kit 骨架版（落后 0.9.0 → 1.0.0）
+[ "$(cat "$PA/agent-workflow/FRAMEWORK_VERSION")" = "$KIT_KFF" ] \
+  || fail "A 目标 FRAMEWORK_VERSION 未升级到 kit 骨架版：$(cat "$PA/agent-workflow/FRAMEWORK_VERSION")"
+ok "A 目标 FRAMEWORK_VERSION = kit 骨架版（$KIT_KFF）"
+
 # 断言：保留清单逐字节不动
 grep -q 'upgrade-marker-keep-project-yaml' "$PA/agent-workflow/project.yaml" || fail "A project.yaml 未保留"
 grep -q 'upgrade-marker-keep-ledger-marker' "$PA/agent-workflow/tasks/dev/current.md" || fail "A tasks 账本未保留"
@@ -116,7 +136,8 @@ ok "A AGENTS.md 重建含技能路由指针，check 通过"
 [ -d "$PA/agent-workflow/workflows" ] || fail "A plain upgrade 不应已清理 workflows/"
 [ -f "$PA/agent-workflow/bin/awf" ] || fail "A plain upgrade 不应已清理 bin/awf 副本"
 [ -f "$PA/agent-workflow/bin/awf-dispatch" ] || fail "A plain upgrade 不应已清理 bin/awf-dispatch 副本"
-"$AWF" upgrade "$PA" --slim >/dev/null 2>&1 || fail "A --slim 升级失败"
+# DEV-205：升级后骨架已最新，--slim 属维护动作，需 --force（强刷）才执行清理
+"$AWF" upgrade "$PA" --slim --force >/dev/null 2>&1 || fail "A --slim --force 升级失败"
 [ ! -d "$PA/agent-workflow/workflows" ] || fail "A --slim 未清理存量 workflows/"
 [ ! -f "$PA/agent-workflow/bin/awf" ] || fail "A --slim 未清理存量 bin/awf"
 [ ! -f "$PA/agent-workflow/bin/awf-dispatch" ] || fail "A --slim 未清理存量 bin/awf-dispatch"
@@ -208,7 +229,8 @@ else
 fi
 ok "B 按指引修复（| Status | → | 状态 |）后 check 通过"
 
-# ---------- C. 自定义 check_workflow.sh：默认保留，--force 才覆盖 ----------
+# ---------- C. 自定义 check_workflow.sh：默认保留并告警，--force 才覆盖 ----------
+printf '0.9.0\n' > "$PA/agent-workflow/FRAMEWORK_VERSION"   # 旧骨架版：让 shim 分支走到（骨架相同会提前跳过）
 printf '#!/bin/sh\necho custom-gate\nexit 0\n' > "$PA/agent-workflow/check_workflow.sh"
 chmod +x "$PA/agent-workflow/check_workflow.sh"
 c_out="$(cd "$WORK" && "$AWF" upgrade "$PA" 2>&1 || true)"
@@ -216,40 +238,73 @@ grep -q 'custom-gate' "$PA/agent-workflow/check_workflow.sh" || fail "C 自定�
 grep -q '自定义门禁' <<<"$c_out" || fail "C 未告警自定义门禁：$c_out"
 ok "C 自定义 check_workflow.sh 默认保留并告警"
 ( cd "$WORK" && "$AWF" upgrade "$PA" --force >/dev/null 2>&1 ) || fail "C --force 升级失败"
-grep -q 'agent-workflow-scaffold/bin/awf' "$PA/agent-workflow/check_workflow.sh" || fail "C --force 后 check_workflow.sh 非标准入口"
+grep -q 'agent-workflow-scaffold/bin/awf' "$PA/agent-workflow/check_workflow.sh" \
+  || fail "C --force 后 check_workflow.sh 非标准入口"
 ok "C --force 覆盖为标准兼容入口"
 
-# ---------- E. 版本锚点 version_file 定向（DEV-145）：upgrade 锚点写 version_file 路径 ----------
+# ---------- E. 已配置 version_file 的目标（DEV-145/DEV-205）：upgrade 写骨架版、不再写版本锚点 ----------
 PE="$WORK/projE"
 "$AWF" init "$PE" --name "锚点定向" --no-register >/dev/null || fail "E init projE 失败"
 sed -i '' 's|^version_file: VERSION$|version_file: agent-workflow/VERSION|' "$PE/agent-workflow/project.yaml" \
   || sed -i 's|^version_file: VERSION$|version_file: agent-workflow/VERSION|' "$PE/agent-workflow/project.yaml"
 grep -q '^version_file: agent-workflow/VERSION$' "$PE/agent-workflow/project.yaml" \
   || fail "E project.yaml 未写入 version_file 定向"
-# kit 自身源版本：读 kit 的 version_file（DISPATCH-155 起为 agent-workflow/VERSION），根 VERSION 兜底
-KIT_VF="$KIT/agent-workflow/VERSION"
-[ -f "$KIT_VF" ] || KIT_VF="$KIT/VERSION"
-[ -f "$KIT_VF" ] || fail "E kit 自身版本锚点缺失：$KIT_VF"
-printf '9.9.9\n' > "$PE/VERSION"   # 根 VERSION 旧值：不应被 upgrade 改写
+printf '0.9.0\n' > "$PE/agent-workflow/FRAMEWORK_VERSION"   # 旧骨架版：触发升级复制路径
+printf '9.9.9\n' > "$PE/VERSION"                            # 根 VERSION 旧值：不应被 upgrade 改写
+printf '2.0.0\n' > "$PE/agent-workflow/VERSION"             # 项目自身技能版锚点：不应被 upgrade 改写
 dry_e="$("$AWF" upgrade "$PE" --dry-run)"
-grep -q '版本锚点' <<<"$dry_e" || fail "E dry-run 未打印版本锚点文案：$dry_e"
-grep -q 'agent-workflow/VERSION' <<<"$dry_e" || fail "E dry-run 未按 version_file 显示锚点路径：$dry_e"
+grep -q '将写骨架版 agent-workflow/FRAMEWORK_VERSION' <<<"$dry_e" || fail "E dry-run 未打印骨架版登记：$dry_e"
+grep -q '版本锚点' <<<"$dry_e" && fail "E dry-run 仍打印版本锚点文案（DEV-205 应删除）：$dry_e"
 "$AWF" upgrade "$PE" >/dev/null 2>&1 || fail "E upgrade 失败"
-[ "$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)" = "$(cat "$KIT_VF")" ] \
-  || fail "E 锚点未写到 version_file 路径（agent-workflow/VERSION=[$(cat "$PE/agent-workflow/VERSION" 2>/dev/null)]，kit=[$(cat "$KIT_VF")]）"
+[ "$(cat "$PE/agent-workflow/FRAMEWORK_VERSION")" = "$KIT_KFF" ] \
+  || fail "E 骨架版未写到 agent-workflow/FRAMEWORK_VERSION：$(cat "$PE/agent-workflow/FRAMEWORK_VERSION")"
+[ "$(cat "$PE/agent-workflow/VERSION")" = "2.0.0" ] || fail "E 技能版锚点（agent-workflow/VERSION）被 upgrade 改写：$(cat "$PE/agent-workflow/VERSION")"
 [ "$(cat "$PE/VERSION")" = "9.9.9" ] || fail "E 根 VERSION 被 upgrade 误改写：$(cat "$PE/VERSION")"
-ok "E upgrade 版本锚点按目标 version_file 写（源读 kit 自身 version_file，根 VERSION 不动）"
+ok "E upgrade 写目标骨架版 = kit 骨架版，版本锚点（version_file 指向与根 VERSION）不被改写"
 
-# ---------- F. 默认目标（未配置 version_file）：upgrade 写目标根 VERSION（DISPATCH-155 回归） ----------
+# ---------- F. 默认目标（未配置 version_file）：upgrade 同样写 FRAMEWORK_VERSION，不生成根 VERSION ----------
 PF="$WORK/projF"
 "$AWF" init "$PF" --name "默认锚点" --no-register >/dev/null || fail "F init projF 失败"
 grep -q '^version_file: VERSION$' "$PF/agent-workflow/project.yaml" \
   || fail "F 默认 project.yaml 应 version_file: VERSION"
-rm -f "$PF/VERSION"   # 模拟尚无根 VERSION；upgrade 应写入 kit 发布版
+printf '0.9.0\n' > "$PF/agent-workflow/FRAMEWORK_VERSION"   # 旧骨架版：触发升级复制路径
+rm -f "$PF/VERSION"   # 无根 VERSION：upgrade 不应再生成（不再写项目版本锚点）
 "$AWF" upgrade "$PF" >/dev/null 2>&1 || fail "F upgrade 失败"
-[ "$(cat "$PF/VERSION" 2>/dev/null)" = "$(cat "$KIT_VF")" ] \
-  || fail "F 默认目标根 VERSION 未写入 kit 发布版（VERSION=[$(cat "$PF/VERSION" 2>/dev/null)]，kit=[$(cat "$KIT_VF")]）"
-ok "F 默认目标 upgrade 写根 VERSION（未配置 version_file 行为不变）"
+[ "$(cat "$PF/agent-workflow/FRAMEWORK_VERSION")" = "$KIT_KFF" ] \
+  || fail "F 默认目标 FRAMEWORK_VERSION 未写 kit 骨架版（=[$(cat "$PF/agent-workflow/FRAMEWORK_VERSION" 2>/dev/null)]，kit=[$KIT_KFF]）"
+[ ! -f "$PF/VERSION" ] || fail "F upgrade 生成了根 VERSION（DEV-205 不再写项目版本锚点）：$(cat "$PF/VERSION")"
+ok "F 默认目标 upgrade 写 FRAMEWORK_VERSION，根 VERSION 不生成（不再写锚点）"
+
+# ---------- G. 目标 FRAMEWORK_VERSION == kit：dry-run 与执行均「骨架已最新」且不覆盖/不写锚点 ----------
+PG="$WORK/projG"
+"$AWF" init "$PG" --name "已最新" --no-register >/dev/null || fail "G init projG 失败"
+# init 已写 FRAMEWORK_VERSION = kit 当前骨架版（== KIT_KFF）；打旧模板标记验证「不覆盖」
+printf '# OLD-TEMPLATE-G\n' > "$PG/agent-workflow/templates/AGENTS.md.tmpl"
+g_dry="$("$AWF" upgrade "$PG" --dry-run)"
+grep -q '骨架已最新 v' <<<"$g_dry" || fail "G dry-run 未打印骨架已最新：$g_dry"
+grep -q '将覆盖' <<<"$g_dry" && fail "G dry-run 骨架已最新仍列变更：$g_dry"
+grep -q 'OLD-TEMPLATE-G' "$PG/agent-workflow/templates/AGENTS.md.tmpl" \
+  || fail "G dry-run 竟覆盖了模板"
+g_out="$("$AWF" upgrade "$PG" 2>&1)" || fail "G upgrade 执行失败：$g_out"
+grep -q '骨架已最新 v' <<<"$g_out" || fail "G 执行未打印骨架已最新：$g_out"
+grep -q 'OLD-TEMPLATE-G' "$PG/agent-workflow/templates/AGENTS.md.tmpl" \
+  || fail "G 执行竟覆盖了模板（骨架相同应跳过复制）"
+[ "$(cat "$PG/agent-workflow/FRAMEWORK_VERSION")" = "$KIT_KFF" ] \
+  || fail "G FRAMEWORK_VERSION 被改写：$(cat "$PG/agent-workflow/FRAMEWORK_VERSION")"
+[ ! -f "$PG/VERSION" ] || fail "G 执行生成了根 VERSION（不再写锚点）"
+ok "G 骨架相同：dry-run 与执行均「骨架已最新」，不覆盖文件、不写锚点"
+
+# ---------- H. 存量目标（无 FRAMEWORK_VERSION）：迁移补写 = kit 骨架版 ----------
+PH="$WORK/projH"
+"$AWF" init "$PH" --name "存量迁移" --no-register >/dev/null || fail "H init projH 失败"
+rm -f "$PH/agent-workflow/FRAMEWORK_VERSION"   # 存量项目未登记骨架版本
+dry_h="$("$AWF" upgrade "$PH" --dry-run)"
+grep -q '迁移补写' <<<"$dry_h" || fail "H dry-run 未提示迁移补写：$dry_h"
+"$AWF" upgrade "$PH" >/dev/null 2>&1 || fail "H upgrade 失败"
+[ "$(cat "$PH/agent-workflow/FRAMEWORK_VERSION")" = "$KIT_KFF" ] \
+  || fail "H 迁移补写未写 kit 骨架版（=[$(cat "$PH/agent-workflow/FRAMEWORK_VERSION" 2>/dev/null)]，kit=[$KIT_KFF]）"
+[ ! -f "$PH/VERSION" ] || fail "H 迁移补写生成了根 VERSION（不再写锚点）"
+ok "H 存量目标（无 FRAMEWORK_VERSION）迁移补写 = kit 骨架版"
 
 # 边界：非项目目标拒绝 / 项目内副本拒绝 / help 可读
 mkdir -p "$WORK/notproj"
@@ -268,4 +323,4 @@ fi
 ok "D 项目内 bin/ 无工具副本（工具技能化形态）"
 
 echo ""
-echo "全部通过：awf upgrade 干净升级 / 旧账本迁移指引 / 自定义门禁保留 / 边界拒绝"
+echo "全部通过：awf upgrade 干净升级 / 旧账本迁移指引 / 自定义门禁保留 / 骨架版差量判定（E/F/G/H）/ 边界拒绝"

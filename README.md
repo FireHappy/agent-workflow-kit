@@ -140,16 +140,19 @@ CI（GitHub Actions）在每次 push 时运行同一套测试。
 /path/to/agent-workflow-kit/bin/awf upgrade <项目目录> --dry-run   # 只预览变更/保留清单
 ```
 
-- **变更清单**：`agent-workflow/templates/AGENTS.md.tmpl`、`README.md`、`check_workflow.sh` 等骨架契约（v1.2.0+ 技能化：流程细节在技能，项目只随技能版本同步骨架）；
+- **变更清单**：`agent-workflow/templates/AGENTS.md.tmpl`、`README.md`、`check_workflow.sh` 等骨架契约 + 登记目标骨架版 `agent-workflow/FRAMEWORK_VERSION`（v1.2.0+ 技能化：流程细节在技能，项目只随骨架版本差量同步骨架）；
 - **保留清单**：`agent-workflow/project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 `AGENTS.md` 区块外内容；
+- **升级判定 = 骨架版本差量**：目标骨架版与源相同 → 默认跳过（`--force` 强刷）；不同/缺失 → 复制骨架 + 写目标 `FRAMEWORK_VERSION`。技能更新只在技能实体（重跑 `./install.sh`），不需升级项目；upgrade 不再把 kit 技能版写项目版本锚点。
 - 升级后跑 `./agent-workflow/check_workflow.sh`；旧账本格式问题（归档块缺「状态」字段、旧英文表头 `| Status |`）会得到**可直接执行的修复指引**，无需推断；
-- 升级流程细节（变更清单/保留清单/旧账本迁移）见技能 `skills/upgrade/SKILL.md`（DSH 顶层技能）。
+- 升级流程细节（变更清单/保留清单/旧账本迁移/双版本模型）见技能 `skills/upgrade/SKILL.md`（DSH 顶层技能）。
 
 批量升级多个项目时，每个目标在**自己的工作区会话**里执行升级；团队不承载跨仓库任务（任务路由见技能 `skills/upgrade/SKILL.md` 与 `skills/cross-project-dispatch/SKILL.md`）。
 
 ## 版本
 
-- `VERSION` 为技能版本；`AGENTS.md` 受控区块会记录 `v<version>` 与 `digest`。
+- **双版本模型（DEV-205）**：技能版本 Skill-Version = `agent-workflow/VERSION`（semver，任何发版 bump；插件显示、技能实体安装消费）；骨架版本 Framework-Version = `agent-workflow/FRAMEWORK_VERSION`（固定路径，仅骨架契约——bin/awf、AGENTS.md.tmpl、project.yaml.tmpl、账本结构、check 门禁、pre-commit、README.md 骨架文件——变化时 bump；`awf upgrade` 判定与插件 outdated 消费）。
+- **两版解耦**：技能更新只重装技能实体（install.sh），不触发项目全量升级；项目升级按骨架版差量判定（相同默认跳过，`--force` 强刷；不同/缺失复制骨架并登记目标骨架版）。`FRAMEWORK_VERSION` 勿放项目根（与锚点铁律同位置规范），init/upgrade 自动登记，不进 project.yaml 键、不走 version_file。
+- `AGENTS.md` 受控区块会记录 `v<version>` 与 `digest`。
 - 版本锚点位置：默认 `agent-workflow/VERSION`（DEV-198/SP-302：勿放项目根——macOS 大小写不敏感 FS 上根 `VERSION` 会遮蔽 libc++ `<version>` 头，Unity IL2CPP 全量构建报错；`awf check` 对根 `VERSION` 给迁移软提示）。
 - 发布：`git tag v0.1.0 && git push --tags`。
 

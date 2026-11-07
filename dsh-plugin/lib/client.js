@@ -1784,7 +1784,7 @@ window.__ModuleLoader__.load({
       const [regBusy, setRegBusy] = useState(false)
       const [regError, setRegError] = useState(null)
       const [regLocal, setRegLocal] = useState(false) // 仅本地（不推送到远端）
-      const [versions, setVersions] = useState(null) // {status, installed, scaffold, latestAWF, latestRelease, upgradeTo}
+      const [versions, setVersions] = useState(null) // {status, installed, scaffold, latestAWF, latestRelease, latestFramework, installedFramework, skillVersion, upgradeTo}
       const [upgrading, setUpgrading] = useState(false) // 升级指令已注入 / 升级进行中
       const [upError, setUpError] = useState(null)
       const [taskActions, setTaskActions] = useState({})
@@ -2619,8 +2619,8 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * DEV-035 框架版本状态条。
-     * @param {object} vs {status: latest|outdated|unknown, installed, scaffold, latestAWF, latestRelease, upgradeTo}
+     * DEV-035 框架版本状态条（双版本模型 DEV-205：outdated 文案按骨架版差量展示）。
+     * @param {object} vs {status: latest|outdated|unknown, installed, scaffold, latestAWF, latestRelease, latestFramework, installedFramework, skillVersion, upgradeTo}
      * @param {object} [ui] {onUpgrade, upgrading, upError}
      */
     function renderVersionBar(vs, ui) {
@@ -2646,7 +2646,9 @@ window.__ModuleLoader__.load({
           },
         },
           h('span', { style: { color: C.error } }, '⚠'),
-          h('span', null, `工作流可升级：${vs.installed || vs.scaffold || '未知'} → ${vs.upgradeTo || '最新'}`),
+          h('span', null, (vs.installedFramework && vs.latestFramework)
+            ? `工作流可升级（骨架 ${vs.installedFramework} → ${vs.latestFramework}）`
+            : `工作流可升级：${vs.installed || vs.scaffold || '未知'} → ${vs.upgradeTo || '最新'}`),
           U.upgrading ? h('span', { style: { fontSize: F(11), color: C.success } }, '升级指令已发给 agent，完成后自动刷新')
             : typeof U.onUpgrade === 'function'
               ? h('button', {
@@ -2698,14 +2700,20 @@ window.__ModuleLoader__.load({
       const proj = ledger.project || {}
       const vs = U.versions || null
       // 版本号并入第一栏：latest → 绿点 + v{installed}；outdated → 黄点 + 可升级（点击去升级）。
-      // 版本信号不存在时（未登记 kit / 读不到 AWF_VERSION）不显示。
+      // 双版本模型（DEV-205）：installed 优先展示骨架版（v{installedFramework}）；outdated 按骨架差量判定；
+      // 技能版本（skillVersion = kit agent-workflow/VERSION）以独立 chip 突出显示。
+      // 版本信号不存在时（未登记 kit / 读不到骨架版）不显示。
       const upgradable = vs && (vs.status === 'outdated' || vs.status === 'unknown') && typeof U.onUpgrade === 'function'
       const versionChip = vs && vs.installed
         ? h('button', {
             onClick: upgradable ? U.onUpgrade : undefined,
             disabled: !upgradable || !!U.upgrading,
-            title: vs.status === 'latest' ? '工作流已最新'
-              : (vs.status === 'outdated' ? '工作流可升级：' + (vs.installed || vs.scaffold || '?') + ' → ' + (vs.upgradeTo || '最新') + '（点击升级）' : '框架版本'),
+            title: vs.status === 'latest' ? '工作流已最新（骨架版本 ' + (vs.installedFramework || vs.installed || '?') + '）'
+              : (vs.status === 'outdated'
+                ? ((vs.installedFramework && vs.latestFramework)
+                  ? '工作流可升级（骨架 ' + vs.installedFramework + ' → ' + vs.latestFramework + '）：点击升级'
+                  : '工作流可升级：' + (vs.installed || vs.scaffold || '?') + ' → ' + (vs.upgradeTo || '最新') + '（点击升级）')
+                : '骨架版本未知（未登记 agent-workflow-kit 或版本不可读）'),
             style: {
               display: 'inline-flex', alignItems: 'center', gap: 4,
               fontSize: F(11), fontWeight: 700, color: vs.status === 'outdated' ? C.warn : C.sub,
@@ -2718,6 +2726,19 @@ window.__ModuleLoader__.load({
             vs.status === 'latest' ? h('span', { style: { color: C.success, fontWeight: 700 } }, '●') : null,
             vs.status === 'outdated' ? h('span', { style: { color: C.warn, fontWeight: 700 } }, '⚠') : null,
             String(vs.installed || ''))
+        : null
+      // DEV-205：技能版本 chip（Skill-Version = kit agent-workflow/VERSION；插件显示用，不参与 outdated 判定）
+      const skillChip = vs && vs.skillVersion
+        ? h('span', {
+            title: '技能版本（Skill-Version = kit agent-workflow/VERSION）：' + vs.skillVersion,
+            style: {
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              fontSize: F(11), fontWeight: 600, color: C.sub,
+              background: C.surface,
+              border: '1px solid color-mix(in srgb, ' + C.border + ' 72%, transparent)',
+              borderRadius: C.radiusSm, padding: '1px 7px', flexShrink: 0,
+            },
+          }, '技能版本 ' + String(vs.skillVersion))
         : null
       const copyBtn = typeof U.onCopyPath === 'function' && proj.path
         ? h('button', {
@@ -2738,7 +2759,8 @@ window.__ModuleLoader__.load({
         },
           h('div', { style: { fontSize: 14, fontWeight: 800, color: C.text, lineHeight: 1.3, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             proj.name || '未命名项目'),
-          versionChip),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+            skillChip, versionChip)),
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 6,
