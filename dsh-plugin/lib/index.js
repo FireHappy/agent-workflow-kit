@@ -469,10 +469,10 @@ export function buildActPrompt({ action, id, type, projectPath, reason, engine =
   }[action]
   const constraint = {
     init: INIT_AGENT_GUIDE,
-    start: `按阶段代理模型（DEV-038）：动作先派独立子代理分析（任务路由/可否执行）再处理，不占用主会话。该任务已登记在 agent-workflow/tasks/${type}/current.md（状态 active）。按 AGENTS.md 任务路由决定是否建队：可并行拆分才建队，小任务单会话直接完成并说明原因；approval=automatic（本仓库已授权）；完成后按团队流程回填账本（验证→review→归档）。`,
-    'return-todo': `按阶段代理模型（DEV-038）：先派独立子代理分析（未提交改动/团队是否仍在执行/todo.md 是否有可恢复行），确认可放回才从 current.md 移除块并恢复 todo.md 行；不可则说明原因不改账本。`,
-    delete: `按阶段代理模型（DEV-038）：先派独立子代理分析（修改范围/依赖/验收进度/git 未提交改动），可删除则移除块并在 done.md 追加[已撤销]行（需回退 git 修改时分析后执行）；不可则说明原因不改账本。`,
-    'progress-backfill': `面板检测到该任务可能未回填（原因：${reason || '信号未知'}）。按阶段代理模型（DEV-038）：状态字段应在启动阶段代理那一刻已流转（启动验证→verify、启动复核→review），回填只补验收勾选与证据，且由独立子代理执行、不占用主会话——优先派一个「账本回填子代理」处理（读账本→对照证据→改 current.md→跑 awf status→回执），子代理不可用时才自行处理。约束：
+    start: `按阶段代理模型：动作先派独立子代理分析（任务路由/可否执行）再处理，不占用主会话。该任务已登记在 agent-workflow/tasks/${type}/current.md（状态 active）。按 AGENTS.md 任务路由决定是否建队：可并行拆分才建队，小任务单会话直接完成并说明原因；approval=automatic（本仓库已授权）；完成后按团队流程回填账本（验证→review→归档）。`,
+    'return-todo': `按阶段代理模型：先派独立子代理分析（未提交改动/团队是否仍在执行/todo.md 是否有可恢复行），确认可放回才从 current.md 移除块并恢复 todo.md 行；不可则说明原因不改账本。`,
+    delete: `按阶段代理模型：先派独立子代理分析（修改范围/依赖/验收进度/git 未提交改动），可删除则移除块并在 done.md 追加[已撤销]行（需回退 git 修改时分析后执行）；不可则说明原因不改账本。`,
+    'progress-backfill': `面板检测到该任务可能未回填（原因：${reason || '信号未知'}）。按阶段代理模型：状态字段应在启动阶段代理那一刻已流转（启动验证→verify、启动复核→review），回填只补验收勾选与证据，且由独立子代理执行、不占用主会话——优先派一个「账本回填子代理」处理（读账本→对照证据→改 current.md→跑 awf status→回执），子代理不可用时才自行处理。约束：
 1. 若状态未随阶段启动流转，先补状态（按实际阶段）；再对照任务块「验收标准」逐条判断：**判断型条目**已完成但未勾选的勾上 - [x]；**命令类 [cmd] 条目不要手动勾选**（由程序验证后带证据勾选，见任务块 awf:evidence 注释）；
 2. 按实际进展更新 | 状态 |（active/verify/review）与「最近更新」；
 3. 只回填事实，不虚构进度；无法判断的保持原样并说明。`,

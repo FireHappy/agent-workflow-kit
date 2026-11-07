@@ -129,7 +129,7 @@ git tag --list --sort=-v:refname
   - `patch`：向后兼容的缺陷修复
 - 版本号只有一个落点（monorepo 例外：每个受影响包的落点都要改齐，版本保持一致）
 - 若语言生态有原生版本字段（`package.json` / `Cargo.toml` / `pom.xml` / `gradle.properties`），把 `version_file` 指向它，**只改一处**，避免多处手改漂移
-- **锚点位置（铁律，DEV-145 + SP-302）**：`version_file` 指向的文件**不得放在项目根**——macOS 大小写不敏感文件系统上，根 `VERSION` 文本文件会与 C++ 标准库头 `<version>` 撞名：Bee clang（Unity IL2CPP）带 `-I"."`，libc++ `cstddef` 内 `#include <version>` 命中 `./VERSION` → `expected unqualified-id` 级联大量误报（Linux/CI 大小写敏感不触发；uxrsample 2026-11-07 实测，SP-302 记录：移走即 0 错误）。**Unity / C++ 项目一律把锚点放 `agent-workflow/VERSION`**：
+- **锚点位置（铁律）**：`version_file` 指向的文件**不得放在项目根**——macOS 大小写不敏感文件系统上，根 `VERSION` 文本文件会与 C++ 标准库头 `<version>` 撞名：Bee clang（Unity IL2CPP）带 `-I"."`，libc++ `cstddef` 内 `#include <version>` 命中 `./VERSION` → `expected unqualified-id` 级联大量误报（Linux/CI 大小写敏感不触发；2026-11-07 uxrsample 实测：移走即 0 错误）。**Unity / C++ 项目一律把锚点放 `agent-workflow/VERSION`**（出处见 memory/history；编号仅作追溯不参与指引）：
   ```sh
   git mv VERSION agent-workflow/VERSION
   # agent-workflow/project.yaml 设 version_file: agent-workflow/VERSION
@@ -154,7 +154,7 @@ git tag --list --sort=-v:refname
 - 调整 xxx 默认行为（不兼容：旧配置需迁移，见 docs/xxx.md）
 
 ### Fixed
-- 修复 xxx 场景下的崩溃（来源：DEV-012）
+- 修复 xxx 场景下的崩溃（来源：如 <任务ID> 或用户直接触发）
 
 ### Removed
 - 移除废弃的 xxx 参数
@@ -196,7 +196,7 @@ git status --short
 2. 在该发版提交上打**注释 tag**（`-a`，带一行说明；不要轻量 tag）：
 
 ```sh
-# 版本号文件 = project.yaml 里 version_file 指向的路径（默认根 VERSION；DEV-198 起 Unity/C++ 项目
+# 版本号文件 = project.yaml 里 version_file 指向的路径（默认根 VERSION；Unity/C++ 项目
 # 应为 agent-workflow/VERSION——锚点位置铁律见 Step 2，勿放项目根，避免 IL2CPP 遮蔽 <version> 头）；
 # 只 git add 版本号文件与 CHANGELOG.md；tag 名按 Step 0 的既有风格
 VF="$(awk -F': ' '$1=="version_file"{print $2}' agent-workflow/project.yaml)"

@@ -104,7 +104,7 @@ cd <项目目录> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf status       
 - [ ] `project.yaml` / `tasks/**` / `memory/**` / `tools/**` 逐字节保留
 - [ ] `check` 退出码 0；旧账本格式问题输出含可直接执行的修复指引
 - [ ] 只本地 commit（消息含任务 ID），未 push
-## v1.2.0 技能化迁移（DEV-184）
+## 技能化迁移（v1.2.0 起）
 
 - 项目内不再有 `agent-workflow/workflows/` 目录：流程细节全部在技能 agent-workflow-scaffold（`skills/` 各流程技能），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
 - 存量项目（带 workflows/ 副本）：`./bin/awf upgrade <项目> --slim` 清理副本迁移到技能化形态（细节已在技能，副本不再需要）。
