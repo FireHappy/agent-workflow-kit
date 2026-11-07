@@ -2724,19 +2724,6 @@ window.__ModuleLoader__.load({
             vs.status === 'outdated' ? h('span', { style: { color: C.warn, fontWeight: 700 } }, '⚠') : null,
             String(vs.skillVersion))
         : null
-      // DEV-205：技能版本 chip（Skill-Version = kit agent-workflow/VERSION；插件显示用，不参与 outdated 判定）
-      const skillChip = vs && vs.skillVersion
-        ? h('span', {
-            title: '技能版本（Skill-Version = kit agent-workflow/VERSION）：' + vs.skillVersion,
-            style: {
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              fontSize: F(11), fontWeight: 600, color: C.sub,
-              background: C.surface,
-              border: '1px solid color-mix(in srgb, ' + C.border + ' 72%, transparent)',
-              borderRadius: C.radiusSm, padding: '1px 7px', flexShrink: 0,
-            },
-          }, '技能版本 ' + String(vs.skillVersion))
-        : null
       const copyBtn = typeof U.onCopyPath === 'function' && proj.path
         ? h('button', {
             className: 'awf-icon-btn' + (U.pathCopied ? ' awf-icon-btn-ok' : ''),
