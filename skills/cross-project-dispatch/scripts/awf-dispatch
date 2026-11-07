@@ -1107,15 +1107,16 @@ def awf_title_sender(title: str) -> str:
 
 
 def row_sender_key(title: str) -> str:
-    """复用池的派发者键：`[awf] [<派发者>]` 取派发者段；旧格式 `[awf] <项目>`
-    （DEV-126 时代、无派发者段）按 lead 处理——会被 lead 池复用并升级改名。"""
+    """会话的派发者键：`[awf] [<派发者>]` 取派发者段；旧格式 `[awf] <项目>`
+    （DEV-126 时代、无派发者段）按 lead 处理（--session 串台校验 M2 使用）。"""
     if not title.startswith(AWF_TITLE_PREFIX):
         return ""
     return awf_title_sender(title) or "lead"
 
 
 def is_legacy_session_title(title: str, project: str) -> bool:
-    """模块约定之前的旧标题：`<项目> · <任务>`（没有 `[awf]` 标记）。"""
+    """旧格式标题（无 `[awf]` 标记）：`<项目> · <任务>`（DEV-126 前，用户自建/旧派发
+    产物）。带 `[awf]` 前缀的一律走 [awf] 复用池，不进 legacy 分支。"""
     title = (title or "").strip()
     if not title or title.startswith(AWF_TITLE_PREFIX):
         return False
@@ -1136,15 +1137,17 @@ def _reuse_rank(row: dict):
 
 def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
                          legacy_probe=None, sender: str = ""):
-    """选承接会话：优先「同 cwd + 同派发者 + 空闲」的 [awf] 会话（DEV-134）。
+    """选承接会话（复用规则：**在 `[awf]` 前缀会话中取闲置会话，改名接新任务**）：
 
-    复用池 = 同 cwd 下标题派发者段 == 本次派发者的会话，最多 {MAX} 个：
+    同 cwd（目标项目）下标题以 `[awf]` 开头的会话构成复用池——**不区分
+    派发者段/任务名/新旧格式**（`[awf] [派发者] [任务]` 新格式与
+    `[awf] <项目> · <模块>` DEV-134 前旧常驻都算）：
     - 池里有空闲（running=False）→ 选最新空闲的复用（改名接新任务）；
     - 池里都忙：池未满（<{MAX}）→ 返回 None，调用方新建扩充并发；
-    - 池满（>={MAX}）都忙 → 返回一个忙碌候选，调用方等它空闲（不新建第 4 个）。
-    任务名段（有/无/新旧）不参与判定，复用后由调用方改名覆盖；不做完成还原。
-    匹配不到同派发者会话时，旧格式（无 [awf] 段）迁移由 legacy_probe 决定；
-    都不满足返回 None 让调用方新建。""".format(MAX=MAX_SENDER_SESSIONS)
+    - 池满（>={MAX}）都忙 → 返回一个忙碌候选，调用方等它空闲（不新建第 {MAX}+1 个）。
+    任务名段不参与判定，复用后由调用方改名覆盖。
+    非 `[awf]` 前缀的会话（用户自建/普通）不进池；池为空时的无前缀旧格式
+    （DEV-126 前 `<项目> · <任务>`）迁移由 legacy_probe 把关闭（RT-1）。""".format(MAX=MAX_SENDER_SESSIONS)
     project = Path(target).name
     real = os.path.realpath(str(target))
     same = []
@@ -1158,21 +1161,20 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
             continue
         same.append(row)
 
-    # DEV-134：同 cwd + 标题的派发者键 == 本次派发者（段级精确匹配，避免
-    # [lead] 误吞 [leadership] 这类前缀）；旧格式 [awf] <项目> 归 lead 池（平滑升级）。
-    # 任务名段不参与判定，复用后改名覆盖。
-    sender_raw = (sender or "").strip()
-    sender_key = clean_title(sender_raw, limit=20) if sender_raw else "lead"
-    pool = [row for row in same if row_sender_key(session_title(row)) == sender_key]
+    pool = [row for row in same if (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX)]
     if pool:
         idle = [row for row in pool if row.get("running") is False]
         if idle:
             return sorted(idle, key=_reuse_rank)[0]
         if len(pool) >= MAX_SENDER_SESSIONS:
-            # 并发达上限：都忙就等（调用方 wait_for_idle；超时按 --queue-timeout 报错）
+            # 并发达上限（每项目 [awf] 会话总数 ≤ {MAX}）：都忙就等（调用方
+            # wait_for_idle；超时按 --queue-timeout 报错），不新建第 {MAX}+1 个。
             return sorted(pool, key=_reuse_rank)[0]
-        # 池未满：新建扩充并发（到第 3 个为止）
+        # 池未满：新建扩充并发（到第 {MAX} 个为止）
         return None
+    # [awf] 池为空时的 legacy 兜底：无 [awf] 前缀的旧格式（<项目> · xxx，DEV-126 前）
+    # 只有 probe 确认（--allow-legacy-reuse / 消息含派发任务包标记）且唯一候选才迁移；
+    # 多条不猜、运行中不迁移。带 [awf] 前缀的会话已在上方 [awf] 池处理，不进这里。
     legacy = [
         row
         for row in same
@@ -1187,6 +1189,7 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
             # 探子读不到消息记录（会话/page 失败等）：宁可不迁移，也不赌。
             return None
         return legacy[0]
+    return None
     return None
 
 

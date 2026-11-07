@@ -423,10 +423,10 @@ assert module.select_reuse_session([other_module], target, "工作流", sender="
     "不同模块（同派发者）复用到同一会话"
 assert module.select_reuse_session([same, other_module], target, "工作流", sender="lead")["sessionId"] == "s-other-module", \
     "多候选选 updatedAt 最新"
-# 不同派发者不复用（lead 不借 member 的会话）
+# 不同派发者的 [awf] 闲置会话可复用（复用池 = 项目下全部 [awf] 会话，跨派发者；改名接新任务）
 member = row("s-member", title=module.awf_session_title("member", "TEST-003 任务"), updated=99)
-assert module.select_reuse_session([member], target, "工作流", sender="lead") is None, \
-    "不同派发者的会话不得借用"
+assert module.select_reuse_session([member], target, "工作流", sender="lead")["sessionId"] == "s-member", \
+    "不同派发者的 [awf] 闲置会话可复用（改名接新任务）"
 
 # 池未满时运行中会话不选中 → 新建扩充（DEV-134 并发上限内扩充；满了才等）
 running_same = row("s-running", title=title, running=True, updated=99)
