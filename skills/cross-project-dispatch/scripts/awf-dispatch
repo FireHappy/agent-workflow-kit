@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import datetime
 import json
 import os
@@ -70,6 +71,11 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # 非 Unix（Windows 等）：文件锁退化为空操作
+    fcntl = None  # type: ignore[assignment]
 
 DEFAULT_WEB_URL = "http://127.0.0.1:51439"
 DEFAULT_TIMEOUT = 300
@@ -115,6 +121,11 @@ DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli
 # 降级写收件箱文件（默认目录相对派发方/目标侧 cwd）。回执内容仍按必报点表组织。
 REPORT_MARKER = "【回执请求】"
 REPORT_INBOX_DIR = "dispatch/reports/inbox"
+# DEV-214：本地归档台账（派发方 cwd 下的 dispatch/ 目录，不入库）——记录被 --cleanup
+# 经 workspace/archiveSession 归档的会话 id；组装复用池/统计每项目 [awf] 会话数时排除。
+ARCHIVED_LEDGER_NAME = "archived-sessions.json"
+# DEV-214：同项目新建决策互斥锁文件名前缀（dispatch/.lock-<project>）。
+LOCK_FILE_PREFIX = ".lock-"
 
 
 class DispatchError(Exception):
@@ -706,6 +717,10 @@ class DshApi:
         value = self.rpc("workspace/create", {"request": {"path": str(path)}})
         return value.get("workspace", {})
 
+    def archive_session(self, session_id: str) -> None:
+        """经 workspace/archiveSession 归档会话（--cleanup 使用）。"""
+        self.rpc("workspace/archiveSession", {"request": {"sessionId": session_id}})
+
 
 # ---------------------------------------------------------------- 本机状态感知（DISPATCH-143）
 
@@ -1104,7 +1119,7 @@ def _reuse_rank(row: dict):
 
 
 def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
-                         legacy_probe=None, sender: str = ""):
+                         legacy_probe=None, sender: str = "", archived_ids=None):
     """选承接会话（复用规则：**在 `[awf]` 前缀会话中取闲置会话，改名接新任务**）：
 
     同 cwd（目标项目）下标题以 `[awf]` 开头的会话构成复用池——**不区分
@@ -1115,12 +1130,18 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
     - 池满（>={MAX}）都忙 → 返回一个忙碌候选，调用方等它空闲（不新建第 {MAX}+1 个）。
     任务名段不参与判定，复用后由调用方改名覆盖。
     非 `[awf]` 前缀的会话（用户自建/普通）不进池；池为空时的无前缀旧格式
-    （DEV-126 前 `<项目> · <任务>`）迁移由 legacy_probe 把关闭（RT-1）。""".format(MAX=MAX_SENDER_SESSIONS)
+    （DEV-126 前 `<项目> · <任务>`）迁移由 legacy_probe 把关闭（RT-1）。
+    DEV-214：本地归档台账（dispatch/archived-sessions.json）记录的会话 id 不进池——
+    组装复用池与统计每项目 [awf] 会话数时排除（archived_ids 缺省从台账读取）。""".format(MAX=MAX_SENDER_SESSIONS)
     project = Path(target).name
     real = os.path.realpath(str(target))
+    if archived_ids is None:
+        archived_ids = load_archived_session_ids()
     same = []
     for row in rows or []:
         if not isinstance(row, dict):
+            continue
+        if str(row.get("sessionId")) in archived_ids:
             continue
         cwd = row.get("cwd") or ""
         if not cwd or os.path.realpath(cwd) != real:
@@ -1880,6 +1901,280 @@ def run_prune(args) -> int:
     return 2 if errors else 0
 
 
+# ---------------------------------------------------------------- 本地归档台账与并发互斥（DEV-214）
+#
+# 四件套：① 归档台账（archived-sessions.json）排除已归档会话；② --new 超上限需
+# --allow-over-3 确认并留痕；③ 同项目新建决策文件锁串行化、锁后重读池再决策；
+# ④ --cleanup 列出每项目超 3 的空闲 [awf] 会话并归档写入台账。
+# 台账与锁文件都在派发方 cwd 的 dispatch/ 下（.gitignore 已忽略 dispatch/，不入库）。
+
+
+def archived_ledger_path() -> Path:
+    """本地归档台账路径：<cwd>/dispatch/archived-sessions.json。"""
+    return Path.cwd() / "dispatch" / ARCHIVED_LEDGER_NAME
+
+
+def load_archived_session_ids() -> set:
+    """读归档台账，返回已归档会话 id 集合；台账缺失/损坏返回空集（保守：不误伤）。"""
+    path = archived_ledger_path()
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    archived = data.get("archived") if isinstance(data, dict) else None
+    if not isinstance(archived, list):
+        return set()
+    return {str(item.get("sessionId")) for item in archived if isinstance(item, dict)}
+
+
+def record_archived_sessions(entries: list) -> None:
+    """把归档记录（{sessionId, project, title}）追加进台账（按 sessionId 去重）。
+    --cleanup --apply 归档成功后调用；归档过的会话从此不参加复用池/数量统计。"""
+    path = archived_ledger_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = []
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            existing = data.get("archived", []) if isinstance(data, dict) else []
+        except (OSError, ValueError):
+            existing = []
+    known = {str(item.get("sessionId")) for item in existing if isinstance(item, dict)}
+    for entry in entries or []:
+        sid = str(entry.get("sessionId"))
+        if not sid or sid in known:
+            continue
+        item = {"sessionId": sid, "project": entry.get("project") or "",
+                "title": entry.get("title") or "",
+                "archivedAt": datetime.datetime.now().isoformat(timespec="seconds")}
+        existing.append(item)
+        known.add(sid)
+    path.write_text(
+        json.dumps({"archived": existing}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def run_forget_archived(args) -> int:
+    """--forget-archived：重置本地归档台账（删除存档文件）。"""
+    path = archived_ledger_path()
+    if path.is_file():
+        path.unlink()
+        msg = f"已重置归档台账：{path}（删除；其中会话不再被排除，恢复进入复用池/统计）"
+        reset = True
+    else:
+        msg = f"归档台账不存在：{path}（无需重置）"
+        reset = False
+    if args.json:
+        print(json.dumps({"ok": True, "mode": "forget-archived",
+                          "path": str(path), "reset": reset}, ensure_ascii=False))
+    else:
+        print(msg)
+    return 0
+
+
+def project_lock_path(target: Path) -> Path:
+    """同项目新建决策锁文件：<cwd>/dispatch/.lock-<project>。"""
+    base = Path.cwd() / "dispatch"
+    token = re.sub(r"[^A-Za-z0-9_.-]", "_", (target.name or "project"))
+    return base / (LOCK_FILE_PREFIX + token)
+
+
+@contextlib.contextmanager
+def project_new_lock(target: Path):
+    """同一项目新建决策的文件锁串行化：持锁期间同项目其他派发进程/线程阻塞；
+    调用方**在锁内重读池再决策**，避免并发新建出第 N+1 个会话。flock 随进程
+    退出/关闭自动释放（持锁方崩溃不产生永久锁）；非 Unix 平台退化为空操作。"""
+    if fcntl is None:
+        yield
+        return
+    lock_path = project_lock_path(target)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            # 有并发方正在决策：阻塞等它完成（其释放/退出后自动拿到）
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
+def project_awf_pool(rows, target: Path, archived_ids=None) -> list:
+    """项目 [awf] 会话池：同 cwd + `[awf]` 前缀 + 未归档（排除台账记录的 id）。
+    统计每项目 [awf] 会话数（上限判定/监听池/--cleanup）统一走这里。"""
+    if archived_ids is None:
+        archived_ids = load_archived_session_ids()
+    real = os.path.realpath(str(target))
+    pool = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("sessionId")) in archived_ids:
+            continue
+        if row.get("blank") is not False:
+            continue
+        cwd = row.get("cwd") or ""
+        if not cwd or os.path.realpath(cwd) != real:
+            continue
+        if not (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX):
+            continue
+        pool.append(row)
+    return pool
+
+
+def over_limit_guard(pool: list, allow_over_3: bool, json_mode: bool = False) -> str:
+    """--new 上限校验（DEV-214）：目标项目 [awf] 池 ≥ MAX 且**全忙**时，--new 继续
+    新建需 --allow-over-3 显式确认，不再静默绕过上限；确认后返回留痕说明（写入派发日志）。
+    不满足条件返回空串。"""
+    if len(pool) < MAX_SENDER_SESSIONS:
+        return ""
+    if any(row.get("running") is False for row in pool):
+        # 池满但有空闲：--new 用于隔离/调试的语义仍成立，不拦（仅全忙才算满池等待场景）
+        return ""
+    if not allow_over_3:
+        raise DispatchError(
+            f"--new 超项目上限：目标项目已有 {len(pool)} 个 [awf] 会话且全部运行中，"
+            f"已到每项目 {MAX_SENDER_SESSIONS} 个并发上限；继续新建会突破该上限。"
+            "如确认需要隔离会话，请显式加 --allow-over-3（本次超限新建会写入派发日志留痕）"
+        )
+    emit(
+        f"超上限新建：目标项目 [awf] 会话已达 {len(pool)} 个且全忙，"
+        f"--allow-over-3 已确认，仍创建新会话（日志留痕）",
+        json_mode,
+    )
+    return "超上限新建（--allow-over-3 确认）"
+
+
+def collect_cleanup_candidates(rows, archived_ids=None) -> list:
+    """按项目聚合 [awf] 会话，找出**每项目超 {MAX} 的空闲 [awf] 会话**（--cleanup 候选）。
+    规则：每项目保留最近更新的 {MAX} 个 [awf] 会话；其余会话中空闲（running=False）为归档
+    候选、运行中为跳过（不归档运行中会话）。返回 [{{"project","path","keep","candidates","skipped"}}]。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    if archived_ids is None:
+        archived_ids = load_archived_session_ids()
+    by_project = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("sessionId")) in archived_ids:
+            continue
+        if row.get("blank") is not False:
+            continue
+        cwd = (row.get("cwd") or "").strip()
+        if not cwd:
+            continue
+        if not (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX):
+            continue
+        key = os.path.realpath(cwd)
+        info = by_project.setdefault(
+            key, {"project": os.path.basename(key.rstrip("/\\")) or key,
+                  "path": key, "sessions": []})
+        info["sessions"].append(row)
+    groups = []
+    for info in by_project.values():
+        pool = info["sessions"]
+        if len(pool) <= MAX_SENDER_SESSIONS:
+            continue
+        ranked = sorted(pool, key=lambda r: r.get("updatedAt") or 0, reverse=True)
+        info["keep"] = ranked[:MAX_SENDER_SESSIONS]
+        over = ranked[MAX_SENDER_SESSIONS:]
+        info["candidates"] = [r for r in over if r.get("running") is False]
+        info["skipped"] = [r for r in over if r.get("running") is not False]
+        if info["candidates"] or info["skipped"]:
+            groups.append(info)
+    return groups
+
+
+def cleanup_sessions(api, rows, apply=False, json_mode=False) -> dict:
+    """--cleanup 主体：列出/归档每项目超 {MAX} 的空闲 [awf] 会话。
+    每个候选经 workspace/archiveSession 归档（apply=True）并写入本地归档台账
+    archived-sessions.json；运行中的超限会话跳过。返回结果字典（供 --json 与测试断言）。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    groups = collect_cleanup_candidates(rows)
+    result = {"ok": True, "mode": "cleanup", "dryRun": not apply,
+              "projects": [], "archived": [], "skipped": [], "errors": []}
+    for info in groups:
+        proj = {
+            "project": info["project"],
+            "path": info["path"],
+            "total": len(info["sessions"]),
+            "keep": [r.get("sessionId") for r in info["keep"]],
+            "candidates": [r.get("sessionId") for r in info["candidates"]],
+            "skipped": [r.get("sessionId") for r in info["skipped"]],
+        }
+        result["projects"].append(proj)
+        for row in info["candidates"]:
+            sid = row.get("sessionId")
+            if apply:
+                try:
+                    if hasattr(api, "archive_session"):
+                        api.archive_session(sid)
+                    else:
+                        api.rpc("workspace/archiveSession", {"request": {"sessionId": sid}})
+                except DispatchError as error:
+                    result["errors"].append({"sessionId": sid, "error": str(error)})
+                    emit(f"FAIL  归档失败 {sid}：{error}", json_mode)
+                    continue
+                result["archived"].append({
+                    "sessionId": sid, "project": info["project"], "title": session_title(row)})
+                emit(f"已归档会话：{sid}（{info['project']}）", json_mode)
+        for row in info["skipped"]:
+            result["skipped"].append({
+                "sessionId": row.get("sessionId"), "project": info["project"],
+                "title": session_title(row)})
+    if apply and result["archived"]:
+        record_archived_sessions(result["archived"])
+    result["ok"] = not result["errors"]
+    return result
+
+
+def run_cleanup(args) -> int:
+    """--cleanup 命令入口：扫描全部工作区会话，列出/归档每项目超 {MAX} 的空闲 [awf] 会话。""".format(MAX=MAX_SENDER_SESSIONS)
+    api = DshApi(args.web_url)
+    rows = api.sessions()
+    apply = bool(args.apply)
+    result = cleanup_sessions(api, rows, apply=apply, json_mode=args.json)
+    if args.json:
+        result["ledger"] = str(archived_ledger_path())
+        print(json.dumps(result, ensure_ascii=False))
+        return 2 if result["errors"] else 0
+    mode = "apply（会归档会话并写入台账）" if apply else "dry-run（只读；加 --apply 才归档）"
+    print(f"cleanup：{mode}")
+    if not result["projects"]:
+        print("没有需要清理的项目：[awf] 会话均未超过每项目 3 个。")
+        return 0
+    for proj in result["projects"]:
+        print()
+        print(f"{proj['project']}（{proj['path']}）：共 {proj['total']} 个 [awf] 会话")
+        print(f"  保留（最近更新 {len(proj['keep'])} 个）：" + "、".join(proj["keep"]))
+        if proj["candidates"]:
+            print(
+                f"  超限空闲 {len(proj['candidates'])} 个"
+                + ("" if apply else "（加 --apply 归档）")
+                + "：" + "、".join(proj["candidates"]))
+        if proj["skipped"]:
+            print(f"  超限运行中（跳过，不归档）：" + "、".join(proj["skipped"]))
+    if result["archived"]:
+        print(f"\n已归档 {len(result['archived'])} 个会话并写入台账：{archived_ledger_path()}")
+    if result["errors"]:
+        print(f"\n归档失败 {len(result['errors'])} 个（见上）。")
+        return 2
+    if not apply:
+        print("\ndry-run：未归档任何会话；确认后加 --apply 执行。")
+    else:
+        print(f"\n台账：{archived_ledger_path()}")
+    return 0
+
+
 # ---------------------------------------------------------------- 派发模式
 
 
@@ -1931,6 +2226,100 @@ def preflight(target: Path, args, need_channel: bool):
     emit(f"G2 工作区：ok（{workspace.get('title')} / {workspace.get('workspaceId')}）", args.json)
     emit(f"G4 通道：ok（{api.base}）", args.json)
     return result
+
+
+def wait_session_ready(api, rows, session_id, target, args):
+    """复用路径公共等待：先确认会话存在；运行中的会话进入等待队列——项目 [awf] 池满
+    （≥{MAX}）时启动独立监听子进程监听整个池（任一会话空闲即返回复用），测试桩/非
+    DshApi 走内联轮询。返回可发送的会话行；会话消失（SESSION_GONE）与超时分别抛错。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    row = find_session_in(rows, session_id) or find_session(api, session_id)
+    if row is None:
+        raise DispatchError(
+            f"复用会话在等待前消失了：{session_id}；会话不可恢复，请重新派发（或用 --new 新建）"
+        )
+    if row.get("running") is not False:
+        emit(
+            f"目标会话 {session_id} 正在运行，进入等待队列（最多 {args.queue_timeout}s；"
+            "--queue-timeout 可调）",
+            args.json,
+        )
+        # 项目池达到 3 个且全忙：启动独立监听子进程监听整个 [awf] 池，
+        # 任一会话空闲即返回给主派发流程复用；测试桩/非 DshApi 仍走内联等待。
+        project_pool = project_awf_pool(rows, target)
+        if isinstance(api, DshApi) and len(project_pool) >= MAX_SENDER_SESSIONS:
+            emit("启动会话监听子进程：等待项目 [awf] 会话池任一空闲后继续发送", args.json)
+            outcome = spawn_idle_listener(
+                api, [r["sessionId"] for r in project_pool], args.queue_timeout, args.json)
+        else:
+            outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json, target=target)
+        if isinstance(outcome, dict) and outcome.get("sessionId"):
+            session_id = outcome["sessionId"]
+            row = outcome
+        if outcome is SESSION_GONE:
+            raise DispatchError(
+                f"等待期间会话消失或被归档：{session_id}；"
+                "原会话不可恢复，请重新派发（GUI 确认后用 --new 新建会话）"
+            )
+        if outcome is None:
+            raise DispatchError(
+                f"目标会话 {session_id} 队列等待超时（>{args.queue_timeout}s）："
+                "会话仍在运行；稍后重试、加大 --queue-timeout，"
+                "或加 --new 新建会话（原会话保留）"
+            )
+        row = outcome
+        emit(f"会话已空闲：{session_id}", args.json)
+    return row
+
+
+def decide_new_session(api, fresh_rows, target, workspace_id, args, module, session_name,
+                       title, sender, legacy_probe) -> dict:
+    """新建决策（DEV-214，在项目文件锁内调用；fresh_rows = 锁后重读的会话列表）。
+
+    锁内**重读池再决策**：
+    - 复用模式：若重读后已有可复用候选（并发调用方刚建出/本机新出现空闲）→ 改复用、
+      不再重复新建；候选运行中返回 running=True，由调用方**锁外**等其空闲（锁内不排队）；
+    - --new 模式：项目 [awf] 池 ≥{MAX} 且全忙 → 需 --allow-over-3 显式确认（否则
+      DispatchError），确认后返回留痕 note（写入派发日志），不再静默绕过上限；
+    - 自动新建保留同名保护（--force 放行）。
+    返回 {{"sessionId","reused","source","renamed","note","running","rows"}}。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    note = ""
+    if args.reuse:
+        cand = select_reuse_session(fresh_rows, target, module,
+                                    legacy_probe=legacy_probe, sender=sender)
+        if cand is not None:
+            sid = cand["sessionId"]
+            running = cand.get("running") is not False
+            renamed = False
+            if not running and reuse_rename_needed(cand, session_name):
+                try:
+                    api.rename(sid, session_name)
+                    renamed = True
+                except DispatchError:
+                    renamed = False
+            return {"sessionId": sid, "reused": True, "source": "复用（并发重读）",
+                    "renamed": renamed, "note": note, "running": running, "rows": fresh_rows}
+        duplicate = [
+            row for row in fresh_rows
+            if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
+            and session_title(row) in (title, session_name)
+        ]
+        if duplicate and not args.force:
+            raise DispatchError(
+                "检测到同名会话，可能已派发过："
+                + "、".join(row["sessionId"] for row in duplicate[:3])
+                + "；确认要再派发请加 --force"
+            )
+    else:
+        # --new 上限校验（DEV-214）：池≥3 且全忙需 --allow-over-3 显式确认；留痕写日志
+        note = over_limit_guard(project_awf_pool(fresh_rows, target),
+                                args.allow_over_3, args.json)
+    created = api.create_session(workspace_id)
+    session_id = created["sessionId"]
+    api.rename(session_id, session_name)
+    return {"sessionId": session_id, "reused": False, "source": "新建",
+            "renamed": True, "note": note, "running": False, "rows": fresh_rows}
 
 
 def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str, args):
@@ -2010,69 +2399,43 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         # 池满（3 个 [awf] 会话且全忙）时 select 已返回忙碌候选，由下方 else 分支进入
         # wait_for_idle 排队等待——达到每项目上限不再是「拒绝不发」，而是等待空闲后再发；
         # 等待超时（--queue-timeout）才报错，--force 为强制新建逃生口。无全局总数上限。
-        # 新建路径：--new 直接建会话，不碰 session/list；自动新建时才做同名保护。
-        # 显式 --new 跳过复用检查与同名保护（用户已明确要新会话）。
-        if args.reuse:
-            duplicate = [
-                row
-                for row in rows
-                if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
-                and session_title(row) in (title, session_name)
-            ]
-            if duplicate and not args.force:
-                raise DispatchError(
-                    "检测到同名会话，可能已派发过："
-                    + "、".join(row["sessionId"] for row in duplicate[:3])
-                    + "；确认要再派发请加 --force"
-                )
-        created = api.create_session(workspace["workspaceId"])
-        session_id = created["sessionId"]
-        api.rename(session_id, session_name)
-        reused = False
-        source = "新建"
+        # DEV-214 并发互斥：同项目新建决策用文件锁（dispatch/.lock-<project>）串行化，
+        # 拿到锁后重读池再决策——并发方刚建出的可复用会话直接改复用，不重复新建；
+        # 显式 --new 做上限校验（池≥3 且全忙需 --allow-over-3），不再静默绕过上限。
+        def _legacy_probe(row: dict) -> bool:
+            # RT-1：显式 --allow-legacy-reuse 直接放行；否则只有会话消息含
+            # 派发任务包标记（旧版派发器在里面派发过）才允许迁移复用。
+            return bool(args.allow_legacy_reuse) or session_has_dispatch_marker(api, row)
+
+        sender_now = resolve_sender(text, getattr(args, "sender", ""))
+        if isinstance(api, DshApi):
+            with project_new_lock(target):
+                decided = decide_new_session(
+                    api, api.sessions(), target, workspace["workspaceId"], args,
+                    module, session_name, title, sender_now, _legacy_probe)
+        else:
+            decided = decide_new_session(
+                api, rows, target, workspace["workspaceId"], args,
+                module, session_name, title, sender_now, _legacy_probe)
+        session_id = decided["sessionId"]
+        reused = decided["reused"]
+        source = decided["source"]
+        renamed = decided["renamed"]
+        if decided["note"]:
+            session_note = decided["note"]
+        if reused and decided.get("running"):
+            # 并发方刚建出的会话已运行：锁已释放，这里等它空闲后再发送（不重复新建）。
+            row = wait_session_ready(api, decided.get("rows") or rows, session_id, target, args)
+            if reuse_rename_needed(row, session_name):
+                try:
+                    api.rename(session_id, session_name)
+                    renamed = True
+                except DispatchError as error:
+                    emit(f"提示：复用会话改名失败（继续发送任务）：{error}", args.json)
     else:
         # 复用路径：先确认会话存在；运行中的会话等它空闲，绝不静默改成新建。
         # 预检刚拉过列表，先用快照；快照里没有才重新查（正常不会发生）。
-        row = find_session_in(rows, session_id) or find_session(api, session_id)
-        if row is None:
-            raise DispatchError(
-                f"复用会话在等待前消失了：{session_id}；会话不可恢复，请重新派发（或用 --new 新建）"
-            )
-        if row.get("running") is not False:
-            emit(
-                f"目标会话 {session_id} 正在运行，进入等待队列（最多 {args.queue_timeout}s；"
-                "--queue-timeout 可调）",
-                args.json,
-            )
-            # 项目池达到 3 个且全忙：启动独立监听子进程监听整个 [awf] 池，
-            # 任一会话空闲即返回给主派发流程复用；测试桩/非 DshApi 仍走内联等待。
-            project_pool = [
-                r for r in (rows or [])
-                if os.path.realpath(r.get("cwd") or "") == os.path.realpath(str(target))
-                and (session_title(r) or "").startswith(AWF_TITLE_PREFIX)
-            ]
-            if isinstance(api, DshApi) and len(project_pool) >= MAX_SENDER_SESSIONS:
-                emit("启动会话监听子进程：等待项目 [awf] 会话池任一空闲后继续发送", args.json)
-                outcome = spawn_idle_listener(
-                    api, [r["sessionId"] for r in project_pool], args.queue_timeout, args.json)
-            else:
-                outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json, target=target)
-            if isinstance(outcome, dict) and outcome.get("sessionId"):
-                session_id = outcome["sessionId"]
-                row = outcome
-            if outcome is SESSION_GONE:
-                raise DispatchError(
-                    f"等待期间会话消失或被归档：{session_id}；"
-                    "原会话不可恢复，请重新派发（GUI 确认后用 --new 新建会话）"
-                )
-            if outcome is None:
-                raise DispatchError(
-                    f"目标会话 {session_id} 队列等待超时（>{args.queue_timeout}s）："
-                    "会话仍在运行；稍后重试、加大 --queue-timeout，"
-                    "或加 --new 新建会话（原会话保留）"
-                )
-            row = outcome
-            emit(f"会话已空闲：{session_id}", args.json)
+        row = wait_session_ready(api, rows, session_id, target, args)
         hint = pressure_hint(row)
         if hint:
             session_note = hint
@@ -2600,11 +2963,20 @@ def main(argv=None) -> int:
             "  awf-dispatch --prune                                  # dry-run：打印清理计划\n"
             "  awf-dispatch --prune --apply                          # 真正删除已完成票据（用完即删）\n"
             "  awf-dispatch --prune --json                           # 结构化输出\n"
+            "  awf-dispatch --cleanup                                # dry-run：列出每项目超 3 的空闲 [awf] 会话\n"
+            "  awf-dispatch --cleanup --apply                        # 归档超限空闲会话并写入台账（workspace/archiveSession）\n"
+            "  awf-dispatch --forget-archived                        # 重置本地归档台账（dispatch/archived-sessions.json）\n"
             "\n--prune：扫描 ./dispatch/tasks/（含子目录，如 upgrade-v<版本>/）下的票据，从正文「- 目标项目：<别名>（<路径>）」\n"
             "        取别名与路径、从文件名取任务 ID；git log --all 命中 ID，或目标账本 done.md 已含 ID → completed。\n"
             "        默认 dry-run 只打印计划，--apply 才删除（git 索引里的票据用 git rm，其余直接删除），\n"
             "        删除后向上清空目录留下空壳（dispatch/tasks 本身保留）。无票据或全部 pending 时退出码 0。\n"
             "        --prune 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。\n"
+            "\n--cleanup（DEV-214 归档台账）：扫描全部工作区会话，按项目聚合 [awf] 前缀会话——每项目保留\n"
+            "        最近更新的 3 个，其余**空闲**会话列为归档候选（运行中跳过不归档）；默认 dry-run 只列出，\n"
+            "        --apply 才逐个经 workspace/archiveSession 归档，并把 {sessionId, project, title, archivedAt}\n"
+            "        写入本地归档台账 dispatch/archived-sessions.json（不入库）。\n"
+            "        **归档台账在组装复用池/统计每项目 [awf] 会话数时排除**——已归档会话不再参加复用与上限统计；\n"
+            "        误重置用 --forget-archived（删除台账，其中会话恢复进入复用池）。--cleanup 不接受 target/task。\n"
             "\n激活式路由（票据来源，DEV-115 定义 / DEV-128 放开转派）：读取任务文件头部的「来源：用户 | 工作流」；\n"
             "        缺省视为用户来源（旧票据兼容）；「来源：工作流」的票据是已派发任务，\n"
             "        DEV-128 起允许按需继续向下一层转派（深度不限），派发时仅提示核对转派理由\n"
@@ -2622,6 +2994,10 @@ def main(argv=None) -> int:
             "        不会静默改成新建；上下文压力 ≥ 0.9 只在输出/日志里提示可考虑 --new，不自动切换。\n"
             "        没有可用会话时才新建并同样命名，作为该项目该模块后续派发的常驻会话。\n"
             "        --new 强制新建（隔离/调试）；--session <id> 直接向指定会话发送；--reuse 可显式书写（默认值）。\n"
+            "        **新建并发互斥（DEV-214）**：同一项目的新建决策用文件锁（dispatch/.lock-<project>）串行化，\n"
+            "        拿到锁后重读池再决策——并发调用方看到刚建出的可复用会话时改为复用，不重复新建。\n"
+            "        **--new 上限校验（DEV-214）**：目标项目 [awf] 池 ≥3 且全忙时，--new 继续新建需显式加\n"
+            "        --allow-over-3 确认（本次超限新建写入派发日志留痕），不再静默绕过每项目 3 个上限。\n"
             "\n默认异步：复用/创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
             "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
             "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
@@ -2667,7 +3043,19 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="配合 --prune：真正删除已完成票据文件，不留存根（默认只打印计划）",
+        help="配合 --prune / --cleanup：真正执行删除/归档（默认只打印计划）",
+    )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="（DEV-214）列出每项目超过 3 个的空闲 [awf] 会话（默认 dry-run；"
+        "--apply 经 workspace/archiveSession 归档并写入本地归档台账 dispatch/archived-sessions.json）",
+    )
+    parser.add_argument(
+        "--forget-archived",
+        action="store_true",
+        help="（DEV-214）重置本地归档台账（删除 dispatch/archived-sessions.json）；"
+        "其中记录的会话恢复进入复用池与每项目数量统计",
     )
     parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
     parser.add_argument("--handoff", action="store_true", help="只生成交接单，不执行")
@@ -2740,6 +3128,12 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--force", action="store_true", help="允许同名会话重复派发")
     parser.add_argument(
+        "--allow-over-3",
+        action="store_true",
+        help="（DEV-214）配合 --new：目标项目 [awf] 池已满 3 个且全忙时，显式确认仍新建"
+        "（突破每项目并发上限；本次超限新建写入派发日志留痕）；不加则拒发（退出码 2）",
+    )
+    parser.add_argument(
         "--allow-legacy-reuse",
         action="store_true",
         help="允许复用项目里唯一的旧格式（无 [awf] 标记）空闲会话并改名为规范标题；"
@@ -2805,14 +3199,15 @@ def main(argv=None) -> int:
 
     # DISPATCH-143（reviewer-d143 minor-1）：--screen-state 与其它模式显式互斥，
     # 明确退化组合语义，不做静默忽略。
-    if args.screen_state and (args.prune or args.session or args.headless or args.handoff
+    if args.screen_state and (args.prune or args.cleanup or args.forget_archived
+                              or args.session or args.headless or args.handoff
                               or args.target or args.task):
         parser.error(
-            "--screen-state 只查询本机显示器状态后退出，不能与 --prune/--apply/--session/"
-            "--headless/--handoff 或 target/task 位置参数同用"
+            "--screen-state 只查询本机显示器状态后退出，不能与 --prune/--cleanup/"
+            "--forget-archived/--apply/--session/--headless/--handoff 或 target/task 位置参数同用"
         )
-    if args.apply and not args.prune:
-        parser.error("--apply 只能配合 --prune 使用")
+    if args.apply and not (args.prune or args.cleanup):
+        parser.error("--apply 只能配合 --prune（删票据）或 --cleanup（归档会话）使用")
     # DISPATCH-146：--report 与其它模式互斥（回执投递独立于派发）。第一个位置
     # 参数即回执文本（与 `--report "<回执文本>"` 命令形式一致）；第二个位置参数
     # （task）仍不允许。
@@ -2826,12 +3221,13 @@ def main(argv=None) -> int:
         except Exception as error:
             print(str(error), file=sys.stderr)
             return 1
-    if args.report and (args.prune or args.session or args.headless or args.handoff
+    if args.report and (args.prune or args.cleanup or args.forget_archived
+                        or args.session or args.headless or args.handoff
                         or args.wait or args.task):
         parser.error(
-            "--report 只用于回执投递（DISPATCH-146 回执投递通道），不能与 --prune/--session/"
-            "--headless/--handoff/--wait 或第二个位置参数（task）同用；回执投递示例："
-            "awf-dispatch --report --to <派发方会话ID> \"<回执文本>\""
+            "--report 只用于回执投递（DISPATCH-146 回执投递通道），不能与 --prune/--cleanup/"
+            "--forget-archived/--session/--headless/--handoff/--wait 或第二个位置参数（task）同用；"
+            "回执投递示例：awf-dispatch --report --to <派发方会话ID> \"<回执文本>\""
         )
     if args.session and not args.reuse:
         parser.error("--session 与 --new 互斥：指定会话时不会再新建")
@@ -2845,6 +3241,26 @@ def main(argv=None) -> int:
         if args.headless or args.handoff:
             parser.error("--prune 不能与 --headless / --handoff 同时使用")
         return run_prune(args)
+    if args.cleanup:
+        if args.target or args.task:
+            parser.error("--cleanup 不接受 target / task 位置参数；它只扫描全部工作区会话")
+        if args.headless or args.handoff or args.session:
+            parser.error("--cleanup 不能与 --headless / --handoff / --session 同时使用")
+        if args.reuse is False:
+            parser.error("--cleanup 不能与 --new 同用（清理模式不派发任务）")
+        try:
+            return run_cleanup(args)
+        except DispatchError as error:
+            print(f"FAIL  {error}", file=sys.stderr)
+            return EXIT_FAIL
+    if args.forget_archived:
+        if args.target or args.task or args.prune or args.cleanup or args.session \
+                or args.headless or args.handoff or args.report or args.screen_state:
+            parser.error(
+                "--forget-archived 只重置本地归档台账（dispatch/archived-sessions.json），"
+                "不能与其他模式或 target/task 位置参数同用"
+            )
+        return run_forget_archived(args)
     if args.screen_state:
         state = detect_screen_state()
         if args.json:
@@ -2859,7 +3275,10 @@ def main(argv=None) -> int:
             print(error, file=sys.stderr)
             return EXIT_FAIL
     if not args.target or not args.task:
-        parser.error("缺少参数：需要 target 与 task（或用 --prune 归档票据）")
+        parser.error(
+            "缺少参数：需要 target 与 task（或用 --prune 归档票据 / --cleanup 清理超限"
+            "会话 / --forget-archived 重置归档台账）"
+        )
 
     try:
         target = resolve_target(args.target)

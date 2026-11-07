@@ -611,7 +611,8 @@ def _args(**overrides):
         idle_wait=300, queue_timeout=60, force=False, team=False, json=False, headless=False,
         handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
         allow_active=False, apply=False, prune=False, web_url="",
-        allow_legacy_reuse=False, sender="lead", new=False,
+        allow_legacy_reuse=False, sender="lead", new=False, allow_over_3=False,
+        cleanup=False, forget_archived=False,
     )
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -619,7 +620,7 @@ def _args(**overrides):
 
 def run_dispatch(api, task_module, idle_wait=300, queue_timeout=60, force=False, reuse=True,
                  json_mode=False, expect_error=False, sessions_in_preflight=True,
-                 allow_legacy=False, session="", new=False):
+                 allow_legacy=False, session="", new=False, allow_over_3=False):
     logs = []
     output = io.StringIO()
     original = (module.preflight, module.append_log, module.emit)
@@ -633,7 +634,8 @@ def run_dispatch(api, task_module, idle_wait=300, queue_timeout=60, force=False,
         f"- 模块：{task_module}\n"
     )
     args = _args(reuse=reuse and not new, idle_wait=idle_wait, queue_timeout=queue_timeout, force=force,
-                 json=json_mode, allow_legacy_reuse=allow_legacy, session=session, new=new)
+                 json=json_mode, allow_legacy_reuse=allow_legacy, session=session, new=new,
+                 allow_over_3=allow_over_3)
     try:
         with contextlib.redirect_stdout(output):
             try:
@@ -1269,19 +1271,30 @@ m2_plain_logs, _ = run_dispatch(m2_plain, "工作流", session="s-m2-plain")
 assert m2_plain.prompts and m2_plain.prompts[0][0] == "s-m2-plain", m2_plain.prompts
 assert any("风险提示" in m for m in m2_plain.emitted), m2_plain.emitted
 
-# 实现点：dispatch_session 走 args.module / args.reuse / --session / 等待 / 旧标题改名
+# 实现点：dispatch_session 走 args.module / args.reuse / --session / 等待 / 旧标题改名 /
+# DEV-214 并发互斥（decide_new_session + wait_session_ready + 文件锁）
 session_src = inspect.getsource(module.dispatch_session)
-for needle in ("args.module", "resolve_module(", "args.reuse", "args.session",
-               "select_reuse_session(", "wait_for_idle(", "args.queue_timeout",
-               "reuse_rename_needed(", "api.rename(session_id, session_name)",
-               "--new", "pressure_hint(", "SESSION_GONE", "renamed = True",
-               "if args.reuse:", "turn_activity(", "wait_for_landing(", "git_head_sha(", "EXIT_ZOMBIE"):
+for needle in ("args.module", "resolve_module(", "args.session",
+               "select_reuse_session(", "reuse_rename_needed(",
+               "api.rename(session_id, session_name)", "--new", "pressure_hint(",
+               "turn_activity(", "wait_for_landing(", "git_head_sha(", "EXIT_ZOMBIE",
+               "decide_new_session(", "wait_session_ready(", "project_new_lock("):
     assert needle in session_src, f"dispatch_session 缺少 {needle}"
+decide_src = inspect.getsource(module.decide_new_session)
+for needle in ("if args.reuse:", "select_reuse_session(", "over_limit_guard(",
+               "args.allow_over_3", "api.create_session(workspace_id)",
+               "api.rename(session_id, session_name)", "复用（并发重读）"):
+    assert needle in decide_src, f"decide_new_session 缺少 {needle}"
+wait_src = inspect.getsource(module.wait_session_ready)
+for needle in ("wait_for_idle(", "args.queue_timeout", "SESSION_GONE",
+               "spawn_idle_listener(", "project_awf_pool("):
+    assert needle in wait_src, f"wait_session_ready 缺少 {needle}"
 
 main_src = inspect.getsource(module.main)
 for needle in ("--reuse", "--new", "--session", "--idle-wait", "--module",
                "default=DEFAULT_REUSE", "default=DEFAULT_IDLE_WAIT",
-               "--session 与 --new 互斥"):
+               "--session 与 --new 互斥", "--cleanup", "--forget-archived",
+               "--allow-over-3", "run_cleanup(", "run_forget_archived("):
     assert needle in main_src, f"main 缺少 {needle}"
 
 # --session 参数解析：与 --new / --headless 互斥（argparse 阶段退出 2）
@@ -1365,6 +1378,320 @@ then
   ok "票据解析与完成判定（commit 无 ID、done.md 含 ID）正确"
 else
   bad "票据解析 / 完成判定断言失败"
+fi
+
+# 1.6 -- DEV-214 四件套：本地归档台账 / --new 上限校验 / 并发新建互斥 / --cleanup
+if python3 - "$DISPATCH_IMPL" <<'PY'
+import importlib.machinery
+import importlib.util
+import argparse
+import contextlib
+import io
+import json
+import os
+import pathlib
+import sys
+import tempfile
+import threading
+import time
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_dev214", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+target = pathlib.Path("/tmp/dev214-proj")
+project = target.name
+title = module.awf_session_title("lead", "TEST-214 冒烟")
+MAX = module.MAX_SENDER_SESSIONS
+
+
+def row(sid, cwd=None, running=False, updated=0, title_value=None, blank=False):
+    values = {"title": title_value if title_value is not None else title}
+    return {
+        "sessionId": sid, "cwd": str(cwd) if cwd is not None else str(target),
+        "running": running, "blank": blank, "updatedAt": updated,
+        "projections": {"values": values, "asOfSeq": 1},
+    }
+
+
+# ---- ① 本地归档台账：写出/读取/去重/排除/重置 ----
+with tempfile.TemporaryDirectory() as tmp:
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(tmp)
+        assert module.archived_ledger_path() == pathlib.Path.cwd() / "dispatch/archived-sessions.json", \
+            "台账路径 = <cwd>/dispatch/archived-sessions.json"
+        assert module.load_archived_session_ids() == set(), "无台账时为空集"
+        module.record_archived_sessions([
+            {"sessionId": "s-a", "project": "p1", "title": "t1"},
+            {"sessionId": "s-b", "project": "p1", "title": "t2"},
+        ])
+        module.record_archived_sessions([
+            {"sessionId": "s-a", "project": "p1", "title": "t1-dup"},
+            {"sessionId": "s-c", "project": "p2", "title": "t3"},
+        ])
+        ids = module.load_archived_session_ids()
+        assert ids == {"s-a", "s-b", "s-c"}, "台账去重后含全部归档 id"
+        # 组装复用池时排除已归档会话（缺省从台账读）
+        rows = [row("s-a", updated=5), row("s-b", updated=4), row("s-live", updated=9)]
+        sel = module.select_reuse_session(rows, target, "工作流", sender="lead")
+        assert sel is not None and sel["sessionId"] == "s-live", \
+            "归档会话不得进复用池（s-a/s-b 被台账排除）"
+        # 项目 [awf] 池统计同样排除
+        pool_rows = [row("s-a"), row("s-b"), row("s-live", running=True)]
+        pool = module.project_awf_pool(pool_rows, target)
+        assert [r["sessionId"] for r in pool] == ["s-live"], "池统计排除归档 id"
+        assert module.project_awf_pool(
+            [row("s-live"), row("s-legacy", title_value=f"{project} · 旧"),
+             row("s-other", cwd="/tmp/elsewhere")], target,
+            archived_ids=set()) == [row("s-live")], "池只收同 cwd + [awf] 前缀"
+        # --forget-archived 重置台账
+        assert pathlib.Path("dispatch/archived-sessions.json").is_file()
+        code = module.run_forget_archived(argparse.Namespace(json=False))
+        assert code == 0 and not pathlib.Path("dispatch/archived-sessions.json").exists()
+        assert module.load_archived_session_ids() == set(), "重置后归档 id 恢复为空"
+        # 重置后 s-a 恢复进入复用池
+        sel2 = module.select_reuse_session([row("s-a", updated=5)], target, "工作流", sender="lead")
+        assert sel2["sessionId"] == "s-a", "重置台账后归档会话恢复可复用"
+    finally:
+        os.chdir(original_cwd)
+
+# 显式 archived_ids 参数路径（不依赖本地台账）
+archived_rows = [row("s-old", updated=1), row("s-new", updated=2)]
+assert module.select_reuse_session(
+    archived_rows, target, "工作流", sender="lead",
+    archived_ids={"s-new"})["sessionId"] == "s-old", "archived_ids 参数排除生效"
+
+# ---- ② --new 上限校验：池≥3 且全忙需 --allow-over-3，确认后留痕 ----
+pool3_busy = [row(f"s-b{i}", running=True, updated=i) for i in (1, 2, 3)]
+try:
+    module.over_limit_guard(pool3_busy, False, json_mode=True)
+    raise AssertionError("池满全忙且未确认应拒发")
+except module.DispatchError as error:
+    assert "--allow-over-3" in str(error) and "超项目上限" in str(error), str(error)
+note = module.over_limit_guard(pool3_busy, True, json_mode=True)
+assert "超上限新建" in note and "--allow-over-3" in note, "确认后返回留痕说明"
+assert module.over_limit_guard([row("s-x", running=True)], True, json_mode=True) == "", "池未满不拦"
+assert module.over_limit_guard(
+    pool3_busy[:2] + [row("s-idle", running=False)], False, json_mode=True) == "", "池满但有空闲不拦"
+
+
+class FakeDispatchApi:
+    def __init__(self, rows):
+        self.rows = [dict(r) for r in rows]
+        self.calls = 0
+        self.created = []
+        self.renamed = []
+        self.prompts = []
+
+    def sessions(self):
+        self.calls += 1
+        return self.rows
+
+    def create_session(self, workspace_id):
+        created = row("s-created-%d" % (len(self.created) + 1))
+        self.rows.append(created)
+        self.created.append(created["sessionId"])
+        return {"sessionId": created["sessionId"]}
+
+    def rename(self, session_id, new_title):
+        self.renamed.append((session_id, new_title))
+
+    def prompt(self, session_id, text, request_id):
+        self.prompts.append((session_id, text))
+
+    def rpc(self, method, params, timeout=30):
+        raise module.DispatchError("unknown rpc " + method)
+
+
+def run_dispatch(api, task_module, reuse=True, new=False, expect_error=False,
+                 allow_over_3=False, json_mode=False):
+    logs = []
+    output = io.StringIO()
+    original = (module.preflight, module.append_log, module.emit)
+
+    def preflight_stub(target, args, need_channel):
+        return {"api": api, "workspace": {"title": "w", "workspaceId": "id"},
+                "sessions": api.sessions()}
+
+    module.preflight = preflight_stub
+    module.append_log = lambda entry: logs.append(entry) or pathlib.Path("/tmp/awf-dispatch-log.md")
+    emitted = []
+    module.emit = lambda message, json_mode=False: emitted.append(message)
+    text = (f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n- 模块：{task_module}\n")
+    args = argparse.Namespace(
+        session="", reuse=reuse and not new, module="", title="", wait=False, timeout=600,
+        idle_wait=300, queue_timeout=5, force=False, team=False, json=json_mode, headless=False,
+        handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
+        allow_active=False, apply=False, prune=False, web_url="",
+        allow_legacy_reuse=False, sender="lead", new=new, allow_over_3=allow_over_3,
+        cleanup=False, forget_archived=False)
+    try:
+        with contextlib.redirect_stdout(output):
+            try:
+                code = module.dispatch_session(
+                    target, pathlib.Path("/tmp/TEST-001-task.md"), text,
+                    f"{project} · TEST-001", "dev", args)
+            except module.DispatchError as error:
+                if not expect_error:
+                    raise
+                return str(error)
+    finally:
+        module.preflight, module.append_log, module.emit = original
+    assert code == 0, code
+    return logs, output.getvalue()
+
+
+# 派发主流程：--new 遇池满全忙 → 拒绝并给出 --allow-over-3；确认后放行且日志留痕
+over_api = FakeDispatchApi(pool3_busy)
+over_msg = run_dispatch(over_api, "工作流", reuse=False, new=True, expect_error=True)
+assert isinstance(over_msg, str) and "--allow-over-3" in over_msg, over_msg
+over_ok_api = FakeDispatchApi([row("s-b1", running=True, updated=1),
+                               row("s-b2", running=True, updated=2),
+                               row("s-b3", running=True, updated=3)])
+logs, _ = run_dispatch(over_ok_api, "工作流", reuse=False, new=True, allow_over_3=True)
+assert over_ok_api.created == ["s-created-1"], over_ok_api.created
+assert "超上限新建（--allow-over-3 确认）" in logs[0], "超限新建必须日志留痕"
+
+# ---- ③ 并发新建互斥：文件锁串行化 + 锁后重读池再决策 ----
+lock_path = module.project_lock_path(target)
+assert lock_path.name == f".lock-{project}", lock_path
+assert str(lock_path).startswith(str(pathlib.Path.cwd())), "锁文件必须位于本地 dispatch/ 下"
+# 持锁期间第二个调用方阻塞，释放后拿到
+held_at = []
+result = []
+
+def holder():
+    with module.project_new_lock(target):
+        held_at.append(time.time())
+        time.sleep(0.4)
+
+th = threading.Thread(target=holder)
+th.start()
+for _ in range(50):  # 等第一个拿到锁
+    if held_at:
+        break
+    time.sleep(0.01)
+assert held_at, "第一个调用方应拿到锁"
+start = time.time()
+with module.project_new_lock(target):
+    waited = time.time() - start
+assert waited >= 0.3, f"第二个调用方必须等第一个释放锁（等了 {waited:.2f}s）"
+th.join()
+# 锁后重读池再决策：并发方刚建出的可复用会话 → 改复用，不再重复新建
+class CreateApi:
+    def __init__(self):
+        self.created = []
+        self.renamed = []
+    def create_session(self, workspace_id):
+        created = row("s-concurrent-1")
+        self.created.append(created["sessionId"])
+        return {"sessionId": created["sessionId"]}
+    def rename(self, session_id, new_title):
+        self.renamed.append((session_id, new_title))
+
+api_concurrent = CreateApi()
+args_reuse = argparse.Namespace(reuse=True, force=False, allow_over_3=True, json=False)
+# 第二个调用方：锁后重读看到第一个刚建的闲置会话 → 复用，零新建
+decided = module.decide_new_session(
+    api_concurrent, [row("s-concurrent-1", title_value=title)], target,
+    "ws", args_reuse, "工作流", title, title, "lead", lambda r: False)
+assert decided["reused"] is True and decided["sessionId"] == "s-concurrent-1", decided
+assert decided["source"] == "复用（并发重读）" and decided["running"] is False, decided
+assert api_concurrent.created == [], "重读发现可复用会话后不得新建"
+# 重读看到忙碌候选 → 返回 running=True，由调用方锁外等待（不重复新建）
+busy_decided = module.decide_new_session(
+    api_concurrent,
+    [row("s-c1", title_value=title, running=True, updated=1),
+     row("s-c2", title_value=title, running=True, updated=2),
+     row("s-concurrent-1", title_value=title, running=True, updated=3)],
+    target, "ws", args_reuse, "工作流", title, title, "lead", lambda r: False)
+assert busy_decided["reused"] is True and busy_decided["running"] is True, busy_decided
+assert busy_decided["sessionId"] == "s-concurrent-1", busy_decided
+# 重读后仍无候选 → 新建（自动路径同名保护：同名运行中会话需 --force 才放行新建）
+dup = [row("s-dup", title_value=title, running=True, updated=5)]
+try:
+    module.decide_new_session(api_concurrent, dup, target, "ws", args_reuse,
+                              "工作流", title, title, "lead", lambda r: False)
+    raise AssertionError("同名保护应拦自动新建")
+except module.DispatchError as error:
+    assert "--force" in str(error), str(error)
+created = module.decide_new_session(
+    api_concurrent, [], target, "ws",
+    argparse.Namespace(reuse=True, force=True, allow_over_3=True, json=False),
+    "工作流", title, title, "lead", lambda r: False)
+assert created["reused"] is False and created["source"] == "新建", created
+assert created["sessionId"] == "s-concurrent-1" and api_concurrent.renamed, created
+
+# ---- ④ --cleanup：列出每项目超 3 的空闲 [awf] 会话；--apply 归档 + 写台账 ----
+clean_rows = [row("s1", updated=1), row("s2", updated=2), row("s3", running=True, updated=3),
+              row("s4", updated=4), row("s5", updated=5)]
+groups = module.collect_cleanup_candidates(clean_rows, archived_ids=set())
+assert len(groups) == 1, groups
+g = groups[0]
+kept = sorted(g["keep"], key=lambda r: r["updatedAt"])
+assert [r["sessionId"] for r in kept] == ["s3", "s4", "s5"], "保留最近更新 3 个（含运行中）"
+assert {r["sessionId"] for r in g["candidates"]} == {"s1", "s2"}, "超限空闲为归档候选"
+assert g["skipped"] == [], "运行中的 s3 属于保留，不在跳过清单"
+assert module.collect_cleanup_candidates(
+    [row("s-a", updated=1), row("s-b", updated=2), row("s-c", updated=3)],
+    archived_ids=set()) == [], "恰好 3 个不清理"
+second_project = [row("s-x", cwd="/tmp/other-proj", updated=1),
+                  row("s-y", cwd="/tmp/other-proj", updated=2),
+                  row("s-z", cwd="/tmp/other-proj", updated=3),
+                  row("s-w", cwd="/tmp/other-proj", updated=4)]
+groups2 = module.collect_cleanup_candidates(second_project, archived_ids=set())
+assert len(groups2) == 1 and groups2[0]["project"] == "other-proj", groups2
+assert [r["sessionId"] for r in groups2[0]["candidates"]] == ["s-x"], groups2
+
+class CleanupApi:
+    """记录 workspace/archiveSession 调用的傀儡 API。"""
+    def __init__(self):
+        self.archived = []
+    def archive_session(self, session_id):
+        self.archived.append(session_id)
+
+with tempfile.TemporaryDirectory() as tmp:
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(tmp)
+        api_c = CleanupApi()
+        # dry-run：只列出，不归档、不写台账
+        dry = module.cleanup_sessions(api_c, clean_rows, apply=False, json_mode=False)
+        assert dry["dryRun"] is True and dry["archived"] == [] and api_c.archived == [], dry
+        assert not pathlib.Path("dispatch/archived-sessions.json").exists(), "dry-run 不写台账"
+        # --apply：归档候选并写台账
+        applied = module.cleanup_sessions(api_c, clean_rows, apply=True, json_mode=False)
+        assert applied["errors"] == [] and applied["ok"] is True, applied
+        assert sorted(api_c.archived) == ["s1", "s2"], api_c.archived
+        assert {e["sessionId"] for e in applied["archived"]} == {"s1", "s2"}
+        assert module.load_archived_session_ids() == {"s1", "s2"}, "归档后写入台账"
+        # 台账生效：s1/s2 不再进复用池；--cleanup 也不再列它们
+        pool_after = module.project_awf_pool(clean_rows, target)
+        assert [r["sessionId"] for r in pool_after] == ["s3", "s4", "s5"], \
+            "归档会话（s1/s2）已从池排除，剩余 s3/s4/s5"
+        assert module.collect_cleanup_candidates(clean_rows) == [], "已归档不再列为候选"
+    finally:
+        os.chdir(original_cwd)
+
+# 清理模式 CLI 互斥：--cleanup 不接受 target/task，--apply 不能单独用
+for argv in (["--cleanup", "demo", "task.md"],
+             ["--cleanup", "--new"],
+             ["--apply"],
+             ["--forget-archived", "demo", "task.md"]):
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            module.main(argv)
+            raise AssertionError(f"{argv} 应被拒绝")
+        except SystemExit as code:
+            assert code.code == 2, (argv, code.code)
+PY
+then
+  ok "DEV-214 四件套：归档台账 / --new 上限 / 并发互斥 / --cleanup"
+else
+  bad "DEV-214 四件套断言失败"
 fi
 
 # 直接用 importlib 加载源脚本，断言 build_prompt 的 --team 注入、默认异步实现点与缺省行为
