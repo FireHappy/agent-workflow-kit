@@ -1694,6 +1694,14 @@ else
   bad "DEV-214 四件套断言失败"
 fi
 
+# 1.7 -- DEV-215：满池等待返回值同步 + 并发记账提示
+if grep -q 'session_id = row\["sessionId"\]' "$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch" \
+   && grep -q '并发记账提示（DEV-215）' "$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch"; then
+  ok "DEV-215 满池等待后以返回会话为准 + 并发记账提示注入"
+else
+  bad "DEV-215 等待同步/并发提示缺失"
+fi
+
 # 直接用 importlib 加载源脚本，断言 build_prompt 的 --team 注入、默认异步实现点与缺省行为
 if python3 - "$DISPATCH_IMPL" <<'PY'
 import importlib.machinery

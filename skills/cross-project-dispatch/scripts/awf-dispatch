@@ -2426,6 +2426,9 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         if reused and decided.get("running"):
             # 并发方刚建出的会话已运行：锁已释放，这里等它空闲后再发送（不重复新建）。
             row = wait_session_ready(api, decided.get("rows") or rows, session_id, target, args)
+            # DEV-215：wait_session_ready 内部可能改选监听返回的空闲会话（满池场景），
+            # 必须以返回值为准——否则发送/改名/日志仍留在原候选（等待目标≠发送目标）。
+            session_id = row["sessionId"]
             if reuse_rename_needed(row, session_name):
                 try:
                     api.rename(session_id, session_name)
@@ -2436,6 +2439,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         # 复用路径：先确认会话存在；运行中的会话等它空闲，绝不静默改成新建。
         # 预检刚拉过列表，先用快照；快照里没有才重新查（正常不会发生）。
         row = wait_session_ready(api, rows, session_id, target, args)
+        # DEV-215：同上——满池等待可能改选监听返回的空闲会话，以返回值为准。
+        session_id = row["sessionId"]
         hint = pressure_hint(row)
         if hint:
             session_note = hint
@@ -2480,10 +2485,24 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     # DISPATCH-146：派发方会话 = 派发方运行本命令时所在会话（env DSH_SESSION_ID），
     # 注入目标提示（目标回执经 --report 投递回该会话），同时写入 dispatch/log.md 供审计。
     dispatcher = dispatcher_session_env()
+    # DEV-215：并发记账提示——同项目活跃 [awf] 池 >1（含本会话）时，要求目标按票据任务编号
+    # 记账/commit，避免多个并行 worker 自排相同 ID 造成账本覆盖（满池实测 002/003 撞 DEV-091）。
+    send_text = text
+    try:
+        concurrent = project_awf_pool(rows or api.sessions(), target)
+    except Exception:
+        concurrent = None  # 异常时跳过提示，不阻塞派发
+    if concurrent is not None and len(concurrent) > 1:
+        tid = ticket_task_id(task.name) or ""
+        send_text = (
+            "⚠ 并发记账提示（DEV-215）：本任务正与同项目其他 [awf] 会话并行执行"
+            + (f"，账本登记/commit 请使用本票据任务编号「{tid}」" if tid else "")
+            + "，勿与其他并行任务共用自排 ID（避免账本互相覆盖）。\n\n" + text
+        )
     try:
         api.prompt(
             session_id,
-            build_prompt(target, title, kind, text, team=args.team,
+            build_prompt(target, title, kind, send_text, team=args.team,
                          dispatcher_session=dispatcher),
             str(uuid.uuid4()),
         )

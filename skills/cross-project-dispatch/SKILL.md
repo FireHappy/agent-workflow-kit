@@ -370,6 +370,10 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 "${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --forget-archived    # 误归档/要恢复时重置台账
 ```
 
+**DEV-215 补充**（满池实测暴露的两处修正）：
+- **满池等待以返回会话为准**：`wait_session_ready` 在监听子进程返回任一空闲会话后，发送 / 改名 / 日志一律使用该返回会话（此前作用于局部变量，等待目标 ≠ 发送目标，监听白等）
+- **并发记账提示**：同项目活跃 `[awf]` 会话 >1 时，任务包自动注入提示，要求目标按票据任务编号登记账本 / commit——避免多个并行 worker 自排相同 ID 造成账本互相覆盖（UXR-POOL 002/003 曾撞 DEV-091）
+
 ## 验收与收尾清单
 
 1. `--wait` 回合结束后，检查目标 agent 回执是否含五项：状态 / 变更文件 / 验证结果 / commit / 阻塞
