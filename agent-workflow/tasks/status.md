@@ -10,6 +10,7 @@
 |--------|--------|--------|------|-------|------|
 | dev | DEV-194 | P1 | active | lead | 派发 v1.4.0 升级至全部登记项目（10 目标） |
 | dev | DEV-196 | P1 | blocked | lead | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） |
+| dev | DEV-204 | P1 | active | lead | 发布 v1.4.1（派发技能自包含 + 测试对齐 + 编号清理批次） |
 
 ## 待处理
 
@@ -28,5 +29,5 @@
 | dev | DEV-175 | P1 | init 流程支持 git 忽略本工作流（--gitignore + awf gitignore 子命令） | 2026-11-06 |
 | dev | DEV-176 | P1 | release-prep 1.1.7 | 2026-11-06 |
 
-*最后更新：2026-11-07 11:33*
+*最后更新：2026-11-07 14:44*
 <!-- awf:status:end -->

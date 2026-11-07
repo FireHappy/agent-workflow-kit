@@ -6,3 +6,4 @@
 |----|--------|------|-------|------|
 | DEV-194 | P1 | active | lead | 派发 v1.4.0 升级至全部登记项目（10 目标） |
 | DEV-196 | P1 | blocked | lead | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） |
+| DEV-204 | P1 | active | lead | 发布 v1.4.1（派发技能自包含 + 测试对齐 + 编号清理批次） |
