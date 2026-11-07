@@ -1,9 +1,21 @@
-## [Unreleased]
+## [1.4.1] - 2026-11-07
+
+### Added
+- **派发工具随技能自包含（DEV-201）**：跨项目派发实现由 `cross-project-dispatch` 技能自带（`scripts/awf-dispatch`），可独立复制/安装/更新；脚手架旧入口（`bin/awf-dispatch`）移除，仓库 CLI/Python 调用、安装、测试与文档统一指向技能内实现——技能即工具，不再依赖脚手架
 
 ### Changed
 - **版本锚点迁移框架支持（DEV-198）**：`version_file` 指向 `agent-workflow/VERSION`（非根目录）全链路验证通过（release-prep 读写 / upgrade 锚点写 / bootstrap·check digest 与根 VERSION 无关，dry-run 实证）；`awf check` 新增「项目根存在 VERSION 文件」防踩坑软提示（迁移建议：`git mv VERSION agent-workflow/VERSION` + `version_file` 指过去；不阻塞，纯脚本项目可忽略）——macOS 大小写不敏感 FS 上根 `VERSION` 遮蔽 libc++ `<version>` 头（Unity IL2CPP Bee clang `-I"."` 全量构建报 `expected unqualified-id`，SP-302，uxrsample 2026-11-07 实测）；release 技能/模板注释同步锚点位置规范（Unity/C++ 项目锚点一律放 `agent-workflow/VERSION`），release 技能 Step 5 去 `git add VERSION` 硬编码（改按 version_file 动态取路径）；SP-302 坑沉淀 kit memory
 - **派发术语统一为「回执」（DEV-195）**：worker→派发方方向全部改「回执」（回报→回执，含 回执投递通道/回执正文/回执字段/回执时机/回执格式/回执数据），消息标题【回执请求】保持，「回报」「汇报」在派发链路活文件中退役——注入文本、技能（cross-project-dispatch/dev/review/team-flow/upgrade/README）、docs/design.md、根 SKILL.md、插件面板文案、smoke 断言同步
 - **票据生命周期统一「用完即删」（DEV-195）**：`awf-dispatch --prune --apply` 从「归档到 dispatch/archive/」改为「真正删除已完成票据（不留存根）」，与 upgrade 技能既有条款对齐；扫描改为递归（覆盖 upgrade-v<版本>/ 子目录票据），删除后向上清空空目录；文档/SKILL/帮助文本同步
+- **注入文本精简（v1.4.1 批次）**：`awf-dispatch` 任务包的回执规则从内联 ~60 行压缩为技能指针（必报点/时机/字段/违约指向 `cross-project-dispatch/SKILL.md`），每次派发的附加约定大幅瘦身
+- **任务编号清理**：技能（release/team-flow/upgrade）与插件注入文本中的任务编号混入移除——正文指引、示例、历史锚点统一去编号（编号仅留注释追溯）；保留「如 DEV-001」任务 ID 格式示例与工作流 README 格式示例
+
+### Fixed
+- **upgrade 回归测试对齐技能化形态（DEV-202/203）**：A 段重写为存量 workflows 存根 + `--slim` 清理断言、B/C/D 段调用改技能路径、措辞对齐新模板；补隔离守卫（全局技能 vs checkout 一致性）、`--slim` 前置自保护、bin 副本清理断言、pre-commit 一致断言——upgrade 回归从「引用退役路径必失败」恢复全绿
+- **半初始化项目工作流补全**：rokid-system-components / rokid-uxr-plugin / rokid-openxr-loader 三项目 `awf init` 补全（保留已有骨架、check 通过）；serialized 共享写点残留清理（openxr-uxr / uxrsample，DEV-087）
+
+### Removed
+- **脚手架旧派发入口**：`bin/awf-dispatch` 删除（DEV-201），全局技能同步后 `~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch` 不再提供
 
 ## [1.4.0] - 2026-11-06
 
