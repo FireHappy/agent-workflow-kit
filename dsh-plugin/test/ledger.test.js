@@ -742,6 +742,10 @@ async function writeProjectFixture(projPath, opts) {
 
 const awfAgentsHome = await mkdtemp(join(tmpdir(), 'awf-agents-'))
 process.env.DSH_AGENTS_HOME = awfAgentsHome // 必须在 import ../lib/index.js 前设置（模块级 AGENTS_HOME）
+// DEV-206：受控技能实体目录（初始为空 → 既有用例走 kit 回退；实体优先用例会写入实体）。
+// kitVersions 在调用时读 DSH_HOME，因此可在此（import 后）设置。
+const awfDshHome = await mkdtemp(join(tmpdir(), 'awf-dsh-'))
+process.env.DSH_HOME = awfDshHome
 const awfKitPath = join(awfAgentsHome, 'kit')
 await writeAgentsIndex(awfAgentsHome, awfKitPath)
 await writeKitFixture(awfKitPath)
@@ -802,8 +806,37 @@ test('DEV-205 versionStatus 回退链 2：无骨架版 + 无 AWF 代次 → 发�
   assert.equal(vs.installed, 'v0.5.0')
 })
 
-test('DEV-205 夹具清理', async () => {
+test('DEV-206 kitVersions 技能实体优先：实体 VERSION/FRAMEWORK_VERSION/bin/awf 优先于 kit 仓库', async () => {
+  const { mkdir, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  // 在受控 DSH_HOME 下构造技能实体：技能版 2.5.0 / 骨架版 2.0.0 / AWF 代次 3（kit 夹具为 1.4.1/1.0.0/2）
+  const entityDir = join(awfDshHome, 'skills', 'agent-workflow-scaffold')
+  await mkdir(join(entityDir, 'bin'), { recursive: true })
+  await writeFile(join(entityDir, 'VERSION'), '2.5.0\n')
+  await writeFile(join(entityDir, 'FRAMEWORK_VERSION'), '2.0.0\n')
+  await writeFile(join(entityDir, 'bin', 'awf'), '#!/usr/bin/env bash\nAWF_VERSION=3\n')
+  const { kitVersions } = await import('../lib/index.js')
+  const k = await kitVersions()
+  assert.equal(k.skillVersion, '2.5.0')       // 实体优先（kit 夹具 1.4.1 被忽略）
+  assert.equal(k.latestFramework, '2.0.0')    // 实体优先（kit 夹具 1.0.0 被忽略）
+  assert.equal(k.latestRelease, '2.5.0')
+  assert.equal(k.latestAWF, 3)                // 实体 bin/awf 代次优先
+  assert.equal(k.kitPath, awfKitPath)         // kit 回退路径仍带出
+  // versionStatus 联动：项目骨架 1.0.0 < 实体 2.0.0 → outdated，升级目标 = 实体骨架版
+  const { versionStatus } = await import('../lib/index.js')
+  const projPath = join(awfAgentsHome, 'proj-entity')
+  await writeProjectFixture(projPath, { framework: '1.0.0' })
+  const vs = await versionStatus(projPath)
+  assert.equal(vs.status, 'outdated')
+  assert.equal(vs.upgradeTo, 'v2.0.0（骨架升级）')
+  assert.equal(vs.skillVersion, 'v2.5.0')
+  assert.equal(vs.latestFramework, 'v2.0.0')
+})
+
+test('DEV-206 夹具清理', async () => {
   const { rm } = await import('node:fs/promises')
   delete process.env.DSH_AGENTS_HOME
+  delete process.env.DSH_HOME
   await rm(awfAgentsHome, { recursive: true, force: true })
+  await rm(awfDshHome, { recursive: true, force: true })
 })

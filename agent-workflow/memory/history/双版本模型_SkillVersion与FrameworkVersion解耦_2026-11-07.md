@@ -23,3 +23,8 @@
 ## 坑
 
 - 插件测试基线曾 40 pass 1 fail：DEV-179 陈旧断言仍在断言 DEV-182 已移除的阶段徽章（awf-stage-chip/seg）——历史遗留，同类"测试断言已退役 UI 元素"问题排查时先 grep 断言对应 class 是否还在生产代码。
+## 补充（DEV-206）：插件版本信号读技能实体优先
+
+- 插件 `kitVersions()` 的 skillVersion/latestFramework/latestAWF 一律**技能实体优先**（`$DSH_HOME/skills/agent-workflow-scaffold/{VERSION,FRAMEWORK_VERSION,bin/awf}`，install.sh 同步，= 安装后唯一事实源，与 upgrade 的 KFF/KVF 同构），未安装/不可读回退 kit 仓库——插件显示的技能版本 = 本机实际生效技能版本，实体存在时 kit 未登记也不影响显示/判定。
+- **实体结构注意**：install.sh 把 `agent-workflow/VERSION` → 实体根 `VERSION`、`agent-workflow/FRAMEWORK_VERSION` → 实体根 `FRAMEWORK_VERSION`、`bin/awf` → 实体根 `bin/awf`（实体没有 agent-workflow/ 子目录）——插件读实体时不能用 `readProjectFrameworkVersion(entity)`（它拼 `agent-workflow/FRAMEWORK_VERSION` 路径），按实体根直读。
+- 测试：受控 DSH_AGENTS_HOME + DSH_HOME 双环境变量夹具（模块级 AGENTS_HOME 须 import 前设置；DSH_HOME 在调用时读，import 后设置即可）；用例覆盖「实体 > kit 优先」与「空实体回退 kit」。

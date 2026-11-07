@@ -54,7 +54,7 @@ import {
   ledgerOf, readIndex, initSkeleton, startTask, archiveTask, isWhitelistedPath, TASK_TYPES,
   parseTodoRows, todoEdit, taskEdit, revertPreview, readSource, writeSource, SOURCE_FILES,
   writeProjectRegistration, readProjectMetaFile, readProjectAWFVersion, readProjectRelease,
-  readProjectFrameworkVersion,
+  readProjectFrameworkVersion, parseAWFVersion,
   setProjectTrack, setScaffoldVersion, writeLocalGitignore, semverLt,
   parseCheckItems, findBlock, cmdCriterion, isSafeCommand, applyCmdEvidence,
   replaceBlockInMd, taskLedgerOverdue, classifyFreshness, isOpenTaskStatus,
@@ -284,27 +284,51 @@ async function findKitProject() {
 }
 
 /**
- * kit 侧最新版本信号（双版本模型 DEV-205）：
- *   - latestFramework = agent-workflow/FRAMEWORK_VERSION（骨架版本，semver，upgrade/outdated 判定依据）
- *   - skillVersion    = agent-workflow/VERSION（技能版本，插件显示；技能更新不触发项目 outdated）
- * 兼容旧信号 latestAWF（代次）/ latestRelease（发布版，读 kit 自身 version_file）。
- * kit 未登记/不可读时对应字段为 null。
+ * 技能实体目录（DEV-206：插件版本信号直接读技能库实体，与 bin/awf upgrade 的
+ * KFF/KVF 同构——实体 = 安装后的唯一事实源，未安装才回退 kit 仓库）。
+ * 路径 = $DSH_HOME/skills/agent-workflow-scaffold（install.sh 默认 DSH_HOME=$HOME/.dsh；
+ * 实体根含 VERSION / FRAMEWORK_VERSION / bin/awf，由 install.sh 从 kit 同步）。
+ */
+function skillEntityDir() {
+  return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skills', 'agent-workflow-scaffold')
+}
+
+/** 读技能实体根版本文件（VERSION / FRAMEWORK_VERSION）；不存在/空 → null。 */
+async function readEntityVersionFile(name) {
+  try {
+    const v = String(await readFile(join(skillEntityDir(), name), 'utf8')).trim()
+    return v || null
+  } catch { return null }
+}
+
+/**
+ * kit 侧最新版本信号（双版本模型 DEV-205 + DEV-206 技能实体优先）：
+ *   - skillVersion    = 技能版本（插件显示；技能更新不触发项目 outdated）——技能实体根 VERSION 优先，回退 kit agent-workflow/VERSION
+ *   - latestFramework = 骨架版本（upgrade/outdated 判定依据）——技能实体根 FRAMEWORK_VERSION 优先，回退 kit agent-workflow/FRAMEWORK_VERSION
+ *   - latestRelease   = 最新发布版（旧 client 兼容字段）——取 skillVersion，再回退 kit 自身 version_file
+ *   - latestAWF       = 骨架契约代次（旧信号，回退链兼容）——技能实体 bin/awf 优先，回退 kit agent-workflow/bin/awf
+ * 技能实体未安装/不可读时逐字段回退 kit 仓库；两者都不可读时对应字段为 null
+ * （实体存在时 kit 未登记也能正确显示技能/骨架版本）。
  */
 async function kitVersions() {
   const kit = await findKitProject()
-  if (!kit || !kit.path) return { kitPath: null, latestAWF: null, latestRelease: null, latestFramework: null, skillVersion: null }
-  const latestAWF = await readProjectAWFVersion(kit.path)
-  // DEV-178：读 kit 自身 project.yaml 的 version_file（was 硬编码根 VERSION；DEV-174 迁移后
-  // kit 锚点 = agent-workflow/VERSION），即技能版本（Skill-Version，DEV-205 双版本模型）。
-  const latestRelease = await readProjectRelease(kit.path)
-  // DEV-205：骨架版本 = kit agent-workflow/FRAMEWORK_VERSION（独立文件，决策 1）；
-  // 技能版本 = kit agent-workflow/VERSION（Skill-Version，插件显示用）。
-  const latestFramework = await readProjectFrameworkVersion(kit.path)
-  let skillVersion = null
+  // DEV-206：实体优先（安装后的唯一事实源，与 bin/awf upgrade KFF/KVF 同构）
+  let skillVersion = await readEntityVersionFile('VERSION')
+  let latestFramework = await readEntityVersionFile('FRAMEWORK_VERSION')
+  let latestAWF = null
   try {
-    skillVersion = String(await readFile(join(kit.path, 'agent-workflow', 'VERSION'), 'utf8')).trim() || null
-  } catch { /* 读不到技能版本 → null */ }
-  return { kitPath: kit.path, latestAWF, latestRelease, latestFramework, skillVersion }
+    latestAWF = parseAWFVersion(String(await readFile(join(skillEntityDir(), 'bin', 'awf'), 'utf8')))
+  } catch { /* 实体无 bin/awf → 走 kit 回退 */ }
+  // kit 仓库回退（实体未安装/不可读时）
+  if (skillVersion === null && kit) {
+    try {
+      skillVersion = String(await readFile(join(kit.path, 'agent-workflow', 'VERSION'), 'utf8')).trim() || null
+    } catch { /* 读不到 → null */ }
+  }
+  if (latestFramework === null && kit) latestFramework = await readProjectFrameworkVersion(kit.path)
+  if (latestAWF === null && kit) latestAWF = await readProjectAWFVersion(kit.path)
+  const latestRelease = skillVersion || (kit ? await readProjectRelease(kit.path) : null)
+  return { kitPath: (kit && kit.path) || null, latestAWF, latestRelease, latestFramework, skillVersion }
 }
 
 /** 项目侧已安装版本信号（双版本模型 DEV-205：installedFramework 骨架版优先；兼容旧信号）。 */
