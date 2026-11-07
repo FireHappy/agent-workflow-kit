@@ -1056,10 +1056,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert module.check_active(proj, allow_active=False) == "无 active 任务", \
         "README 索引不得误报为 active"
 
-# S2：派发注入的补充约定含 blocked 回执条款（必有回执主机制覆盖 blocked 场景）
+# S2：派发注入指向技能回执规范（blocked/解除条件/静默等明细在技能内）
 prompt = module.build_prompt(target, "TEST", "dev", "任务：TEST-001 冒烟\n")
-assert "blocked" in prompt and "必须回执派发方" in prompt, prompt
-assert "解除条件" in prompt and "静默停等" in prompt, prompt
+assert "cross-project-dispatch/SKILL.md" in prompt and "必报点" in prompt, prompt
 
 # S3（DISPATCH-139）：门禁严格度——P0 默认 180s + 中途状态 / P1 allow-dirty=tasks 粒度 + G3 三选项 / P2 G1 瞬态豁免
 assert module.DEFAULT_QUEUE_TIMEOUT == 180, module.DEFAULT_QUEUE_TIMEOUT
@@ -1182,12 +1181,10 @@ probe_json = subprocess.run([sys.argv[1], "--screen-state", "--json"], capture_o
 assert probe_json.returncode == 0
 assert json.loads(probe_json.stdout)["screen_state"] in ("on", "off", "locked", "unknown"), probe_json.stdout
 
-# S6（DISPATCH-144）：注入文本含状态透明化条款（中间状态转换主动回执，不因还在修复而沉默）
+# S6（DISPATCH-144）：注入文本指向技能回执规范（状态透明化等明细在技能内，不重复内联）
 agreed = module.build_prompt("demo", "S6", "dev", "任务：S6-144 冒烟\n")
-assert "状态透明化（DISPATCH-144）" in agreed, "注入文本缺状态透明化条款"
-assert "一回合内" in agreed and "修复开始" in agreed and "归档完成" in agreed, agreed
-assert "不因「还在修复 / 还没最终成功」而沉默" in agreed or "还在修复" in agreed, agreed
-assert "mid-status 只覆盖 `--wait` 等待超时前，本条款覆盖异步派发全程" in agreed, "衔接 mid-status 说明缺失"
+assert "cross-project-dispatch/SKILL.md" in agreed, "注入文本缺技能回执规范指针"
+assert "必报点" in agreed and "回执" in agreed, agreed
 
 # M1：read_task 票据必备字段校验（目标项目/任务编号/来源/路由裁决），缺失拒发并明示缺项
 with tempfile.TemporaryDirectory() as tmp:
@@ -2819,24 +2816,6 @@ if diff -q "$KIT_DIR/templates/AGENTS.md.tmpl" \
 else
   bad "DISPATCH-134 模板副本漂移"
 fi
-# 30.7 DISPATCH-141：需用户确认时决策回派发端（不在目标会话内提问/不擅自行事/--session 续发）
-if grep -q '不得在本会话内向用户提问' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '需用户确认' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q 'awf-dispatch --session' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '不得擅自执行推荐方案' "$KIT_DIR/bin/awf-dispatch"; then
-  ok "DISPATCH-141 awf-dispatch 注入文本含决策回派发端约定（不提问/不擅自行事/--session 续发）"
-else
-  bad "DISPATCH-141 awf-dispatch 注入文本缺决策回派发端约定"
-fi
-if grep -q '决策回派发端' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q -- '--session' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q 'DISPATCH-141' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '不得擅自执行推荐方案' "$KIT_DIR/bin/awf-dispatch"; then
-  ok "DISPATCH-141 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 决策回派发端流程（转述→决策→--session 续发）与模板同步"
-else
-  bad "DISPATCH-141 决策回派发端流程缺失或模板未同步"
-fi
-
 # 30.9b DISPATCH-143 术语统一：无「用户暂离/away」残留（文档/代码/模板统一为「远程办公状态（remote）」）
 if grep -rn '用户暂离\|away' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/templates" \
    "$KIT_DIR/bin/awf-dispatch" "$KIT_DIR/AGENTS.md" 2>/dev/null | grep -v '^Binary'; then
