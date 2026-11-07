@@ -2,15 +2,15 @@
 # awf upgrade 回归测试：验证「升级已有项目的工作流」是一等操作。
 #
 # 场景（对应 docs/upgrade.md 验收标准）：
-#   A. 干净升级：init 项目 → 制造旧版框架（旧模板/旧 README/旧工作流/旧 bin/awf
-#      桩）→ upgrade --dry-run 只预览不改写 → upgrade 执行 → 断言升级后框架文件
+#   A. 干净升级：init 项目 → 制造存量旧项目（旧模板/旧 README/旧 workflows/ 副本/旧 bin
+#      工具副本）→ upgrade --dry-run 只预览不改写 → upgrade 执行 → 断言升级后骨架模板
 #      与 kit 一致、project.yaml/tasks/** 保留、AGENTS.md 入口按新模板重建、
-#      check 通过。
+#      --slim 清理存量副本、check 通过。
 #   B. 旧账本迁移兼容：归档块用旧英文表头（| Status |）→ check FAIL 且输出含
 #      「| Status | → | 状态 |」修复指引；current.md 用 | Status | 时 awf status
 #      仍正确读取状态列；按指引修复后 check 通过。
 #   C. 自定义 check_workflow.sh：默认保留并告警，--force 才覆盖为标准入口。
-#   D. 非 agent-workflow 目标拒绝；upgrade --help 可读；项目内副本拒绝执行。
+#   D. 非 agent-workflow 目标拒绝；upgrade --help 可读；项目内无工具副本。
 #
 # 隔离：DSH_AGENTS_HOME 重定向到临时目录，不触碰真实 ~/.agents，可重跑。
 # 用法：bash test/upgrade.sh
@@ -28,6 +28,16 @@ mkdir -p "$WORK/skills/agent-workflow-scaffold/bin"
 cp "$KIT/bin/awf" "$SKILL_BIN"
 chmod +x "$SKILL_BIN"
 chk() { ( cd "$1" && "$SKILL_BIN" "${@:2}" ); }
+# 隔离守卫（DEV-203）：upgrade 内部 bootstrap/check 硬编码 $HOME/.dsh/skills，不随
+# DSH_AGENTS_HOME 重定向——全局技能实体必须与 checkout 一致，否则测试会静默测旧技能假绿。
+GLOBAL_AWF="$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf"
+if [ ! -f "$GLOBAL_AWF" ] || ! cmp -s "$GLOBAL_AWF" "$KIT/bin/awf"; then
+  echo "FAIL  全局技能实体与 checkout 不一致（$GLOBAL_AWF）；请先运行 ./install.sh 再跑本测试" >&2
+  exit 1
+fi
+[ -f "$HOME/.dsh/skills/agent-workflow-scaffold/templates/AGENTS.md.tmpl" ] \
+  && cmp -s "$HOME/.dsh/skills/agent-workflow-scaffold/templates/AGENTS.md.tmpl" "$KIT/templates/AGENTS.md.tmpl" \
+  || { echo "FAIL  全局技能模板与 checkout 不一致；请先运行 ./install.sh" >&2; exit 1; }
 
 fail() { echo "FAIL  $*" >&2; exit 1; }
 ok()   { echo "ok    $*"; }
@@ -43,19 +53,24 @@ PA="$WORK/projA"
 printf '\n# upgrade-marker-keep-project-yaml\n' >> "$PA/agent-workflow/project.yaml"
 printf '\n<!-- upgrade-marker-keep-ledger-marker -->\n' >> "$PA/agent-workflow/tasks/dev/current.md"
 
-# 制造存量旧项目：旧模板 / 旧 README / 旧 workflows/ 副本 / 旧 check_workflow.sh 桩
+# 制造存量旧项目：旧模板 / 旧 README / 旧 workflows/ 副本 / 旧 bin 工具副本 / 旧 check_workflow.sh 桩
 printf '# 旧模板 v0.3（无任务路由）\n## 铁律\n- 旧\n' > "$PA/agent-workflow/templates/AGENTS.md.tmpl"
 printf '# OLD-README\n' > "$PA/agent-workflow/README.md"
 mkdir -p "$PA/agent-workflow/workflows"
 printf '# OLD-CROSS-PROJECT\n' > "$PA/agent-workflow/workflows/cross-project.md"
 printf '#!/bin/sh\necho OLD-GATE\nexit 0\n' > "$PA/agent-workflow/check_workflow.sh"
 chmod +x "$PA/agent-workflow/check_workflow.sh"
+# 旧 bin 工具副本（存量项目在工具技能化前的形态）：plain upgrade 保留，--slim 删除
+mkdir -p "$PA/agent-workflow/bin"
+printf '#!/bin/sh\necho OLD-TOOL\nexit 1\n' > "$PA/agent-workflow/bin/awf"
+printf '#!/usr/bin/env python3\nprint("OLD-DISPATCH")\n' > "$PA/agent-workflow/bin/awf-dispatch"
+chmod +x "$PA/agent-workflow/bin/awf" "$PA/agent-workflow/bin/awf-dispatch"
 
 # 制造旧版后 check 应失败（旧模板/旧 README 与 digest 不一致 → 入口过期）
 if chk "$PA" check >/dev/null 2>&1; then
   fail "A 制造旧版后 check 不应通过"
 fi
-ok "A 制造旧版框架后 check 失败（旧模板/README 触发入口过期）"
+ok "A 制造旧版框架后 check 失败（旧模板触发入口过期）"
 
 # --dry-run：只打印，不覆盖
 dry="$("$AWF" upgrade "$PA" --dry-run)"
@@ -74,14 +89,15 @@ if ! out="$(cd "$WORK" && "$AWF" upgrade "$PA" 2>&1)"; then
 fi
 ok "A upgrade 执行成功且 check 通过"
 
-# 断言：骨架模板与 kit 一致（派发工具在技能，不复制到项目）
+# 断言：骨架模板与 kit 一致（派发工具在技能，不复制到项目；存量副本由 --slim 清理）
 [ -f "$KIT/skills/cross-project-dispatch/scripts/awf-dispatch" ] || fail "A 派发技能缺少自带脚本"
-[ ! -e "$PA/agent-workflow/bin/awf-dispatch" ] || fail "A 项目内不应有 awf-dispatch 副本"
 cmp -s "$PA/agent-workflow/templates/AGENTS.md.tmpl" "$KIT/templates/AGENTS.md.tmpl" \
   || fail "A templates/AGENTS.md.tmpl 与 kit 不一致"
+cmp -s "$PA/agent-workflow/templates/pre-commit" "$KIT/templates/pre-commit" \
+  || fail "A templates/pre-commit 与 kit 不一致"
 cmp -s "$PA/agent-workflow/README.md" "$KIT/templates/README.md" || fail "A README 与 kit 不一致"
 grep -q 'OLD-GATE' "$PA/agent-workflow/check_workflow.sh" || fail "A 自定义门禁被静默覆盖"
-ok "A 升级后骨架模板与 kit 一致，项目内无派发副本，自定义门禁保留"
+ok "A 升级后骨架模板与 kit 一致，自定义门禁保留"
 
 # 断言：保留清单逐字节不动
 grep -q 'upgrade-marker-keep-project-yaml' "$PA/agent-workflow/project.yaml" || fail "A project.yaml 未保留"
@@ -95,10 +111,17 @@ grep -q '本入口不重复' "$PA/AGENTS.md" || fail "A AGENTS.md 未按技能�
 chk "$PA" check >/dev/null || fail "A 升级后 check 未通过"
 ok "A AGENTS.md 重建含技能路由指针，check 通过"
 
-# --slim 清理存量 workflows/ 副本（技能化后不再需要）
+# --slim 清理存量 workflows/ + bin 工具副本（技能化后不再需要）
+# 前置自保护：plain upgrade 不清理（--slim 才有判别力）
+[ -d "$PA/agent-workflow/workflows" ] || fail "A plain upgrade 不应已清理 workflows/"
+[ -f "$PA/agent-workflow/bin/awf" ] || fail "A plain upgrade 不应已清理 bin/awf 副本"
+[ -f "$PA/agent-workflow/bin/awf-dispatch" ] || fail "A plain upgrade 不应已清理 bin/awf-dispatch 副本"
 "$AWF" upgrade "$PA" --slim >/dev/null 2>&1 || fail "A --slim 升级失败"
 [ ! -d "$PA/agent-workflow/workflows" ] || fail "A --slim 未清理存量 workflows/"
-ok "A --slim 清理存量 workflows/ 副本"
+[ ! -f "$PA/agent-workflow/bin/awf" ] || fail "A --slim 未清理存量 bin/awf"
+[ ! -f "$PA/agent-workflow/bin/awf-dispatch" ] || fail "A --slim 未清理存量 bin/awf-dispatch"
+chk "$PA" check >/dev/null || fail "A --slim 后 check 未通过"
+ok "A --slim 清理存量 workflows/ + bin 工具副本，项目健康"
 
 # ---------- B. 旧账本迁移兼容：| Status | 表头 → check 给修复指引 ----------
 PB="$WORK/projB"

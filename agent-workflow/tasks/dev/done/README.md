@@ -101,3 +101,4 @@
 | DEV-198 | P1 | 版本锚点迁移框架支持：version_file → agent-workflow/VERSION 全链路 + 根 VERSION 防踩坑检查 | 2026-11-07 |
 | DEV-201 | P1 | 派发技能自包含，移除旧入口 | 2026-11-07 |
 | DEV-202 | P1 | 修复 upgrade 回归测试与新形态不符（workflows/ 退役 + bin 空目录） | 2026-11-07 |
+| DEV-203 | P2 | upgrade 回归测试健壮性增强（DEV-202 复核建议 1/2/3/4/5/6） | 2026-11-07 |
