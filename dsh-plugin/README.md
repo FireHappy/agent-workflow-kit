@@ -152,7 +152,7 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
   - 修复：全部 td 统一 `word-break:break-word;overflow-wrap:anywhere`（去除 nowrap）；colgroup 列宽按比例归一化合计 100%（旧值 18+12+52+18+16+16=132% 溢出）；4 列 docs 型表格宽度不变（回归）
   - 验证：抽取 mdToHtml 对真实 6 列归档表合成渲染断言通过 + 单测回归 26/26 全绿
 
-- **0.3.6+（DEV-183）**：初始化与升级流程一致——`/awf/init/agent` 改为**注入主会话**（不再用受管理子代理）；引导卡加「git 忽略工作流」toggle（对应 awf init --gitignore / awf gitignore）；同时 `awf-dispatch` 增加**全局 [awf] 会话总数 ≤ 3** 限制（所有项目合计，复用不受限）
+- **0.3.6+（DEV-183/DEV-212）**：初始化与升级流程一致——`/awf/init/agent` 改为**注入主会话**（不再用受管理子代理）；引导卡加「git 忽略工作流」toggle（对应 awf init --gitignore / awf gitignore）；`awf-dispatch` 仅限制**单项目 [awf] 会话 ≤3**（不设全局上限），3 个全忙时由独立监听子进程等待任一空闲后继续派发
 - **0.2.4（DEV-103 等）**：看板初始化 agent 化 + 引导卡提亮
   - 初始化改走 agent 完整配置（`lib/index.js` 新增 `POST /awf/init/agent`）：受管理子代理读项目上下文（README/技术栈/结构）→ 生成完整骨架（project.yaml + AGENTS.md 区块 + workflows/templates/bin/awf + 标准 4 列账本骨架 + 初始真实任务）→ awf check/status 验证 → 回执；替代仅空模板的最小骨架
   - `buildActPrompt` 新增 init 动作分支（`INIT_AGENT_GUIDE`），`AGENT_ACTIONS` 白名单加入 init

@@ -85,43 +85,11 @@ DEFAULT_IDLE_WAIT = 300
 # 调度方项目名（DEV-136：默认 = 发起派发的会话所在项目，如 agent-workflow-kit））
 # + 当前任务摘要（ID + 短标题，随派发动态更新）；前缀保持 [awf]（DEV-126 澄清）。
 AWF_TITLE_PREFIX = "[awf]"
-# DEV-134：同一派发者在同一目标项目的 [awf] 任务会话数量上限（并发上限）。
-# 池内空闲优先复用；都忙且池未满 → 新建扩充；池满（>=MAX）都忙 → 等待空闲。
+# DEV-134/DEV-210：同一项目 [awf] 任务会话总数上限（用户语义「一个项目 [awf] 会话 ≤3」）。
+# 池内空闲优先复用（在 [awf] 中取闲置会话改名接新任务）；都忙且池未满 → 新建扩充；
+# 池满（>=MAX）都忙 → 等待空闲。复用不受此限；仅「需要新建」时按项目池总数判断。
+# 无全局 [awf] 会话总数上限（DEV-183 全局上限已按用户要求移除——用户只要每项目 ≤3）。
 MAX_SENDER_SESSIONS = 3
-# DEV-183：全局 [awf] 会话总数上限（所有项目合计，用户要求：跨会话派发总数 ≤ 3）。
-# 复用不受此限（复用不新增会话）；仅「需要新建」时检查：已达全局上限 → 报错要求
-# 复用空闲会话 / 清理归档，--force 为逃生口。
-# 可配置（按项目不同，DEV-183 环境变量方案）：
-#   AWF_MAX_SESSIONS_<项目ID>（项目专属，如 AWF_MAX_SESSIONS_UXRSAMPLE=5）>
-#   AWF_MAX_SESSIONS（通用）> 默认 3。
-DEFAULT_MAX_GLOBAL_AWF_SESSIONS = 3
-
-
-def resolve_max_global_sessions(target) -> int:
-    """按目标项目解析 [awf] 会话总数上限（每项目可不同）。
-
-    优先级：项目专属环境变量 AWF_MAX_SESSIONS_<项目ID> > 通用 AWF_MAX_SESSIONS >
-    DEFAULT_MAX_GLOBAL_AWF_SESSIONS（3）。项目ID = 目标目录名，大写并 - → _。
-    非法值（非正整数）回退下一级并告警，不抛错。
-    """
-    base = os.path.basename(os.path.realpath(str(target)))
-    proj_key = (base or "project").upper().replace("-", "_")
-    candidates = [
-        (f"AWF_MAX_SESSIONS_{proj_key}", True),
-        ("AWF_MAX_SESSIONS", False),
-    ]
-    for var, is_proj in candidates:
-        raw = (os.environ.get(var) or "").strip()
-        if not raw:
-            continue
-        try:
-            value = int(raw)
-            if value >= 1:
-                return value
-            emit(f"环境变量 {var}={raw} 非正整数，忽略（回退下一级/默认）", False)
-        except ValueError:
-            emit(f"环境变量 {var}={raw} 无法解析为整数，忽略（回退下一级/默认）", False)
-    return DEFAULT_MAX_GLOBAL_AWF_SESSIONS
 # 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
 # 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
 DEFAULT_QUEUE_TIMEOUT = 180
@@ -1273,6 +1241,53 @@ def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = 
         time.sleep(max(0.0, min(interval, deadline - time.time())))
 
 
+def wait_for_idle_sessions(api: DshApi, session_ids: list, timeout: int, interval: float = 3.0):
+    """监听多个 [awf] 会话，任一变为空闲即返回其会话行。
+
+    供独立监听子进程使用：达到项目 3 会话上限且全忙时，监听器持续观察整个项目池，
+    任一会话结束就把它交还给派发主流程复用；超时返回 None，会话消失返回 SESSION_GONE。
+    """
+    wanted = {str(x) for x in session_ids}
+    deadline = time.time() + max(0, timeout)
+    while True:
+        rows = api.sessions()
+        seen = {str(row.get("sessionId")): row for row in rows if isinstance(row, dict)}
+        if not wanted.intersection(seen):
+            return SESSION_GONE
+        for sid in session_ids:
+            row = seen.get(str(sid))
+            if row is not None and row.get("running") is False:
+                return row
+        if time.time() >= deadline:
+            return None
+        time.sleep(max(0.0, min(interval, deadline - time.time())))
+
+
+def spawn_idle_listener(api: DshApi, session_ids: list, timeout: int, json_mode: bool = False):
+    """启动独立监听子进程，监听项目 [awf] 会话池直到任一空闲。"""
+    payload = json.dumps([str(x) for x in session_ids], ensure_ascii=False)
+    cmd = [sys.executable, str(Path(__file__).resolve()), "--listen-sessions", payload,
+           "--queue-timeout", str(max(0, timeout))]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        out, err = proc.communicate(timeout=max(0, timeout) + 5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return None
+    if proc.returncode != 0:
+        if not json_mode and err.strip():
+            print("  … 会话监听子进程失败：" + err.strip(), file=sys.stderr)
+        return None
+    try:
+        result = json.loads(out.strip() or "{}")
+    except json.JSONDecodeError:
+        return None
+    if result.get("gone"):
+        return SESSION_GONE
+    return result.get("session")
+
+
 def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int,
                  json_mode: bool, target=None, head_before=None):
     """轮询到回合结束；返回 (会话行, 回合耗时秒) 或 (None, None)。
@@ -1991,37 +2006,10 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             source = "复用"
 
     if session_id is None:
-        # 数量上限（DEV-159）：同一派发者在同一项目的 [awf] 会话不超过
-        # MAX_SENDER_SESSIONS（3）——--new 同样受约束（用户语义：数量不超 3）；
-        # 显式 --force 为逃生口（旧会话坏掉/阻塞需强制新建时）。
-        if not args.force:
-            sender_key = clean_title(sender, limit=20) if sender else "lead"
-            pool_count = sum(
-                1 for row in rows
-                if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
-                and row_sender_key(session_title(row)) == sender_key
-            )
-            if pool_count >= MAX_SENDER_SESSIONS:
-                raise DispatchError(
-                    f"该派发者「{sender_key}」在 {target.name} 已有 {pool_count} 个 [awf] 会话"
-                    f"（上限 {MAX_SENDER_SESSIONS}）——达到数量上限：请复用空闲会话、"
-                    "或清理（--prune / GUI 删除票据）后重试；确需强制新建加 --force"
-                )
-            # DEV-183：全局 [awf] 会话总数上限（按项目可配：项目专属环境变量 > 通用 > 默认 3）。
-            # 走到新建路径说明没有可复用会话（复用池全忙或不存在）——全局已达上限时
-            # 必须等待空闲/清理，不允许再新建；--force 逃生口保留。
-            global_count = sum(
-                1 for row in rows
-                if session_title(row).startswith(AWF_TITLE_PREFIX)
-            )
-            max_global = resolve_max_global_sessions(target)
-            if global_count >= max_global:
-                raise DispatchError(
-                    f"全局 [awf] 会话已达 {global_count} 个（上限 {max_global}，"
-                    f"项目 {target.name} 可经 AWF_MAX_SESSIONS_{os.path.basename(os.path.realpath(str(target))).upper().replace('-', '_')}"
-                    " 或 AWF_MAX_SESSIONS 调整）——无可复用空闲会话，请等待现有会话空闲"
-                    "（--queue-timeout）或清理归档后重试；确需强制新建加 --force"
-                )
+        # 新建路径：走到这里说明「无可复用闲置会话」（select 返回 None = 池空或池未满<3）。
+        # 池满（3 个 [awf] 会话且全忙）时 select 已返回忙碌候选，由下方 else 分支进入
+        # wait_for_idle 排队等待——达到每项目上限不再是「拒绝不发」，而是等待空闲后再发；
+        # 等待超时（--queue-timeout）才报错，--force 为强制新建逃生口。无全局总数上限。
         # 新建路径：--new 直接建会话，不碰 session/list；自动新建时才做同名保护。
         # 显式 --new 跳过复用检查与同名保护（用户已明确要新会话）。
         if args.reuse:
@@ -2056,7 +2044,22 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                 "--queue-timeout 可调）",
                 args.json,
             )
-            outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json, target=target)
+            # 项目池达到 3 个且全忙：启动独立监听子进程监听整个 [awf] 池，
+            # 任一会话空闲即返回给主派发流程复用；测试桩/非 DshApi 仍走内联等待。
+            project_pool = [
+                r for r in (rows or [])
+                if os.path.realpath(r.get("cwd") or "") == os.path.realpath(str(target))
+                and (session_title(r) or "").startswith(AWF_TITLE_PREFIX)
+            ]
+            if isinstance(api, DshApi) and len(project_pool) >= MAX_SENDER_SESSIONS:
+                emit("启动会话监听子进程：等待项目 [awf] 会话池任一空闲后继续发送", args.json)
+                outcome = spawn_idle_listener(
+                    api, [r["sessionId"] for r in project_pool], args.queue_timeout, args.json)
+            else:
+                outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json, target=target)
+            if isinstance(outcome, dict) and outcome.get("sessionId"):
+                session_id = outcome["sessionId"]
+                row = outcome
             if outcome is SESSION_GONE:
                 raise DispatchError(
                     f"等待期间会话消失或被归档：{session_id}；"
@@ -2654,6 +2657,7 @@ def main(argv=None) -> int:
     parser.add_argument("target", nargs="?", help="项目别名 / 项目 ID / 目录（--prune 时不需要）")
     parser.add_argument("task", nargs="?", help="任务文件（Markdown；--prune 时不需要）")
     parser.add_argument("--web-url", default="", help=f"DSH Web URL（默认 $DSH_WEB_URL 或 {DEFAULT_WEB_URL}）")
+    parser.add_argument("--listen-sessions", default="", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true", help="只做前置检查，不创建会话")
     parser.add_argument(
         "--prune",
@@ -2812,6 +2816,16 @@ def main(argv=None) -> int:
     # DISPATCH-146：--report 与其它模式互斥（回执投递独立于派发）。第一个位置
     # 参数即回执文本（与 `--report "<回执文本>"` 命令形式一致）；第二个位置参数
     # （task）仍不允许。
+    if getattr(args, "listen_sessions", ""):
+        try:
+            ids = json.loads(args.listen_sessions)
+            api = DshApi(args.web_url)
+            row = wait_for_idle_sessions(api, ids, args.queue_timeout)
+            print(json.dumps({"session": row, "gone": row is SESSION_GONE}, ensure_ascii=False))
+            return 0 if row is not None else 1
+        except Exception as error:
+            print(str(error), file=sys.stderr)
+            return 1
     if args.report and (args.prune or args.session or args.headless or args.handoff
                         or args.wait or args.task):
         parser.error(

@@ -514,6 +514,13 @@ assert row_idle is not None and row_idle["running"] is False and polling.calls =
 stuck = FakeApi([[turn(True)]])
 assert module.wait_for_idle(stuck, "s-awf", timeout=0.05, interval=0.01) is None
 
+# DEV-212：项目 3 个 [awf] 全忙时，监听器观察整个池；任一会话空闲即返回
+multi = FakeApi([[{"sessionId": "s-a", "running": True}, {"sessionId": "s-b", "running": True}],
+                 [{"sessionId": "s-a", "running": True}, {"sessionId": "s-b", "running": False}]])
+watch = module.wait_for_idle_sessions(multi, ["s-a", "s-b"], timeout=5, interval=0.01)
+assert watch is not None and watch["sessionId"] == "s-b" and watch["running"] is False
+
+
 # 轮询中会话消失/被归档：返回 SESSION_GONE（与超时区分，调用方提示重新派发）
 missing = FakeApi([[{"sessionId": "other", "running": False}]])
 assert module.wait_for_idle(missing, "s-awf", timeout=0.05, interval=0.01) is module.SESSION_GONE
@@ -949,16 +956,17 @@ assert running_api.created == [], running_api.created
 assert running_api.prompts and running_api.prompts[0][0] == "s-r3", running_api.prompts
 assert any("等待队列" in m for m in running_api.emitted), running_api.emitted
 
-# DEV-159 数量上限：同一派发者同项目 [awf] 会话不超过 3——--new 同样受约束（拒绝新建，--force 逃生）
+# DEV-210/DEV-212 数量上限：每项目 [awf] 会话总数 ≤3；达到 3 且全忙时等待，不拒绝、不新建第 4 个。
+# 自动复用路径已有 running_api 覆盖；这里保留 3 个空闲候选，验证优先复用 [awf] 闲置而非新建。
 pool3_api = FakeDispatchApi([
-    row("s-p1", title=module.awf_session_title("lead", "TEST-310 甲")),
-    row("s-p2", title=module.awf_session_title("lead", "TEST-311 乙")),
-    row("s-p3", title=module.awf_session_title("lead", "TEST-312 丙")),
+    row("s-p1", title=module.awf_session_title("lead", "TEST-310 甲"), updated=1),
+    row("s-p2", title=module.awf_session_title("member", "TEST-311 乙"), updated=2),
+    row("s-p3", title=module.awf_session_title("lead", "TEST-312 丙"), updated=3),
 ])
-pool3_err = run_dispatch(pool3_api, "通用", new=True, expect_error=True)
-assert "已有 3 个" in pool3_err and "上限 3" in pool3_err, pool3_err
-run_dispatch(pool3_api, "通用", new=True, force=True)
-assert pool3_api.created == ["s-created-1"], "超限时 --force 可强制新建（逃生口）"
+logs, _ = run_dispatch(pool3_api, "通用")
+assert pool3_api.created == [], "已有 3 个 [awf] 会话时应优先复用闲置，不新建"
+assert pool3_api.prompts and pool3_api.prompts[0][0] == "s-p3", pool3_api.prompts
+assert "会话来源：复用" in logs[0], logs
 
 # --new 不碰 session/list：mock sessions() 抛错也应成功（不应报 G4 / 复用检查失败）
 new_api = NoListApi([row("s-same", title=title)])
