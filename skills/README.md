@@ -15,6 +15,8 @@
 | 发版 / 版本号 / tag / CHANGELOG | `skills/release/SKILL.md` | 探测→bump→CHANGELOG→tag→收尾 |
 | 团队执行 / 多角色协办 | `skills/team-flow/SKILL.md` | 先登记→建队→三轨→质量合同→队长收尾 |
 | 升级 / 整理已有工作流 | `skills/upgrade/SKILL.md` | 定位→预览→执行→修复→提交（保留账本历史） |
+| Unity 打包 + 安装 | `skills/unity-build-install/SKILL.md` | 场景预检→工具判定→通道（MCP/batch）→构建→校验→安装启动 |
+| Unity MCP 操作编辑器 | `skills/unity-mcp/SKILL.md` | check→安装→启动→选实例→ping/state→构建/控制台 |
 
 ## 使用方式
 
