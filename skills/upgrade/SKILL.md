@@ -40,7 +40,7 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 | 文件 | 说明 |
 |---|---|
 | `~/.dsh/skills/agent-workflow-scaffold/bin/awf` | 生成/校验工具（新增 `upgrade`、check 迁移修复指引随版本生效） |
-| `~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch` | 跨项目派发器 |
+| `~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch` | 跨项目派发器 |
 | `agent-workflow/templates/AGENTS.md.tmpl` | 入口模板（任务路由等规则随之更新） |
 | `agent-workflow/README.md` | 规范正文 |
 | `agent-workflow/templates/AGENTS.md.tmpl` 等稳定契约 | 技能化后工作流细节在技能，项目内无 workflows/ 副本 |

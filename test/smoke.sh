@@ -7,6 +7,8 @@
 set -eu
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+DISPATCH_IMPL="$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch"
+DISPATCH_CLI="$DISPATCH_IMPL"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export DSH_AGENTS_HOME="$TMP/agents"
@@ -48,7 +50,7 @@ assert_grep 'awf:begin v1 digest:' "$PROJ/AGENTS.md" "入口含 digest"
 assert_grep '（未配置' "$PROJ/AGENTS.md" "空校验命令有回退提示"
 assert_grep '技能库' "$PROJ/AGENTS.md" "入口含技能库表述（技能化形态）"
 [ ! -d "$PROJ/agent-workflow/workflows" ] && ok "init 不生成 workflows/ 目录（技能化：细节在技能）" || bad "init 不应生成 workflows/ 目录"
-assert_file "$KIT_DIR/bin/awf-dispatch" "awf-dispatch"
+assert_file "$DISPATCH_CLI" "awf-dispatch"
 assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
 
 # 1.4 gitignore：init --gitignore 写 .gitignore（根锚定+幂等）；awf gitignore 为存量项目补写
@@ -77,20 +79,20 @@ assert_grep '^/agent-workflow/$' "$NOGI_PROJ/.gitignore" "awf gitignore 为存�
 assert_grep '^/CLAUDE.md$' "$NOGI_PROJ/.gitignore" "无换行 .gitignore 追加块完整落行"
 
 # 1.1 派发器：help / --team 任务包注入 / handoff / 无工作流前置检查
-"$KIT_DIR/bin/awf-dispatch" --help >/dev/null && ok "awf-dispatch --help" || bad "awf-dispatch --help 失败"
-if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--team'; then
+"$DISPATCH_CLI" --help >/dev/null && ok "awf-dispatch --help" || bad "awf-dispatch --help 失败"
+if "$DISPATCH_CLI" --help 2>&1 | grep -q -- '--team'; then
   ok "--help 列出 --team"
 else
   bad "--help 未列出 --team"
 fi
-if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q 'AgentTeams'; then
+if "$DISPATCH_CLI" --help 2>&1 | grep -q 'AgentTeams'; then
   ok "--help 说明 AgentTeams 语义"
 else
   bad "--help 未说明 AgentTeams 语义"
 fi
 
 # 1.2 默认异步：--help 含 --wait / --no-wait 兼容别名，并写清默认不等待
-help_text="$("$KIT_DIR/bin/awf-dispatch" --help 2>&1)"
+help_text="$("$DISPATCH_CLI" --help 2>&1)"
 if printf '%s\n' "$help_text" | grep -Eq -- '(^|[[:space:]])--wait([[:space:]]|$)'; then
   ok "--help 列出 --wait"
 else
@@ -321,7 +323,7 @@ else
   bad "release-prep 无 Unreleased 时未提示手动"
 fi
 
-if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+if python3 - "$DISPATCH_IMPL" <<'PY'
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -1266,7 +1268,7 @@ else
 fi
 
 # 1.4 --prune 判定：票据解析 + commit 无 ID 但 done.md 含 ID 也算 completed
-if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+if python3 - "$DISPATCH_IMPL" <<'PY'
 import importlib.machinery
 import importlib.util
 import pathlib
@@ -1332,7 +1334,7 @@ else
 fi
 
 # 直接用 importlib 加载源脚本，断言 build_prompt 的 --team 注入、默认异步实现点与缺省行为
-if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+if python3 - "$DISPATCH_IMPL" <<'PY'
 import importlib.machinery
 import importlib.util
 import inspect
@@ -1387,18 +1389,18 @@ else
 fi
 
 printf '# 任务：TEST-001 冒烟派发\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n\n1. 只读验证。\n' > "$TMP/task.md"
-( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ" task.md --handoff >/dev/null ) \
+( cd "$TMP" && "$DISPATCH_CLI" "$PROJ" task.md --handoff >/dev/null ) \
   && ok "handoff 生成交接单" || bad "handoff 失败"
 [ -f "$TMP"/dispatch/handoff/*.md ] && ok "交接单文件存在" || bad "交接单文件缺失"
 mkdir -p "$TMP/noworkflow"
-if "$KIT_DIR/bin/awf-dispatch" "$TMP/noworkflow" "$TMP/task.md" --dry-run >"$TMP/out" 2>&1; then
+if "$DISPATCH_CLI" "$TMP/noworkflow" "$TMP/task.md" --dry-run >"$TMP/out" 2>&1; then
   bad "无工作流时派发应失败"
 else
   grep -q 'G1 工作流失败' "$TMP/out" && ok "无工作流时前置检查失败" || bad "无工作流时错误信息不明确"
 fi
 
 # 1.5 --prune 端到端：dry-run 不改文件 / --apply 删除（git rm 与 unlink）/ 用法错误
-DISPATCH="$KIT_DIR/bin/awf-dispatch"
+DISPATCH="$DISPATCH_CLI"
 PRUNE="$TMP/prune"
 PRUNE_TARGET="$TMP/prune-target"
 mkdir -p "$PRUNE/dispatch/tasks" "$PRUNE_TARGET/agent-workflow/tasks/dev"
@@ -1615,7 +1617,7 @@ rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV_001.md"
 
 # 12. 派发器：无效目标应返回退出码 2（门失败）
 set +e
-"$KIT_DIR/bin/awf-dispatch" no-such-project /dev/null >/dev/null 2>&1
+"$DISPATCH_CLI" no-such-project /dev/null >/dev/null 2>&1
 dispatch_code=$?
 set -e
 [ "$dispatch_code" = "2" ] && ok "awf-dispatch 门失败退出码为 2" || bad "awf-dispatch 退出码为 ${dispatch_code}（期望 2）"
@@ -1830,7 +1832,7 @@ else
 fi
 
 # 20. RT-1：旧格式迁移默认关闭，--allow-legacy-reuse 显式放行（帮助与文档同步）
-if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--allow-legacy-reuse'; then
+if "$DISPATCH_CLI" --help 2>&1 | grep -q -- '--allow-legacy-reuse'; then
   ok "RT-1 --help 列出 --allow-legacy-reuse"
 else
   bad "RT-1 --help 未列出 --allow-legacy-reuse"
@@ -1842,7 +1844,7 @@ else
 fi
 
 # 20.1 RT-1/2/3 单元回归（mock API / 真实 git 仓库；不接触真实会话）
-if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+if python3 - "$DISPATCH_IMPL" <<'PY'
 import argparse
 import contextlib
 import importlib.machinery
@@ -2155,7 +2157,7 @@ else
 fi
 
 # 21. DEV-115 激活式路由：票据来源校验（ticket_source 解析 + 禁止转派 + 旧票据兼容）
-if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+if python3 - "$DISPATCH_IMPL" <<'PY'
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -2458,20 +2460,20 @@ ROLE_TASK_DIR="$TMP/role-tasks"; mkdir -p "$ROLE_TASK_DIR"
 printf '# 任务：执行冒烟测试并生成测试报告\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：在目标项目执行冒烟测试。\n' > "$ROLE_TASK_DIR/match.md"
 printf '# 任务：外汇交易数据分析与图表\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：分析外汇交易数据并生成图表。\n' > "$ROLE_TASK_DIR/mismatch.md"
 # 24.1 --help 含 --check-role
-if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--check-role'; then
+if "$DISPATCH_CLI" --help 2>&1 | grep -q -- '--check-role'; then
   ok "DEV-122 awf-dispatch --help 含 --check-role"
 else
   bad "DEV-122 --help 缺少 --check-role"
 fi
 # 24.2 决策三件套模板与跨项目规范含 role（防文档回归）
 if grep -q 'role' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q 'role' "$KIT_DIR/bin/awf-dispatch"; then
+   && grep -q 'role' "$DISPATCH_IMPL"; then
   ok "DEV-122 决策三件套模板与跨项目规范含 role 匹配语义"
 else
   bad "DEV-122 决策三件套模板/规范缺 role"
 fi
 # 24.3 --check-role 匹配：输出匹配且无警告、rc=0
-if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ4" "$ROLE_TASK_DIR/match.md" \
+if ( cd "$TMP" && "$DISPATCH_CLI" "$PROJ4" "$ROLE_TASK_DIR/match.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-match.log" 2>&1 ); then
   if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-match.log" \
      && ! grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-match.log"; then
@@ -2483,7 +2485,7 @@ else
   bad "DEV-122 --check-role 匹配场景退出码非 0"
 fi
 # 24.4 --check-role 不匹配：警告但退出码仍 0（软校验不硬拒）
-if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ4" "$ROLE_TASK_DIR/mismatch.md" \
+if ( cd "$TMP" && "$DISPATCH_CLI" "$PROJ4" "$ROLE_TASK_DIR/mismatch.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-mismatch.log" 2>&1 ); then
   if grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-mismatch.log"; then
     ok "DEV-122 --check-role 不匹配：警告但退出码 0（软校验）"
@@ -2494,7 +2496,7 @@ else
   bad "DEV-122 --check-role 不匹配场景退出码非 0"
 fi
 # 24.5 --allow-role-mismatch 静默不匹配警告
-if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ4" "$ROLE_TASK_DIR/mismatch.md" \
+if ( cd "$TMP" && "$DISPATCH_CLI" "$PROJ4" "$ROLE_TASK_DIR/mismatch.md" \
      --check-role --allow-role-mismatch --dry-run --headless > "$ROLE_TASK_DIR/out-silent.log" 2>&1 ); then
   if ! grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-silent.log"; then
     ok "DEV-122 --allow-role-mismatch 静默不匹配警告"
@@ -2505,7 +2507,7 @@ else
   bad "DEV-122 --allow-role-mismatch 场景退出码非 0"
 fi
 # 24.6 无 role：提示但不阻塞、rc=0
-if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$PROJ5" "$ROLE_TASK_DIR/match.md" \
+if ( cd "$TMP" && "$DISPATCH_CLI" "$PROJ5" "$ROLE_TASK_DIR/match.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-norole.log" 2>&1 ); then
   if grep -q '目标未填 role' "$ROLE_TASK_DIR/out-norole.log"; then
     ok "DEV-122 --check-role 无 role：提示但不阻塞（rc=0）"
@@ -2520,7 +2522,7 @@ fi
 ROLE_KIT="擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版"
 "$KIT_DIR/bin/awf" init "$TMP/proj6" --name "误判回归" --role "$ROLE_KIT" >/dev/null 2>&1
 printf '# 任务：生成本周周报并总结 git 提交\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：收集本周会话与提交，生成周报。\n' > "$ROLE_TASK_DIR/zhoubao.md"
-if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj6" "$ROLE_TASK_DIR/zhoubao.md" \
+if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj6" "$ROLE_TASK_DIR/zhoubao.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-kit.log" 2>&1 ); then
   if grep -q '警告：目标 role' "$ROLE_TASK_DIR/out-kit.log"; then
     ok "DEV-123 kit role ↔ 周报任务：不匹配（泛词「生成」不再单独构成依据）"
@@ -2532,7 +2534,7 @@ else
 fi
 ROLE_ZB="擅长收集 DSH 会话历史与 git 提交，归纳生成日报/周报"
 "$KIT_DIR/bin/awf" init "$TMP/proj7" --name "周报匹配" --role "$ROLE_ZB" >/dev/null 2>&1
-if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj7" "$ROLE_TASK_DIR/zhoubao.md" \
+if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj7" "$ROLE_TASK_DIR/zhoubao.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-zb.log" 2>&1 ); then
   if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-zb.log"; then
     ok "DEV-123 周报 role ↔ 周报任务：匹配保持（领域词「周报」单命中）"
@@ -2545,7 +2547,7 @@ fi
 ROLE_UXR="擅长 Rokid UXR SDK 的 Unity 示例开发与真机联调测试"
 "$KIT_DIR/bin/awf" init "$TMP/proj8" --name "领域词命中" --role "$ROLE_UXR" >/dev/null 2>&1
 printf '# 任务：Unity 真机联调\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：在真机联调 Unity 示例。\n' > "$ROLE_TASK_DIR/unity.md"
-if ( cd "$TMP" && "$KIT_DIR/bin/awf-dispatch" "$TMP/proj8" "$ROLE_TASK_DIR/unity.md" \
+if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj8" "$ROLE_TASK_DIR/unity.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-uxr.log" 2>&1 ); then
   if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-uxr.log"; then
     ok "DEV-123 领域词（Unity/联调）无泛词交集仍命中匹配"
@@ -2643,14 +2645,14 @@ fi
 
 # 27. DEV-126 part C：会话命名 [awf] <目标项目> + 队列等待 --queue-timeout
 # 27.1 --help 含新标题约定与队列参数
-if "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q '\[awf\] <目标项目>' \
-   && "$KIT_DIR/bin/awf-dispatch" --help 2>&1 | grep -q -- '--queue-timeout'; then
+if "$DISPATCH_CLI" --help 2>&1 | grep -q '\[awf\] <目标项目>' \
+   && "$DISPATCH_CLI" --help 2>&1 | grep -q -- '--queue-timeout'; then
   ok "DEV-126 --help 含 [awf] <目标项目> 与 --queue-timeout（队列等待）"
 else
   bad "DEV-126 --help 缺新标题约定或 --queue-timeout"
 fi
 # 27.2 前缀常量保持 [awf]（用户澄清：任务里写 [asf] 是笔误，前缀不变）
-if grep -q 'AWF_TITLE_PREFIX = "\[awf\]"' "$KIT_DIR/bin/awf-dispatch"; then
+if grep -q 'AWF_TITLE_PREFIX = "\[awf\]"' "$DISPATCH_IMPL"; then
   ok "DEV-126 会话前缀仍为 [awf]（标题格式简化、前缀不变）"
 else
   bad "DEV-126 前缀偏离 [awf]"
@@ -2761,9 +2763,9 @@ for section in "必报点总表" "回执投递通道" "回执正文排版" "远�
   grep -q "$section" "$SKILL_CROSS" && ok "技能章节齐全：$section" || bad "技能缺章节：$section"
 done
 # 行为契约：注入文本/脚本必须实现这些语义（来自 bin/awf-dispatch 注入段与实现）
-if grep -q '必有回执' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '无回执' "$KIT_DIR/bin/awf-dispatch" \
-   && grep -q '派发方' "$KIT_DIR/bin/awf-dispatch"; then
+if grep -q '必有回执' "$DISPATCH_IMPL" \
+   && grep -q '无回执' "$DISPATCH_IMPL" \
+   && grep -q '派发方' "$DISPATCH_IMPL"; then
   ok "DISPATCH 必有回执/失联兜底/投递通道语义在注入文本"
 else
   bad "DISPATCH 必有回执/失联兜底/投递通道语义不在注入文本"
@@ -2786,7 +2788,7 @@ else
   bad "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 登记样例字段缺失"
 fi
 # 30.2 必有回执是主机制（成功必须回执 / 失败必须回执 / 需用户确认·多轮对话）
-if grep -q '必有回执' "$KIT_DIR/bin/awf-dispatch" \
+if grep -q '必有回执' "$DISPATCH_IMPL" \
    && grep -q '必有回执' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
   ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 必有回执是主机制（成功/失败都必须回执，需用户确认+多轮对话）"
 else
@@ -2800,11 +2802,11 @@ else
   bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺兜底语义"
 fi
 # 30.4 旧表述（代理 FAIL/无回执常规化 / 记忆锚点）已从三处源文本清除
-if grep -q '代理 FAIL、超时无回执' "$KIT_DIR/bin/awf-dispatch" \
-   || grep -q '静默中断' "$KIT_DIR/bin/awf-dispatch" \
-   || grep -q '记忆锚点' "$KIT_DIR/bin/awf-dispatch" \
+if grep -q '代理 FAIL、超时无回执' "$DISPATCH_IMPL" \
+   || grep -q '静默中断' "$DISPATCH_IMPL" \
+   || grep -q '记忆锚点' "$DISPATCH_IMPL" \
    || grep -q '记忆锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   || grep -q '记忆锚点' "$KIT_DIR/bin/awf-dispatch"; then
+   || grep -q '记忆锚点' "$DISPATCH_IMPL"; then
   bad "DISPATCH-134 旧表述残留（代理 FAIL/记忆锚点/无回执常规化）"
 else
   ok "DISPATCH-134 旧表述已清除（无回执不再是常规路径）"
@@ -2818,25 +2820,25 @@ else
 fi
 # 30.9b DISPATCH-143 术语统一：无「用户暂离/away」残留（文档/代码/模板统一为「远程办公状态（remote）」）
 if grep -rn '用户暂离\|away' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/templates" \
-   "$KIT_DIR/bin/awf-dispatch" "$KIT_DIR/AGENTS.md" 2>/dev/null | grep -v '^Binary'; then
+   "$DISPATCH_CLI" "$KIT_DIR/AGENTS.md" 2>/dev/null | grep -v '^Binary'; then
   bad "DISPATCH-143 术语残留：发现「用户暂离/away」，应统一为「远程办公状态（remote）」"
 else
   ok "DISPATCH-143 术语统一：无「用户暂离/away」残留，统一为「远程办公状态（remote）」"
 fi
 if grep -rn '等待最终成功才回执\|闷头执行到最终成功' "$KIT_DIR/docs" "$KIT_DIR/skills" "$KIT_DIR/templates" \
-   "$KIT_DIR/bin/awf-dispatch" "$KIT_DIR/agent-workflow/workflows" 2>/dev/null | grep -v '^Binary'; then
+   "$DISPATCH_CLI" "$KIT_DIR/agent-workflow/workflows" 2>/dev/null | grep -v '^Binary'; then
   bad "DISPATCH-144 旧表述残留（等待最终成功才回执/闷头执行），应改为状态转换即回执"
 else
   ok "DISPATCH-144 无「等待最终成功才回执/闷头执行」旧表述（状态转换即回执）"
 fi
 # 只查注入文本（新条款载体）——仓库既有 DEV-138「派发即启动子代理会话」等契约词属既有表述，不算本条款引入
-if grep -q '子代理\|主代理' "$KIT_DIR/bin/awf-dispatch" 2>/dev/null; then
+if grep -q '子代理\|主代理' "$DISPATCH_IMPL" 2>/dev/null; then
   bad "DISPATCH-145 注入文本引入「子代理/主代理」新词，应沿用「派发方/目标会话」"
 else
   ok "DISPATCH-145 注入文本沿用「派发方/目标会话」表述，未引入子代理/主代理新词"
 fi
 # 30.13b DISPATCH-146：--report --dry-run 渲染回执消息（不依赖 GUI，本地可复现；含标记/来源/派发单）
-if "$KIT_DIR/bin/awf-dispatch" --report "必报点 3 里程碑完成：DEV-156 已实现回执通道" \
+if "$DISPATCH_CLI" --report "必报点 3 里程碑完成：DEV-156 已实现回执通道" \
      --to session-demo-0001 --from session-demo-0002 --ticket DISPATCH-146 --dry-run 2>&1 \
    | grep -q '【回执请求】'; then
   ok "DISPATCH-146 --report --dry-run 渲染回执消息（不联网）"
@@ -2844,13 +2846,13 @@ else
   bad "DISPATCH-146 --report --dry-run 未渲染回执消息"
 fi
 # 30.13c DISPATCH-146：--report 与派发参数互斥（第一个位置参数=回执文本，第二个=非法）
-if "$KIT_DIR/bin/awf-dispatch" --report "x" demo02 2>&1 | grep -q '不能与'; then
+if "$DISPATCH_CLI" --report "x" demo02 2>&1 | grep -q '不能与'; then
   ok "DISPATCH-146 --report 与第二个位置参数互斥（第一个位置参数=回执文本；既有调用方式不变）"
 else
   bad "DISPATCH-146 --report 互斥校验缺失"
 fi
 # 30.13d DISPATCH-146：--report 缺文本 → 干净报错 + 退出码 2（不抛 traceback）
-if "$KIT_DIR/bin/awf-dispatch" --report >/tmp/awf-report-notext.out 2>&1; then
+if "$DISPATCH_CLI" --report >/tmp/awf-report-notext.out 2>&1; then
   bad "DISPATCH-146 --report 缺文本应退出码 2"
 elif grep -q 'Traceback' /tmp/awf-report-notext.out; then
   bad "DISPATCH-146 --report 缺文本不应抛 traceback"
@@ -2860,7 +2862,7 @@ else
   bad "DISPATCH-146 --report 缺文本报错信息缺失"
 fi
 # 30.14b DISPATCH-147：收尾句可经 --report 通道渲染投递（复用 DEV-156 通道，不新造）
-if "$KIT_DIR/bin/awf-dispatch" --report "任务完成，会话空闲，可续发（来源会话：session-demo）" \
+if "$DISPATCH_CLI" --report "任务完成，会话空闲，可续发（来源会话：session-demo）" \
      --to session-demo-0001 --from session-demo-0002 --ticket DISPATCH-147 --dry-run 2>&1 \
    | grep -q '任务完成，会话空闲，可续发'; then
   ok "DISPATCH-147 收尾报平安可经 --report 通道渲染（复用通道，不新造）"
@@ -2869,7 +2871,7 @@ else
 fi
 
 # 30.15 DEV-165：回执投递头用「项目名＋会话名」，查不到回退会话 ID
-if python3 - "$KIT_DIR/bin/awf-dispatch" <<'PY'
+if python3 - "$DISPATCH_IMPL" <<'PY'
 import importlib.machinery
 import importlib.util
 import pathlib
@@ -2913,11 +2915,11 @@ else
   bad "DEV-165 回执投递头改造未通过"
 fi
 # 30.8 旧表述「用户在目标会话内回复即可继续」已从源文本清除
-if grep -q '用户在 GUI 目标会话内' "$KIT_DIR/bin/awf-dispatch" \
-   || grep -q '用户在目标会话内直接回复' "$KIT_DIR/bin/awf-dispatch" \
-   || grep -q '用户在目标会话内回复继续' "$KIT_DIR/bin/awf-dispatch" \
+if grep -q '用户在 GUI 目标会话内' "$DISPATCH_IMPL" \
+   || grep -q '用户在目标会话内直接回复' "$DISPATCH_IMPL" \
+   || grep -q '用户在目标会话内回复继续' "$DISPATCH_IMPL" \
    || grep -q '目标会话多轮对话续聊' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   || grep -q '目标会话多轮对话续聊' "$KIT_DIR/bin/awf-dispatch" \
+   || grep -q '目标会话多轮对话续聊' "$DISPATCH_IMPL" \
    || grep -q '目标会话多轮对话续聊' "$KIT_DIR/AGENTS.md"; then
   bad "DISPATCH-141 旧表述残留（用户在目标会话内回复即可继续）"
 else

@@ -14,7 +14,7 @@ agent-workflow-kit/
 ├── SKILL.md                 # 技能入口（脚手架）
 ├── prompt.md                # 无 shell 环境的提示词版
 ├── bin/awf                  # init / bootstrap / check / status / register / projects / find / release-prep / upgrade
-├── bin/awf-dispatch         # 跨项目派发（DSH 工作区会话适配）
+├── skills/cross-project-dispatch/scripts/awf-dispatch # 派发技能自带工具
 ├── templates/               # 生成用的规范与入口模板
 ├── test/smoke.sh            # 冒烟测试
 ├── test/upgrade.sh          # 升级回归测试（awf upgrade 全流程）
@@ -50,7 +50,7 @@ install 后 DSH 在下一次请求前把所有技能加入技能目录：`agent-
 ~/.dsh/skills/agent-workflow-scaffold/bin/awf status
 
 # 跨项目派发（目标有工作流且已登记工作区；默认只发送不等待，--wait 才等待回合结束）
-~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md
+~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md
 ```
 
 生成结果：
@@ -67,7 +67,6 @@ install 后 DSH 在下一次请求前把所有技能加入技能目录：`agent-
     ├── tools/                操作手册
     ├── templates/            入口模板
     ├── bin/awf               bootstrap / check / status / register / projects / find
-    ├── bin/awf-dispatch      跨项目派发（DSH 会话适配）
     └── check_workflow.sh     兼容入口
 
 （v1.2.0 技能化：无 workflows/ 目录——流程细节在技能 agent-workflow-scaffold 的
@@ -90,16 +89,18 @@ skills/ 各流程技能，AGENTS.md 路由内联状态机 + 强制加载技能�
 
 ## 跨项目派发
 
+派发工具由 `cross-project-dispatch` 技能自带（`scripts/awf-dispatch`），可独立安装、复制和更新；不再提供 `bin/awf-dispatch` 或脚手架技能下的旧入口。
+
 当任务目标在另一个仓库时，先检查目标是否有工作流、是否已登记为当前 harness 的工作区；都满足后，优先在**目标工作区的会话**中执行，而不是默认 headless。
 
 派发遵循**激活式 router** 协议：路由能力只在直接面对**用户原始请求**的节点临时激活（任务票据头部带「来源：用户 | 工作流」标记，缺省=用户，向后兼容）；「来源：工作流」票据允许按需继续转派（深度不限），转派时在票据头部更新「路由裁决」，来源=工作流的再次派发只提示核对转派理由、不拦截。每个 worker 可在项目 `project.yaml` 填 `role` 作**名牌**（一句话自述，`awf find` / `awf projects` 检索时带出；缺省回退 name），router 检索工作群时可见。设计权衡与「激活派发 / 转派被拒」两段示意见 [docs/design.md](docs/design.md)「激活式 Router」，名牌说明见同文「worker 名牌（role）」，票据来源字段与派发器校验见 [skills/cross-project-dispatch/SKILL.md](skills/cross-project-dispatch/SKILL.md)「任务票据来源」。`templates/AGENTS.md.tmpl` 任务路由段与`skills/cross-project-dispatch/SKILL.md` 已内置同一规则。
 
 ```bash
-~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch <别名|目录> <任务文件>
-~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
-~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --headless # GUI 不可用时
-~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --handoff  # 只生成交接单
-~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch demo02 task.md --team     # 任务包附团队执行建议
+~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
+~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
+~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless # GUI 不可用时
+~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff  # 只生成交接单
+~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team     # 任务包附团队执行建议
 ```
 
 四道前置门、回退矩阵与任务包格式见技能 `skills/cross-project-dispatch/SKILL.md`（DSH 顶层技能）。

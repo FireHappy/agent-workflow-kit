@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:413e1c2f -->
+<!-- awf:begin v1 digest:3df7ce7f -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -28,13 +28,13 @@
 ## 校验
 
 - 框架与入口：`./agent-workflow/check_workflow.sh`
-- 编译：`bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile bin/awf-dispatch`
+- 编译：`bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile skills/cross-project-dispatch/scripts/awf-dispatch`
 - 测试：`bash test/smoke.sh`
 
 ## 并行
 
 - 可并行单元：生成器与模板(bin/ templates/), 工作流规范(agent-workflow/README.md agent-workflow/workflows/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
-- 共享写点（任何并行单元都不得同时修改）：agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, skills/cross-project-dispatch/SKILL.md
+- 共享写点（任何并行单元都不得同时修改）：agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, skills/cross-project-dispatch/scripts/awf-dispatch, skills/cross-project-dispatch/SKILL.md
 - 并行时账本只由主线写；子任务返回结果，由主线合并进 `tasks/<type>/current/<ID>.md`
 - 实现与复核尽量由不同会话/角色承担；复核必须独立重跑验证命令，不能只看实现者自述
 
@@ -44,7 +44,7 @@
 - 按名字定位：`~/.dsh/skills/agent-workflow-scaffold/bin/awf find <别名|ID>`
 - 若索引里还没有本仓库（clone/移动后），运行 `~/.dsh/skills/agent-workflow-scaffold/bin/awf register`；`bootstrap` 会自动刷新已登记项目的路径
 - 派发前先确认目标项目有工作流且已登记为当前 harness 的工作区；满足后优先在目标工作区的会话中执行，不要默认无人值守（后台）执行
-- 派发工具（若 harness 提供）：`~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
+- 派发工具（若 harness 提供）：`~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>`；前置检查失败时按提示补工作流/工作区
 - 不要在调度方会话里直接改目标仓库；写入由目标 agent 在目标工作区完成
 
 ## 项目事实

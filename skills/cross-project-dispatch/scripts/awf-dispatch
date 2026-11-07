@@ -27,21 +27,21 @@
 （--queue-timeout，默认 180s；超时按队列超时报错）。
 
 用法：
-  ./agent-workflow/bin/awf-dispatch <别名|目录> <任务文件>
-  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait
-  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
-  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
-  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流
-  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --sender agent-workflow-kit
-  ./agent-workflow/bin/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx
-  ./agent-workflow/bin/awf-dispatch demo02 task.md --headless
-  ./agent-workflow/bin/awf-dispatch demo02 task.md --handoff
-  ./agent-workflow/bin/awf-dispatch demo02 task.md --team
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --sender agent-workflow-kit
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team
 
 票据清理（用完即删；默认为 dry-run，只打印计划）：
-  ./agent-workflow/bin/awf-dispatch --prune
-  ./agent-workflow/bin/awf-dispatch --prune --apply
-  ./agent-workflow/bin/awf-dispatch --prune --json
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune --apply
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune --json
 
 票据来源（激活式 router）：派发前读取任务文件头部的「来源：用户 | 工作流」标记。
 缺省视为用户来源（旧票据无该字段仍可用，向后兼容）；DEV-128 起**允许**标记

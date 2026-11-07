@@ -16,12 +16,12 @@ tag_prefix: v
 
 # 校验命令（留空表示暂未配置）
 gate: ./agent-workflow/check_workflow.sh
-compile: bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile bin/awf-dispatch
+compile: bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile skills/cross-project-dispatch/scripts/awf-dispatch
 test: bash test/smoke.sh
 
 # 并行切分：格式为 “名称(路径), 名称(路径)”
 scopes: 生成器与模板(bin/ templates/), 工作流规范(agent-workflow/README.md agent-workflow/workflows/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
 
 # 并行时任何单元都不许同时修改的文件或目录
-serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, agent-workflow/bin/awf-dispatch, skills/cross-project-dispatch/SKILL.md
+serialized: agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, skills/cross-project-dispatch/scripts/awf-dispatch, skills/cross-project-dispatch/SKILL.md
 role: 擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版

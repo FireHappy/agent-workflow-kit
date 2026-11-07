@@ -65,7 +65,6 @@ agent-workflow/
 ├── tools/                      操作手册
 ├── templates/AGENTS.md.tmpl    入口模板（供 bootstrap 重渲染）
 ├── bin/awf                     init / bootstrap / check / status
-├── bin/awf-dispatch            跨项目派发（DSH 会话适配）
 └── check_workflow.sh           兼容入口
 ```
 
@@ -113,7 +112,7 @@ agent-workflow/
 - 不要手写 `AGENTS.md` 或 `tasks/*` 来“绕过”脚本生成：入口会与 `project.yaml` 脱节
 - 不要在 `AGENTS.md` 里重复技能细则正文，入口只放路由、铁律、验证命令与技能指针
 - 不要自动 push、不要改写用户已有的提交历史
-- 不要把某个 harness 专属概念写进生成的核心规范；DSH 派发器属于可选适配层（`bin/awf-dispatch`），只在需要时使用
+- 不要把某个 harness 专属概念写进生成的核心规范；DSH 派发器随 `cross-project-dispatch` 技能的 `scripts/awf-dispatch` 提供，不依赖脚手架；只在需要时使用
 
 ## 无 shell 环境
 

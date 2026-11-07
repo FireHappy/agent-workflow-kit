@@ -22,7 +22,7 @@
    - `agent-workflow/memory/{cache,history}/`、`agent-workflow/tools/README.md`
    - `agent-workflow/templates/AGENTS.md.tmpl`（复制原文）
    - `agent-workflow/bin/awf`（复制 `bin/awf`，加可执行权限）
-   - `agent-workflow/bin/awf-dispatch`（存在则复制；DSH 跨项目会话派发）
+   - 派发工具不写入项目，由 `cross-project-dispatch` 技能自带 `scripts/awf-dispatch`
    - `agent-workflow/check_workflow.sh`（调用 `bin/awf check`）
 3. 渲染 `AGENTS.md`：`templates/AGENTS.md.tmpl` 的占位符替换为项目事实，`{{DIGEST}}` 取 `sha256(project.yaml + AGENTS.md.tmpl)` 前 8 位。
    - 已有 `AGENTS.md` 时，只替换 `<!-- awf:begin -->` 与 `<!-- awf:end -->` 之间；无标记则追加。

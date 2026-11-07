@@ -147,7 +147,7 @@
 3. 目标没有未提交改动 / 其他 active 任务
 4. 目标工作区可创建会话
 
-全过时优先在**目标工作区的会话**中执行，不要默认无人值守（后台）执行；详细流程见 `workflows/cross-project.md`。若当前 harness 提供派发工具，可用 `~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话；否则按 `workflows/cross-project.md` 手动派发。
+全过时优先在**目标工作区的会话**中执行，不要默认无人值守（后台）执行；详细流程见 `workflows/cross-project.md`。若当前 harness 提供派发工具，可用 `~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>` 自动检查并创建会话；否则按 `workflows/cross-project.md` 手动派发。
 
 跨仓库写入一律经派发完成：**团队不承载跨仓库任务**——成员会话工作区 = 建队方工作区，直接改目标仓库会越权或撞目标门禁；需要团队时只用于「拆票据 + 每目标一个成员派发等待 + 汇总回执」。
 
@@ -204,4 +204,4 @@
 /path/to/awf-kit/bin/awf upgrade <项目目录> --dry-run   # 只预览变更/保留
 ```
 
-`awf upgrade` 覆盖框架文件（bin/awf、bin/awf-dispatch、templates/AGENTS.md.tmpl、README.md、workflows/*.md、check_workflow.sh 入口），**保留** `project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 AGENTS.md 区块外内容；旧账本格式问题（归档块缺「状态」、旧英文表头 `| Status |`）由 `check` 输出修复指引。步骤与验收见 kit 的 `skills/release/UPGRADE.md`。
+`awf upgrade` 覆盖框架文件（templates/AGENTS.md.tmpl、README.md、check_workflow.sh 入口等骨架文件；派发实现只在 cross-project-dispatch 技能），**保留** `project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 AGENTS.md 区块外内容；旧账本格式问题（归档块缺「状态」、旧英文表头 `| Status |`）由 `check` 输出修复指引。步骤与验收见 kit 的 `skills/release/UPGRADE.md`。

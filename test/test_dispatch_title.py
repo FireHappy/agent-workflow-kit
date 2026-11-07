@@ -11,10 +11,11 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parent.parent
 
-# bin/awf-dispatch 带连字符无法直接 import；用源码文本加载模块。
-_dispatch_src = (KIT / "bin" / "awf-dispatch").read_text(encoding="utf-8")
+# 派发实现由技能自带；使用源码文本加载带连字符的脚本。
+DISPATCH = KIT / "skills" / "cross-project-dispatch" / "scripts" / "awf-dispatch"
+_dispatch_src = DISPATCH.read_text(encoding="utf-8")
 awf_dispatch = type(sys)("awf_dispatch")
-exec(compile(_dispatch_src, str(KIT / "bin" / "awf-dispatch"), "exec"), awf_dispatch.__dict__)
+exec(compile(_dispatch_src, str(DISPATCH), "exec"), awf_dispatch.__dict__)
 
 
 class TitleFormat(unittest.TestCase):

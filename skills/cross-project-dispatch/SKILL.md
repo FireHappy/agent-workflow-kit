@@ -12,6 +12,10 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、目标
 
 **路径约定**：文中 `tasks/`、`memory/`、`tools/`、`project.yaml` 均指目标项目 `agent-workflow/` 下的相对路径。
 
+## 随技能提供的工具
+
+本技能自带 `scripts/awf-dispatch`（Python 3 标准库），不依赖脚手架技能。下文 `awf-dispatch` 均指本技能目录下的脚本；已安装时可调用 `${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch`。不提供脚手架下的旧派发入口。
+
 ## 四道前置门（G1–G4，缺一不可）
 
 | 门 | 检查内容 | 不满足时 |
@@ -342,8 +346,8 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 - 特殊情况：目标门禁不通过（G1-G4 拦截）→ 票据保留至用户决策（补 init / 清理工作区 / 豁免），决策后重派或删除
 
 ```sh
-"$KIT/bin/awf-dispatch" --prune           # dry-run：只打印计划
-"$KIT/bin/awf-dispatch" --prune --apply   # 确认后真正删除（用完即删，不留存根）
+"${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --prune           # dry-run：只打印计划
+"${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --prune --apply   # 确认后真正删除（用完即删，不留存根）
 ```
 
 ## 验收与收尾清单

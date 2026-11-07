@@ -36,13 +36,13 @@ install_skill() {
     echo "已安装（link）：${dest}"
   else
     # 实体化：只复制技能内容。主技能复制 SKILL.md + skills/ + bin/ + templates/ + test/；
-    # 纯流程技能（skills/*/）只有 SKILL.md，其余子目录存在才复制。
+    # 各流程技能（skills/*/）携带自己的 scripts；其余资源子目录存在才复制。
     # kit 的 docs/ 是项目文档（design/arch-review），不进技能（DEV-191）。
     mkdir -p "$dest"
     cp "$src/SKILL.md" "$dest/SKILL.md"
     # 技能版本锚点：主技能的版本 = 仓库 agent-workflow/VERSION（脚手架自身版本），落到实体根 VERSION
     [ -f "$src/agent-workflow/VERSION" ] && cp "$src/agent-workflow/VERSION" "$dest/VERSION"
-    for sub in skills bin templates test; do
+    for sub in skills bin templates test scripts; do
       [ -d "$src/$sub" ] && cp -R "$src/$sub" "$dest/$sub"
     done
     echo "已安装（copy）：${dest}"
@@ -61,12 +61,10 @@ for sk in "$REPO"/skills/*/; do
   install_skill "$sk_name" "$sk" || exit 1
 done
 
-# DEV-186 工具技能化：bin/awf、bin/awf-dispatch 是技能的一部分。
-# 项目内命令用技能路径：
-#   ~/.dsh/skills/agent-workflow-scaffold/bin/awf
-#   ~/.dsh/skills/agent-workflow-scaffold/bin/awf-dispatch
+# awf 属脚手架技能；派发实现由 cross-project-dispatch 技能自带。
+# 唯一派发入口：${DSH_HOME}/skills/cross-project-dispatch/scripts/awf-dispatch
 chmod +x "$SKILLS/agent-workflow-scaffold/bin/awf" \
-         "$SKILLS/agent-workflow-scaffold/bin/awf-dispatch" \
-         "$SKILLS/agent-workflow-scaffold/test/smoke.sh" 2>/dev/null || true
+         "$SKILLS/agent-workflow-scaffold/test/smoke.sh" \
+         "$SKILLS/cross-project-dispatch/scripts/awf-dispatch" 2>/dev/null || true
 
 echo "验证：bash \"$SKILLS/agent-workflow-scaffold/test/smoke.sh\""

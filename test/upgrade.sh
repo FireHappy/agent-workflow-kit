@@ -74,7 +74,7 @@ ok "A upgrade 执行成功且 check 通过"
 
 # 断言：框架文件与 kit 一致
 cmp -s "$PA/agent-workflow/bin/awf" "$KIT/bin/awf" || fail "A bin/awf 与 kit 不一致"
-cmp -s "$PA/agent-workflow/bin/awf-dispatch" "$KIT/bin/awf-dispatch" || fail "A bin/awf-dispatch 与 kit 不一致"
+[ -f "$KIT/skills/cross-project-dispatch/scripts/awf-dispatch" ] || fail "A 派发技能缺少自带脚本"
 cmp -s "$PA/agent-workflow/templates/AGENTS.md.tmpl" "$KIT/templates/AGENTS.md.tmpl" \
   || fail "A templates/AGENTS.md.tmpl 与 kit 不一致"
 cmp -s "$PA/agent-workflow/README.md" "$KIT/templates/README.md" || fail "A README 与 kit 不一致"

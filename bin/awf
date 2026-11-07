@@ -137,7 +137,7 @@ awf — agent workflow framework
       按别名或 ID 查找项目路径；输出 `id\t路径\t角色`（角色缺省回退 name）。
 
   awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
-      一键发版装配：先检测生成副本漂移（bin/awf / bin/awf-dispatch /
+      一键发版装配：先检测生成副本漂移（bin/awf /
       templates/ ↔ agent-workflow/），有漂移即拒绝覆盖；无漂移才刷新生成副本
       与 AGENTS 入口、写账本、改版本锚点（project.yaml 的 version_file，默认根 VERSION）/
       CHANGELOG、跑校验并归档；
@@ -145,16 +145,16 @@ awf — agent workflow framework
 
   awf upgrade [目录] [--dry-run] [--force]
       升级已有项目的 agent-workflow 框架到当前 kit 版本（一等操作）：
-      复制框架文件（bin/awf、bin/awf-dispatch、templates/AGENTS.md.tmpl、
+      复制骨架文件（templates/AGENTS.md.tmpl、
       README.md、workflows/*.md、check_workflow.sh 兼容入口）→ bootstrap
       刷新 AGENTS.md 入口 → check 校验；保留 project.yaml、tasks/**、
       memory/**、tools/** 与账本历史。旧账本格式问题（归档块缺「状态」、
       旧英文表头 | Status |）由 check 输出修复指引。
-      详细步骤与验收见 skills/release/UPGRADE.md。
+      详细步骤与验收见 skills/upgrade/SKILL.md。
 
   awf-dispatch <别名|目录> <任务文件>
       跨项目派发（DSH 会话适配）：检查目标工作流/工作区后，在目标工作区创建会话执行。
-      另见 skills/cross-project/DISPATCH.md 与 skills/cross-project/DISPATCH.md。
+      由 cross-project-dispatch 技能的 scripts/awf-dispatch 提供，不属于脚手架。
 
 说明:
   init 之后请编辑 agent-workflow/project.yaml，再运行 awf bootstrap。
@@ -826,7 +826,6 @@ EOF
   say "  ├── memory/                  cache / history"
   say "  ├── tools/                   操作手册"
   say "  ├── bin/awf                  bootstrap / check / status"
-  say "  ├── bin/awf-dispatch         跨项目派发（DSH 会话适配）"
   say "  └── check_workflow.sh        兼容入口"
   say ""
   if [ "$gitignore" -eq 1 ]; then
@@ -1372,7 +1371,7 @@ release_usage() {
 用法：awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
 
 一键发版装配（在 kit 仓库根运行）：
-  0. 检查生成副本漂移（bin/awf / bin/awf-dispatch / templates/ ↔ agent-workflow/），有漂移即拒绝
+  0. 检查生成副本漂移（bin/awf / templates/ ↔ agent-workflow/），有漂移即拒绝
   1. ./bin/awf init . --force --no-register + bootstrap 刷新生成副本与 AGENTS 入口
   2. 在 agent-workflow/tasks/dev/current/ 写入 release-prep 任务文件（release_write_current）
   3. 改版本锚点（project.yaml 的 version_file 指向的文件，默认根 VERSION）；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
@@ -1540,7 +1539,7 @@ cmd_release_prep() {
 
   if [ "$dry_run" -eq 1 ]; then
     say "[dry-run] cd $ROOT"
-    say "[dry-run] 检查生成副本漂移（bin/awf / bin/awf-dispatch / templates/ ↔ agent-workflow/，有漂移即拒绝）"
+    say "[dry-run] 检查生成副本漂移（bin/awf / templates/ ↔ agent-workflow/，有漂移即拒绝）"
     say "[dry-run] ./bin/awf init . --force --no-register"
     say "[dry-run] ./bin/awf bootstrap"
     if [ -n "$(release_done_id)" ]; then
@@ -1645,7 +1644,7 @@ upgrade_usage() {
 源，不能执行 upgrade）：
 
   1. 复制框架文件到目标 agent-workflow/：
-     bin/awf、bin/awf-dispatch、templates/AGENTS.md.tmpl、README.md、
+     templates/AGENTS.md.tmpl、README.md、
      check_workflow.sh 兼容入口（自定义门禁默认保留，见下）
   2. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap  刷新 AGENTS.md 受控区块（区块外保留）
   3. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check      校验（退出码 = 失败项数量）

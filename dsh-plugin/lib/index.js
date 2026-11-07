@@ -454,7 +454,7 @@ async function isDirectory(p) {
 const INIT_AGENT_GUIDE = [
   '初始化 agent-workflow 工作流框架（完整版，不要只生成空模板）：',
   '1. 先读项目上下文：README.md / package.json / 目录结构 / 语言与技术栈 / 现有约定，据此填写 project.yaml 的 id / name / purpose / aliases / stack（stack 影响默认校验命令，如 node、python、unity 等）；',
-  '2. 生成文件（参照全局技能 agent-workflow-scaffold 的初始化产物）：agent-workflow/project.yaml（项目事实，唯一输入）；agent-workflow/README.md、agent-workflow/workflows/{dev,debug,docs,review,cross-project,release}.md（可参照 kit 模板）；agent-workflow/templates/AGENTS.md.tmpl；agent-workflow/bin/awf（+awf-dispatch 若有）；check_workflow.sh 兼容入口；tasks/{dev,debug,docs}/{todo,current,done}.md 骨架（todo.md 表格行=标准 4 列 `| 任务ID | 优先级 | 描述 | 登记日期 |`）；根目录 AGENTS.md 受控区块（由 bootstrap 生成）；CLAUDE.md 指针；',
+  '2. 生成文件（参照全局技能 agent-workflow-scaffold 的初始化产物）：agent-workflow/project.yaml（项目事实，唯一输入）；agent-workflow/README.md、agent-workflow/workflows/{dev,debug,docs,review,cross-project,release}.md（可参照 kit 模板）；agent-workflow/templates/AGENTS.md.tmpl；派发工具仅由 cross-project-dispatch 技能携带，不生成项目内 awf-dispatch；check_workflow.sh 兼容入口；tasks/{dev,debug,docs}/{todo,current,done}.md 骨架（todo.md 表格行=标准 4 列 `| 任务ID | 优先级 | 描述 | 登记日期 |`）；根目录 AGENTS.md 受控区块（由 bootstrap 生成）；CLAUDE.md 指针；',
   '3. 尽量从项目实际填充初始信息：todo.md 可写 1-3 条真实可行的初始任务（如「梳理项目现状并登记待办」），current.md 留空待认领，done.md 空表；project.yaml 填写真实 stack 与 purpose，不要默认 generic；',
   '4. 完成后运行 agent-workflow/bin/awf check 验证通过（或等价 bootstrap），再运行 awf status 刷新 status.md；',
   '5. 用简洁文本回执：生成了哪些文件、project.yaml 的关键字段、check/status 结果；失败时说明原因与已写文件。',
@@ -954,7 +954,7 @@ export function apply(ctx) {
         const text = [
           '【Agent Workflow 动作指令】',
           `请升级项目 ${project.path} 的 agent-workflow 框架版本（当前 ${vs.installed || vs.scaffold || '未知'} → 目标 ${vs.upgradeTo || '最新'}）。`,
-          `1. 整理合并（不是整体覆盖）：参照 kit（${vs.kitPath || 'agent-workflow-kit'}）的升级方式，把 agent-workflow/ 下的框架文件（bin/awf、bin/awf-dispatch、workflows/、templates/、README.md、check_workflow.sh 兼容入口等）合并为当前 kit 版本；`,
+          `1. 整理合并（不是整体覆盖）：参照 kit（${vs.kitPath || 'agent-workflow-kit'}）的升级方式，把 agent-workflow/ 下的骨架文件（templates/、README.md、check_workflow.sh 入口等；派发工具在 cross-project-dispatch 技能，不复制到项目）合并为当前 kit 版本；`,
           '2. 保留清单（不得覆盖/删除）：agent-workflow/tasks/ 任务账本（含 done.md 历史）、project.yaml 项目事实（若 kit 模板有新增字段则补全而非重写）、AGENTS.md 受控区块外的自定义内容；',
           '3. 完成后更新 project.yaml 的 scaffold_version，运行 agent-workflow/bin/awf check 验证通过；',
           '3b. 账本格式规范（升级必查，避免面板无法显示）：检查 agent-workflow/tasks/*/todo.md 的任务表格行统一为 4 列标准格式 `| 任务ID | 优先级 | 描述 | 登记日期 |`（表头/分隔行除外）；发现 5 列或畸形列（如 `| 任务ID | Priority | Title | Dependencies | Date |`）时，把依赖信息并入描述（形如 `描述（依赖 X）`）并转为标准 4 列，不要静默跳过；同时检查 current.md/done.md 任务块格式保持 `## [ID] 标题` + 字段表 + `### 下一步`；最后用 `awf status` 刷新摘要确认待办行能正常解析；',

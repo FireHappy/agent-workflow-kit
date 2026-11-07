@@ -66,7 +66,7 @@
 
 跨项目不是把 cwd 切过去，而是先过四道门：目标工作流、目标工作区、可写、会话通道。全过时用 `awf-dispatch` 在目标工作区创建正式会话，任务留在会话里可继续追问；headless 仅作为无人值守回退。
 
-核心与适配分离：`workflows/cross-project.md` 是 harness 无关规范，`bin/awf-dispatch` 是 DSH 适配器；其他 harness 可用 GUI 手工会话，语义相同。
+派发能力由技能自包含：`skills/cross-project-dispatch/SKILL.md` 提供流程，`scripts/awf-dispatch` 提供 DSH 适配实现，两者随同一技能分发，不依赖脚手架下的工具入口；其他 harness 可按流程使用其原生会话通道。
 
 ## 派发协议三规则（DEV-132）
 

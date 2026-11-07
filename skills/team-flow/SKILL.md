@@ -150,7 +150,7 @@ hypothesis-b（假设 2 验证）┤─> fix（根因修复 + 回归）
 
 ```sh
 bash test/smoke.sh            # 新增功能必须带新断言
-python3 -m py_compile bin/awf bin/awf-dispatch
+python3 -m py_compile skills/cross-project-dispatch/scripts/awf-dispatch
 bash -n bin/awf test/smoke.sh
 ./agent-workflow/check_workflow.sh
 git diff --check
