@@ -1,6 +1,6 @@
 {
   "name": "dsh-awf-dashboard",
-  "version": "1.3.0",
+  "version": "1.5.0",
   "description": "agent-workflow 工作流进度看板：在 DSH 右侧边栏可视化项目账本（当前任务 / todo 进度 / 最近完成 / status.md 新鲜度）",
   "keywords": [
     "dsh",
