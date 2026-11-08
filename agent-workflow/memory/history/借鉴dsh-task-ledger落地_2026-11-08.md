@@ -19,7 +19,9 @@
 4. **目录改名在 git 显示为「删除 + 未跟踪」**：dsh-plugin → dsh-awf-dashboard 需 `git add -A` 由 git 识别 rename，单独 add 会丢历史。
 5. **派生指标与注释**：任务文件骨架里的 HTML 注释示例字段（`<!-- … -->`）会污染字段解析，解析必须 comment-aware（parseBlocks/deriveTaskAging 均已处理，新增解析逻辑照做）。
 
-## 后续待办（DEV-217）
+## 后续待办（DEV-217 —— 已完成，2026-11-08）
 
-- **copy 源收敛**：把 copy 脚本技能源从「本机实体」收敛为「仓库/发布 tag」，使 npm 包内容 = 发布版本技能、可复现可校验（manifest 不再写死本机路径）；发放给其他用户的插件包不依赖开发者本机实体状态。
+- ~~**copy 源收敛**~~：DEV-217 已落地——copy 默认源 = kit 仓库白名单（SKILL.md/skills/*/templates/*/test/* + bin/awf），产物平铺 `skills/`（框架技能与 8 个流程技能同级），manifest.source 版本契约（插件版本=package.json、骨架版=模板内），`--check` 逐文件 sha256 + 版本漂移。插件 1.6.0→1.7.0。
+- **版本契约**（DEV-217）：FRAMEWORK_VERSION 放 `templates/`（根+副本）；init/upgrade 读模板；插件版本信号读 `dsh-awf-dashboard/package.json`；技能实体根 VERSION/FRAMEWORK_VERSION 退役（install.sh 不写并清理）。**改模板才 bump 骨架版；流程技能更新不触发项目 upgrade。**
+- **重复文件治理（待做）**：git 中仍有 ~49 个内容重复文件（哈希统计 22 组），主要是源↔副本：插件内嵌 `skills/`（~30 个，计划改为构建产物：.gitignore + npm prepack 生成，不进 git）、`agent-workflow/templates/` 的 3 个 + FRAMEWORK_VERSION 副本（需改 check 排放宽，暂缓）。
 - 全局技能实体同步（./install.sh）纳入发版流程；validate 纳入门禁前先治理 kit 历史账本数据债务。

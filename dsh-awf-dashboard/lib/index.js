@@ -288,10 +288,10 @@ async function findKitProject() {
 }
 
 /**
- * 技能实体目录（DEV-206：插件版本信号直接读技能库实体，与 bin/awf upgrade 的
- * KFF/KVF 同构——实体 = 安装后的唯一事实源，未安装才回退 kit 仓库）。
- * 路径 = $DSH_HOME/skills/agent-workflow-scaffold（install.sh 默认 DSH_HOME=$HOME/.dsh；
- * 实体根含 VERSION / FRAMEWORK_VERSION / bin/awf，由 install.sh 从 kit 同步）。
+ * 技能实体目录（install.sh 安装落点；路径 = $DSH_HOME/skills/agent-workflow-scaffold，
+ * install.sh 默认 DSH_HOME=$HOME/.dsh）。
+ * DEV-217 版本契约：实体含 bin/awf + templates/FRAMEWORK_VERSION（骨架版随模板）；
+ * 实体根 VERSION / FRAMEWORK_VERSION 已退役，插件/分发版本改读本包 package.json。
  */
 function skillEntityDir() {
   return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skills', 'agent-workflow-scaffold')

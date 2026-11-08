@@ -23,7 +23,7 @@ agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，�
   - `POST /awf/task/delete/dry-run` / `POST /awf/task/delete/execute`（删除任务回退：dry-run 文件清单 → 前端弹框二次确认 → execute）
   - `POST /awf/register`（DEV-035 登记当前项目：已有 agent-workflow/ 直接写全局索引；没有则先初始化骨架再登记；body `{path, workspaceRoot, local}`，白名单与 `/awf/init` 相同；`local: true` → project.yaml 写 `track: false` + `.gitignore` 追加 `# awf:local-begin` 忽略区块 `/agent-workflow/` `/AGENTS.md` `/CLAUDE.md`；顺带补齐缺失的 `scaffold_version`）
   - `POST /awf/upgrade`（DEV-035 框架升级：版本落后时向 agent 注入升级意图（不直接改文件），409 up-to-date 表示已最新；升级由 agent 执行并跑 `awf check` 验证，插件经 SSE/轮询刷新状态）
-  - `GET  /awf/ledger` 响应附带 `versions`（DEV-035 版本监测；DEV-205 双版本模型：`{status: latest|outdated|unknown, installed, scaffold, latestAWF, latestRelease, latestFramework, installedFramework, skillVersion, upgradeTo}`，技能版本 `skillVersion` = 技能实体 `~/.dsh/skills/agent-workflow-scaffold/VERSION`（install.sh 同步；未安装回退 kit 仓库 `agent-workflow/VERSION`，显示用），骨架版本 `latestFramework`/`installedFramework` = `agent-workflow/FRAMEWORK_VERSION`（实体优先，同回退；outdated/upgrade 判定依据；双方骨架版可读 → 骨架差量判定，存量无骨架版 → 回退 `AWF_VERSION` 代次 → 发布版 semver → `scaffold_version`））
+  - `GET  /awf/ledger` 响应附带 `versions`（DEV-035 版本监测；DEV-205 双版本模型：`{status: latest|outdated|unknown, installed, scaffold, latestAWF, latestRelease, latestFramework, installedFramework, skillVersion, upgradeTo}`，技能版本 `skillVersion` = 插件 `dsh-awf-dashboard/package.json` version（DEV-217 唯一信号；不再读技能实体 VERSION），骨架版本 `latestFramework`/`installedFramework` = `agent-workflow/FRAMEWORK_VERSION`（项目实例）与 `templates/FRAMEWORK_VERSION`（模板源；技能实体优先、回退 kit 仓库；outdated/upgrade 判定依据；双方骨架版可读 → 骨架差量判定，存量无骨架版 → 回退 `AWF_VERSION` 代次 → 发布版 semver → `scaffold_version`））
 - 客户端：右侧边栏页签，15s 自动刷新 + 手动刷新；只跟随当前会话项目，无项目下拉选择器
 - 默认锚定：页签打开即自动选中当前 DSH 会话所属项目（见「默认锚定」一节），无需手动选择
 
