@@ -1146,8 +1146,7 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
         cwd = row.get("cwd") or ""
         if not cwd or os.path.realpath(cwd) != real:
             continue
-        if row.get("blank") is not False:
-            continue
+        # DEV-224：入池不看 blank（入池规则见 project_awf_pool）
         same.append(row)
 
     pool = [row for row in same if (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX)]
@@ -1155,12 +1154,9 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
         idle = [row for row in pool if row.get("running") is False]
         if idle:
             return sorted(idle, key=_reuse_rank)[0]
-        if len(pool) >= MAX_SENDER_SESSIONS:
-            # 并发达上限（每项目 [awf] 会话总数 ≤ {MAX}）：都忙就等（调用方
-            # wait_for_idle；超时按 --queue-timeout 报错），不新建第 {MAX}+1 个。
-            return sorted(pool, key=_reuse_rank)[0]
-        # 池未满：新建扩充并发（到第 {MAX} 个为止）
-        return None
+        # DEV-224：池内都忙 → 返回忙碌候选，由调用方排队等任一空闲（默认不新建；
+        # 只有池里没有任何 [awf] 会话时才允许新建 / 显式 --new）。
+        return sorted(pool, key=_reuse_rank)[0]
     # [awf] 池为空时的 legacy 兜底：无 [awf] 前缀的旧格式（<项目> · xxx，DEV-126 前）
     # 只有 probe 确认（--allow-legacy-reuse / 消息含派发任务包标记）且唯一候选才迁移；
     # 多条不猜、运行中不迁移。带 [awf] 前缀的会话已在上方 [awf] 池处理，不进这里。
@@ -1904,7 +1900,7 @@ def run_prune(args) -> int:
 # ---------------------------------------------------------------- 本地归档台账与并发互斥（DEV-214）
 #
 # 四件套：① 归档台账（archived-sessions.json）排除已归档会话；② --new 超上限需
-# --allow-over-3 确认并留痕；③ 同项目新建决策文件锁串行化、锁后重读池再决策；
+# ③ 同项目新建决策文件锁串行化、锁后重读池再决策（DEV-224：池上限已取消）；
 # ④ --cleanup 列出每项目超 3 的空闲 [awf] 会话并归档写入台账。
 # 台账与锁文件都在派发方 cwd 的 .dispatch/ 下（.gitignore 已忽略 .dispatch/，不入库）。
 
@@ -2020,8 +2016,8 @@ def project_awf_pool(rows, target: Path, archived_ids=None) -> list:
             continue
         if str(row.get("sessionId")) in archived_ids:
             continue
-        if row.get("blank") is not False:
-            continue
+        # DEV-224：入池不再过滤 blank——项目下以 [awf] 开头且未归档的会话全部入池，
+        # 忙碌状态在锁内校验（blank 只表示"尚无消息"，照样可承接派发）。
         cwd = row.get("cwd") or ""
         if not cwd or os.path.realpath(cwd) != real:
             continue
@@ -2031,27 +2027,142 @@ def project_awf_pool(rows, target: Path, archived_ids=None) -> list:
     return pool
 
 
-def over_limit_guard(pool: list, allow_over_3: bool, json_mode: bool = False) -> str:
-    """--new 上限校验（DEV-214）：目标项目 [awf] 池 ≥ MAX 且**全忙**时，--new 继续
-    新建需 --allow-over-3 显式确认，不再静默绕过上限；确认后返回留痕说明（写入派发日志）。
-    不满足条件返回空串。"""
-    if len(pool) < MAX_SENDER_SESSIONS:
-        return ""
-    if any(row.get("running") is False for row in pool):
-        # 池满但有空闲：--new 用于隔离/调试的语义仍成立，不拦（仅全忙才算满池等待场景）
-        return ""
-    if not allow_over_3:
-        raise DispatchError(
-            f"--new 超项目上限：目标项目已有 {len(pool)} 个 [awf] 会话且全部运行中，"
-            f"已到每项目 {MAX_SENDER_SESSIONS} 个并发上限；继续新建会突破该上限。"
-            "如确认需要隔离会话，请显式加 --allow-over-3（本次超限新建会写入派发日志留痕）"
-        )
-    emit(
-        f"超上限新建：目标项目 [awf] 会话已达 {len(pool)} 个且全忙，"
-        f"--allow-over-3 已确认，仍创建新会话（日志留痕）",
-        json_mode,
-    )
-    return "超上限新建（--allow-over-3 确认）"
+# ---------------------------------------------------------------------------
+# DEV-224：全局派发会话登记表（跨派发方/进程并发安全）
+#   - 位置：$DSH_HOME/.awf-dispatch/sessions.json（同机所有派发方共享）；
+#   - 内容：{sessions: {sessionId: {state, owner, since, until}}}；
+#   - 锁：$DSH_HOME/.awf-dispatch/.lock（fcntl.flock，串行化"读候选+占用"临界区）；
+#   - 占用有 TTL（进程崩溃留下的占用超时自动作废）；发送成功后进入短冷却，
+#     等宿主 running 字段更新后再放开，防止同一瞬间被另一个派发选中。
+# ---------------------------------------------------------------------------
+REGISTRY_BUSY_TTL = 600      # 占用有效期（秒）
+REGISTRY_COOLDOWN = 10       # 发送成功后的冷却期（秒，等 running 字段更新）
+
+
+def registry_dir() -> Path:
+    base = os.environ.get("DSH_HOME") or str(Path.home() / ".dsh")
+    return Path(base) / ".awf-dispatch"
+
+
+def registry_file() -> Path:
+    return registry_dir() / "sessions.json"
+
+
+def registry_lock_path() -> Path:
+    return registry_dir() / ".lock"
+
+
+@contextlib.contextmanager
+def registry_lock():
+    registry_dir().mkdir(parents=True, exist_ok=True)
+    if fcntl is None:  # 非 POSIX 平台降级：无跨进程锁，仅单进程内安全
+        yield
+        return
+    with open(registry_lock_path(), "a+") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def load_registry() -> dict:
+    try:
+        data = json.loads(registry_file().read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data.setdefault("sessions", {})
+            return data
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    return {"sessions": {}}
+
+
+def save_registry(data: dict) -> None:
+    registry_dir().mkdir(parents=True, exist_ok=True)
+    tmp = registry_file().with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(registry_file())
+
+
+def prune_registry(data: dict) -> dict:
+    now = time.time()
+    sessions = data.setdefault("sessions", {})
+    for sid, item in list(sessions.items()):
+        until = item.get("until") if isinstance(item, dict) else None
+        if not isinstance(until, (int, float)):
+            until = now + REGISTRY_BUSY_TTL
+        if until <= now:
+            sessions.pop(sid, None)
+    return data
+
+
+def occupied_session_ids(data: dict) -> set:
+    now = time.time()
+    return {
+        sid
+        for sid, item in (data.get("sessions") or {}).items()
+        if isinstance(item, dict) and isinstance(item.get("until"), (int, float)) and item["until"] > now
+    }
+
+
+def mark_session(sid: str, state: str, owner: str, ttl: float) -> None:
+    with registry_lock():
+        data = prune_registry(load_registry())
+        data.setdefault("sessions", {})[sid] = {
+            "state": state,
+            "owner": owner,
+            "since": time.time(),
+            "until": time.time() + ttl,
+        }
+        save_registry(data)
+
+
+def release_session(sid: str, owner: str) -> None:
+    """发送完成后释放占用（短冷却，等宿主 running 更新；异常时不掩盖主流程）。"""
+    try:
+        mark_session(sid, "cooldown", owner, REGISTRY_COOLDOWN)
+    except Exception:
+        pass
+
+
+def pick_claim_session(api, target: Path, owner: str, timeout: int,
+                       legacy_probe=None, sender: str = ""):
+    """DEV-224：从目标项目 [awf] 池（同项目 + [awf] + 未归档）挑**未登记占用且 running=False**
+    的会话并原子占用；池内全忙/被占用则每 2s 重读等待，超时抛 DispatchError。
+    返回会话行；池里没有任何 [awf] 会话时返回 None（调用方决定新建/legacy）。"""
+    deadline = time.time() + max(0, int(timeout or 0))
+    while True:
+        rows = api.sessions()
+        pool = project_awf_pool(rows, target)
+        if not pool:
+            return None
+        with registry_lock():
+            data = prune_registry(load_registry())
+            occupied = occupied_session_ids(data)
+            idle = [
+                row for row in pool
+                if row.get("running") is False and str(row.get("sessionId")) not in occupied
+            ]
+            if idle:
+                cand = sorted(idle, key=_reuse_rank)[0]
+                sid = cand["sessionId"]
+                data.setdefault("sessions", {})[sid] = {
+                    "state": "busy",
+                    "owner": owner,
+                    "since": time.time(),
+                    "until": time.time() + REGISTRY_BUSY_TTL,
+                }
+                save_registry(data)
+                return cand
+        if time.time() >= deadline:
+            raise DispatchError(
+                f"等待空闲 [awf] 会话超时（{timeout}s）：池内 {len(pool)} 个会话均忙/被其他派发占用；"
+                "可稍后重试、调大 --queue-timeout，或用 --new 显式新建"
+            )
+        time.sleep(2)
+
 
 
 def collect_cleanup_candidates(rows, archived_ids=None) -> list:
@@ -2279,8 +2390,7 @@ def decide_new_session(api, fresh_rows, target, workspace_id, args, module, sess
     锁内**重读池再决策**：
     - 复用模式：若重读后已有可复用候选（并发调用方刚建出/本机新出现空闲）→ 改复用、
       不再重复新建；候选运行中返回 running=True，由调用方**锁外**等其空闲（锁内不排队）；
-    - --new 模式：项目 [awf] 池 ≥{MAX} 且全忙 → 需 --allow-over-3 显式确认（否则
-      DispatchError），确认后返回留痕 note（写入派发日志），不再静默绕过上限；
+    - --new 模式：DEV-224 起不再受每项目 3 个上限约束（--allow-over-3 仅为兼容参数）；
     - 自动新建保留同名保护（--force 放行）。
     返回 {{"sessionId","reused","source","renamed","note","running","rows"}}。
     """.format(MAX=MAX_SENDER_SESSIONS)
@@ -2312,9 +2422,8 @@ def decide_new_session(api, fresh_rows, target, workspace_id, args, module, sess
                 + "；确认要再派发请加 --force"
             )
     else:
-        # --new 上限校验（DEV-214）：池≥3 且全忙需 --allow-over-3 显式确认；留痕写日志
-        note = over_limit_guard(project_awf_pool(fresh_rows, target),
-                                args.allow_over_3, args.json)
+        # DEV-224：--new 不再受每项目 3 个上限约束（无 over_limit_guard）。
+        note = ""
     created = api.create_session(workspace_id)
     session_id = created["sessionId"]
     api.rename(session_id, session_name)
@@ -2334,7 +2443,9 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     session_name = args.title or awf_session_title(sender, task_display(task, text))
     # G4 探针已在 preflight 拉过 session/list，这里直接复用，避免重复调用。
     rows = state.get("sessions") or []
+    owner = f"{resolve_sender(text, getattr(args, 'sender', ''))}|{task.name}"
     row = None
+    ready_confirmed = False
     session_id = None
     source = None
     reused = False
@@ -2387,12 +2498,17 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             # 派发任务包标记（旧版派发器在里面派发过）才允许迁移复用。
             return bool(args.allow_legacy_reuse) or session_has_dispatch_marker(api, row)
 
-        row = select_reuse_session(rows, target, module, legacy_probe=legacy_probe,
-                                    sender=resolve_sender(text, getattr(args, "sender", "")))
+        # DEV-224：登记表锁内原子选取 + 占用；池内全忙/被占用则轮询等待（超时 --queue-timeout）。
+        owner_sender = resolve_sender(text, getattr(args, "sender", ""))
+        row = pick_claim_session(
+            api, target, owner, args.queue_timeout,
+            legacy_probe=legacy_probe, sender=owner_sender,
+        )
         if row is not None:
             session_id = row["sessionId"]
             reused = True
             source = "复用"
+            ready_confirmed = True  # pick_claim 已确认空闲并占用，无需再排队等待
 
     if session_id is None:
         # 新建路径：走到这里说明「无可复用闲置会话」（select 返回 None = 池空或池未满<3）。
@@ -2401,7 +2517,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         # 等待超时（--queue-timeout）才报错，--force 为强制新建逃生口。无全局总数上限。
         # DEV-214 并发互斥：同项目新建决策用文件锁（.dispatch/.lock-<project>）串行化，
         # 拿到锁后重读池再决策——并发方刚建出的可复用会话直接改复用，不重复新建；
-        # 显式 --new 做上限校验（池≥3 且全忙需 --allow-over-3），不再静默绕过上限。
+        # DEV-224：--new 不受上限约束；--allow-over-3 保留为兼容参数（no-op）。
         def _legacy_probe(row: dict) -> bool:
             # RT-1：显式 --allow-legacy-reuse 直接放行；否则只有会话消息含
             # 派发任务包标记（旧版派发器在里面派发过）才允许迁移复用。
@@ -2414,8 +2530,11 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
                     api, api.sessions(), target, workspace["workspaceId"], args,
                     module, session_name, title, sender_now, _legacy_probe)
         else:
+            # DEV-224：复用模式的新建决策必须读最新会话列表（预检快照可能已过期）；
+            # --new 显式新建不需要 session/list（保持「--new 不探测列表」语义）。
+            fresh_rows = api.sessions() if args.reuse else []
             decided = decide_new_session(
-                api, rows, target, workspace["workspaceId"], args,
+                api, fresh_rows, target, workspace["workspaceId"], args,
                 module, session_name, title, sender_now, _legacy_probe)
         session_id = decided["sessionId"]
         reused = decided["reused"]
@@ -2423,6 +2542,9 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         renamed = decided["renamed"]
         if decided["note"]:
             session_note = decided["note"]
+        if not reused:
+            # DEV-224：新会话登记占用（与其他派发方的并发保护）
+            mark_session(session_id, "busy", owner, REGISTRY_BUSY_TTL)
         if reused and decided.get("running"):
             # 并发方刚建出的会话已运行：锁已释放，这里等它空闲后再发送（不重复新建）。
             row = wait_session_ready(api, decided.get("rows") or rows, session_id, target, args)
@@ -2438,7 +2560,10 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     else:
         # 复用路径：先确认会话存在；运行中的会话等它空闲，绝不静默改成新建。
         # 预检刚拉过列表，先用快照；快照里没有才重新查（正常不会发生）。
-        row = wait_session_ready(api, rows, session_id, target, args)
+        # DEV-224：pick_claim 选中的空闲会话已确认并占用，跳过等待；--session 指定 /
+        # 并发重读返回的忙碌候选仍需排队等待。
+        if not ready_confirmed:
+            row = wait_session_ready(api, rows, session_id, target, args)
         # DEV-215：同上——满池等待可能改选监听返回的空闲会话，以返回值为准。
         session_id = row["sessionId"]
         hint = pressure_hint(row)
@@ -2507,12 +2632,14 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             str(uuid.uuid4()),
         )
     except DispatchError as error:
+        release_session(session_id, owner)
         if reused:
             raise DispatchError(
                 f"复用会话 {session_id} 发送任务失败：{error}；"
                 "建议加 --new 强制新建会话后重试（复用会话本身保留）"
             )
         raise
+    release_session(session_id, owner)
 
     emit("任务已派发（send ok）", args.json)
     # 改名成功时以新标题为准（row 是改名前的快照，不能再用它覆盖）。
