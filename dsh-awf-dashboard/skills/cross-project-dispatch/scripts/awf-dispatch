@@ -82,7 +82,7 @@ DEFAULT_TIMEOUT = 300
 # 默认异步：只创建会话并发送任务，立即返回；显式 --wait 才等待回合结束。
 DEFAULT_WAIT = False
 # 默认复用目标工作区已有的常驻会话，避免每次派发都新建、会话数线性增长。
-DEFAULT_REUSE = True
+DEFAULT_REUSE = False  # 新范式（用户定）：默认每次新建；--reuse 才复用旧会话
 # 上下文压力只作提示：达到该值提醒可考虑 --new，但不自动切换会话。
 PRESSURE_HINT_LIMIT = 0.9
 # 兼容保留：DEV-126 起会话繁忙的队列等待由 DEFAULT_QUEUE_TIMEOUT 控制；本常量仅保留解析/校验。
@@ -3253,16 +3253,17 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="awf-dispatch",
         description=(
-            "跨项目派发：先检查目标工作流与工作区，再按「项目 + 模块」复用目标工作区的"
-            "常驻会话（没有可用会话时新建）执行。默认只发送任务、立即返回会话 ID"
-            "（不等待回合）；加 --wait 才等待回合结束。"
+            "跨项目派发：先检查目标工作流与工作区，默认每次新建会话执行（新范式；"
+            "特殊场景 --reuse 才复用常驻会话）。默认只发送任务、立即返回会话 ID"
+            "（不等待回合）；加 --wait 才等待回合结束。完成后：--retire-session 归档 → "
+            "dsh-session-gc 删文件。"
         ),
         epilog=(
             "示例：\n"
-            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md            # 默认异步：复用/新建后只发送\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md            # 默认异步：新建会话并只发送\n"
             "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --wait     # 等待回合结束\n"
-            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --new      # 强制新建会话\n"
-            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --module 工作流  # 指定模块会话\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --new      # 兼容/显式新建（默认已新建）\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --reuse     # 显式复用旧会话（特殊场景）\n"
             "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --session session-xxx  # 指定会话\n"
             "  awf-dispatch demo02 task.md --dry-run\n"
             "  awf-dispatch demo02 task.md --headless\n"
@@ -3300,7 +3301,8 @@ def main(argv=None) -> int:
             "        缺省视为用户来源（旧票据兼容）；「来源：工作流」的票据是已派发任务，\n"
             "        DEV-128 起允许按需继续向下一层转派（深度不限），派发时仅提示核对转派理由\n"
             "        并更新票据「路由裁决」，不再 FAIL 拦截。\n"
-            "\n会话复用（默认）：派发前先 session/list，按「项目 + 模块」复用目标工作区会话：\n"
+            "\n会话新建（默认）与会话复用（--reuse 显式）：默认每次新建会话；显式 --reuse 时，\n"
+            "        派发前先 session/list，按「项目 + 模块」复用目标工作区会话：\n"
             "        复用键 = 同 cwd + 标题等于「[awf] <目标项目>」；\n"
             "        模块来源：--module > 票据「模块：」行 > 默认「通用」；\n"
             "        匹配不到时不借用同项目其它模块的会话，直接新建本模块会话（避免上下文串味）；\n"
@@ -3405,13 +3407,13 @@ def main(argv=None) -> int:
         dest="reuse",
         action="store_true",
         default=DEFAULT_REUSE,
-        help="默认行为：按「项目 + 模块」复用目标工作区已有的常驻会话",
+        help="显式复用已有常驻会话（默认已改为每次新建；仅特殊场景显式使用）",
     )
     reuse_group.add_argument(
         "--new",
         dest="reuse",
         action="store_false",
-        help="强制新建会话（新范式：每次派发都新建，完成后 --retire-session 归档 + dsh-session-gc 删文件）",
+        help="兼容/显式新建（默认行为：每次派发新建；完成后 --retire-session 归档 + dsh-session-gc 删文件）",
     )
     parser.add_argument(
         "--module",
@@ -3532,8 +3534,12 @@ def main(argv=None) -> int:
             "--allow-dirty 范围仅支持 tasks（如 --allow-dirty=tasks）；裸 --allow-dirty 为全豁免"
         )
     argv = normalized_argv
+    # 默认已是新建（DEFAULT_REUSE=False）；单独记录“显式写了 --new”，
+    # 供 --session / 清理类模式做互斥校验，避免把默认值误判成用户意图。
+    explicit_new = "--new" in argv
     args = parser.parse_args(argv)
     args.allow_dirty_scope = allow_dirty_scope
+    args.explicit_new = explicit_new
 
     # SESSION-20261108（复核低1）：settle 模式两两互斥——此前 --prune/--cleanup/
     # --forget-archived/--retire-session/--permission-state/--report/--screen-state
@@ -3586,7 +3592,7 @@ def main(argv=None) -> int:
             "--handoff/--wait 或第二个位置参数（task）同用；"
             "回执投递示例：awf-dispatch --report --to <派发方会话ID> \"<回执文本>\""
         )
-    if args.session and not args.reuse:
+    if args.session and args.explicit_new:
         parser.error("--session 与 --new 互斥：指定会话时不会再新建")
     if args.session and (args.headless or args.handoff):
         parser.error("--session 只用于会话模式，不能与 --headless / --handoff 同用")
@@ -3603,7 +3609,7 @@ def main(argv=None) -> int:
             parser.error("--cleanup 不接受 target / task 位置参数；它只扫描全部工作区会话")
         if args.headless or args.handoff or args.session:
             parser.error("--cleanup 不能与 --headless / --handoff / --session 同时使用")
-        if args.reuse is False:
+        if args.explicit_new:
             parser.error("--cleanup 不能与 --new 同用（清理模式不派发任务）")
         try:
             return run_cleanup(args)
@@ -3615,7 +3621,7 @@ def main(argv=None) -> int:
             parser.error("--retire-session 不接受 target / task 位置参数；它只归档指定会话")
         if args.headless or args.handoff or args.session:
             parser.error("--retire-session 不能与 --headless / --handoff / --session 同时使用")
-        if args.reuse is False:
+        if args.explicit_new:
             parser.error("--retire-session 不能与 --new 同用（退役模式不派发任务）")
         try:
             return run_retire_session(args)

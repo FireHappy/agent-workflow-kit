@@ -450,7 +450,7 @@ def row(session_id, cwd=str(target), running=False, blank=False, title="",
     }
 
 
-assert module.DEFAULT_REUSE is True, "默认必须复用"
+assert module.DEFAULT_REUSE is False, "默认必须新建（新范式：每次派发新建）"
 assert module.ZOMBIE_TURN_SECONDS == 5.0, "僵尸判定阈值必须是 5s"
 assert module.LANDING_POLL_SECONDS == 10.0, "落地轮询间隔必须是 10s"
 assert (module.EXIT_OK, module.EXIT_FAIL, module.EXIT_TIMEOUT, module.EXIT_ZOMBIE,
