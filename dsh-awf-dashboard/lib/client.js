@@ -3038,13 +3038,11 @@ window.__ModuleLoader__.load({
           const sr = ctx && typeof ctx.get === 'function' ? ctx.get('sidebarRight') : null
           if (sr && typeof sr.openTab === 'function') {
             if (rightbarOpen()) {
-              // 收起侧边栏（等同点击侧边栏按钮），保留工作流页签，不关闭工作流
+              // 用按钮：模拟点击侧边栏「收起右侧边栏」按钮（保留工作流页签）
               try {
-                if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
-                else {
-                  const closeBtn = findBtn('收起右侧边栏')
-                  if (closeBtn) realClick(closeBtn)
-                }
+                const closeBtn = findBtn('收起右侧边栏')
+                if (closeBtn) realClick(closeBtn)
+                else if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
               } catch { /* 忽略 */ }
               setActive(false)
               setTimeout(() => setActive(isWorkflowVisible()), 350)
