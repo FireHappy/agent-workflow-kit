@@ -113,6 +113,80 @@ export function parseBlocks(md) {
 }
 
 // ---------------------------------------------------------------------------
+// DEV-216：停滞/逾期派生指标（只读字段，不写账本；取不到时间戳 → null，不编造）
+// ---------------------------------------------------------------------------
+
+/** 提取字符串内第一个合法 YYYY-MM-DD；2026-02-30 等伪日期与无日期文本 → null。 */
+function firstValidDate(value) {
+  if (typeof value !== 'string') return null
+  const m = /([0-9]{4})-([0-9]{2})-([0-9]{2})/.exec(value)
+  if (!m) return null
+  const y = +m[1]; const mo = +m[2]; const d = +m[3]
+  const dt = new Date(Date.UTC(y, mo - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null
+  return m[0]
+}
+
+/** 两个 YYYY-MM-DD 相差天数（refDate - date；按 UTC 日期差，无时区漂移）。 */
+function daysAgo(dateStr, refStr) {
+  const d = Date.parse(dateStr + 'T00:00:00Z')
+  const r = Date.parse(refStr + 'T00:00:00Z')
+  return Math.round((r - d) / 86400000)
+}
+
+/**
+ * 任务块字段表映射（comment-aware，仅供 deriveTaskAging 抽取时间戳）。
+ * 与 parseBlocks/parseCheckItems 的注释语义一致：`<!--` 到 `-->` 之间的行跳过
+ * （骨架模板/旧示例等注释内嵌的表格行不算字段，避免注释中的旧日期污染派生指标）；
+ * 未闭合的 `<!--` 视为注释延伸到块尾。不动 parseBlockFieldMap 本身，
+ * updateTaskFields/todoEdit 等既有调用语义保持不变。
+ */
+function blockFieldsCommentAware(blockText) {
+  const map = {}
+  let inComment = false
+  for (const line of String(blockText || '').split('\n')) {
+    if (!inComment && /<!--/.test(line) && !/-->/.test(line)) { inComment = true; continue }
+    if (inComment) {
+      if (/-->/.test(line)) inComment = false
+      continue
+    }
+    if (!line.trimStart().startsWith('|')) continue
+    const parts = line.split('|')
+    if (parts.length < 3) continue
+    const key = trim(parts[1])
+    if (!key || key === '字段' || /^-+$/.test(key)) continue
+    map[key] = trim(parts[2] || '')
+  }
+  return map
+}
+
+/**
+ * 为任务块派生停滞/逾期只读字段（纯函数，无文件 IO、不写账本）：
+ *  - stale ：「最近更新」（或 Last Updated）距参照日 ≥ 3 天 → true；
+ *  - overdue：「认领日期」（认领时间/Claimed）存在时以其计，否则以「最近更新」计，
+ *    距参照日 ≥ 7 天 → true；
+ *  - 取不到对应时间戳（字段缺失或日期非法）→ 该字段为 null，不编造；
+ *    两个时间戳都没有 → { stale: null, overdue: null }。
+ * 时间基准 = 任务块字段表（锚定规则同 parseBlocks：只认 `|` 开头的表格行；
+ * `<!-- ... -->` 注释区间内的行不算字段——旧示例/模板不污染派生指标）。
+ * @param {string|null} blockText 任务块原文（findBlock 输出；null/空 → 无时间戳）
+ * @param {string} [today] 参照日 YYYY-MM-DD（缺省今天，测试可注入）
+ * @returns {{stale: boolean|null, overdue: boolean|null, updated: string|null, claimed: string|null}}
+ */
+export function deriveTaskAging(blockText, today) {
+  const ref = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(String(today || '')) ? today : todayLocal()
+  const map = blockFieldsCommentAware(blockText)
+  const updated = firstValidDate(map['最近更新'] || map['Last Updated'] || '')
+  const claimed = firstValidDate(map['认领日期'] || map['认领时间'] || map['Claimed'] || '')
+  if (updated === null && claimed === null) return { stale: null, overdue: null, updated, claimed }
+  const stale = updated === null ? null : daysAgo(updated, ref) >= 3
+  // overdue 基准：认领日期优先（认领后未推进 ≥ 7 天即逾期），无认领日期回退最近更新
+  const base = claimed !== null ? claimed : updated
+  const overdue = base === null ? null : daysAgo(base, ref) >= 7
+  return { stale, overdue, updated, claimed }
+}
+
+// ---------------------------------------------------------------------------
 // todo.md 进度 / done.md 最近完成
 // ---------------------------------------------------------------------------
 
@@ -358,7 +432,15 @@ export async function ledgerOf(projectPath) {
     const md = fileContent[file]
     if (md === undefined) continue
     for (const b of parseBlocks(md)) {
-      current.push({ type, ...b, checkItems: parseCheckItems(findBlock(md, b.id)) })
+      const blockText = findBlock(md, b.id)
+      // DEV-216：为任务块派生停滞/逾期只读字段（stale/overdue；取不到时间戳为 null，不编造）
+      const aging = deriveTaskAging(blockText)
+      current.push({
+        type, ...b,
+        checkItems: parseCheckItems(blockText),
+        stale: aging.stale,
+        overdue: aging.overdue,
+      })
     }
   }
   for (const { type, file } of todoBuckets) {

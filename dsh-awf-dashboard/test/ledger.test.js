@@ -840,3 +840,163 @@ test('DEV-206 夹具清理', async () => {
   await rm(awfAgentsHome, { recursive: true, force: true })
   await rm(awfDshHome, { recursive: true, force: true })
 })
+
+// ---- DEV-216：停滞/逾期派生指标（只读字段，取不到时间戳为 null 不编造） ----
+
+test('DEV-216 deriveTaskAging：stale=最近更新≥3天；overdue=认领/最近更新≥7天', async () => {
+  const { deriveTaskAging } = await import('../src/ledger.js')
+  const ref = '2026-11-08'
+  const block = (rows) => ['## [DEV-1] 演示', '', '| 字段 | 内容 |', '|------|------|', rows, ''].join('\n')
+  // 最近更新距今 3 天 → stale=true、未逾期
+  assert.deepEqual(deriveTaskAging(block('| 最近更新 | 2026-11-05 |'), ref),
+    { stale: true, overdue: false, updated: '2026-11-05', claimed: null })
+  // 距今 2 天 → 未停滞
+  assert.deepEqual(deriveTaskAging(block('| 最近更新 | 2026-11-06 |'), ref),
+    { stale: false, overdue: false, updated: '2026-11-06', claimed: null })
+  // 距今 7 天 → 停滞且逾期
+  assert.deepEqual(deriveTaskAging(block('| 最近更新 | 2026-11-01 |'), ref),
+    { stale: true, overdue: true, updated: '2026-11-01', claimed: null })
+  // 认领日期存在 → overdue 以认领为准：认领 8 天前 + 更新 1 天前 → stale=false、overdue=true
+  assert.deepEqual(deriveTaskAging(block('| 认领日期 | 2026-10-31 |\n| 最近更新 | 2026-11-07 |'), ref),
+    { stale: false, overdue: true, updated: '2026-11-07', claimed: '2026-10-31' })
+  // 认领 5 天前 + 更新 8 天前 → stale=true（按更新）、overdue=false（按认领）
+  assert.deepEqual(deriveTaskAging(block('| 认领日期 | 2026-11-03 |\n| 最近更新 | 2026-10-31 |'), ref),
+    { stale: true, overdue: false, updated: '2026-10-31', claimed: '2026-11-03' })
+})
+
+test('DEV-216 deriveTaskAging：无时间戳/伪日期 → null（不编造）；Last Updated 英文键兼容', async () => {
+  const { deriveTaskAging } = await import('../src/ledger.js')
+  const ref = '2026-11-08'
+  // 无任何时间戳字段 → 两个派生字段均为 null
+  assert.deepEqual(deriveTaskAging('## [DEV-2] 无日期\n\n| 字段 | 内容 |\n|------|------|\n| 优先级 | P2 |\n', ref),
+    { stale: null, overdue: null, updated: null, claimed: null })
+  // 空 / null 原文 → null（不编造）
+  assert.deepEqual(deriveTaskAging(null, ref), { stale: null, overdue: null, updated: null, claimed: null })
+  assert.deepEqual(deriveTaskAging('', ref), { stale: null, overdue: null, updated: null, claimed: null })
+  // 伪日期 2026-02-30 不算时间戳
+  assert.deepEqual(deriveTaskAging('## [DEV-3] 伪日期\n\n| 字段 | 内容 |\n|------|------|\n| 最近更新 | 2026-02-30 |\n', ref),
+    { stale: null, overdue: null, updated: null, claimed: null })
+  // 正文引用不算字段（锚定规则）；Last Updated 英文键兼容
+  const cited = '## [DEV-4] 引用\n\n正文提到 | 最近更新 | 2026-11-01 | 不算字段。\n\n| 字段 | 内容 |\n|------|------|\n| Last Updated | 2026-11-05 |\n'
+  assert.deepEqual(deriveTaskAging(cited, ref),
+    { stale: true, overdue: false, updated: '2026-11-05', claimed: null })
+})
+
+test('DEV-216 ledgerOf：当前任务块派生 stale/overdue 只读字段（相对今天计算）', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { ledgerOf } = await import('../src/ledger.js')
+  const root = await mkdtemp(join(tmpdir(), 'awf-aging-'))
+  // 相对真实今天的日期（避免用例随运行日期失效）
+  const fmt = (dt) => {
+    const p = (n) => String(n).padStart(2, '0')
+    return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
+  }
+  const dayAgo = (off) => { const r = new Date(); r.setDate(r.getDate() - off); return fmt(r) }
+  try {
+    await dirFixture(root).write()
+    // 认领 8 天前 + 更新 1 天前 → stale=false、overdue=true
+    await writeFile(root + '/agent-workflow/tasks/dev/current/DEV-310.md',
+      `## [DEV-310] 逾期任务\n\n| 字段 | 内容 |\n|------|------|\n| 状态 | active |\n| 认领日期 | ${dayAgo(8)} |\n| 最近更新 | ${dayAgo(1)} |\n`, 'utf8')
+    // 更新 3 天前 → stale=true、overdue=false
+    await writeFile(root + '/agent-workflow/tasks/dev/current/DEV-311.md',
+      `## [DEV-311] 停滞任务\n\n| 字段 | 内容 |\n|------|------|\n| 状态 | active |\n| 最近更新 | ${dayAgo(3)} |\n`, 'utf8')
+    const ledger = await ledgerOf(root)
+    const byId = Object.fromEntries(ledger.current.map((t) => [t.id, t]))
+    assert.equal(byId['DEV-310'].stale, false)
+    assert.equal(byId['DEV-310'].overdue, true)
+    assert.equal(byId['DEV-311'].stale, true)
+    assert.equal(byId['DEV-311'].overdue, false)
+  } finally {
+    await (await import('node:fs/promises')).rm(root, { recursive: true, force: true })
+  }
+})
+
+test('DEV-216 deriveTaskAging comment-aware：注释内旧示例/认领日期不参与字段抽取（t7 回归）', async () => {
+  const { deriveTaskAging } = await import('../src/ledger.js')
+  const ref = '2026-11-08'
+  // 真实最近更新 + 注释旧示例（注释位于真实字段之后，内含冲突旧值与认领日期）→ 取真实值
+  const commentAfter = [
+    '## [DEV-5] 注释在真值之后',
+    '',
+    '| 字段 | 内容 |',
+    '|------|------|',
+    '| 最近更新 | 2026-11-05 |',
+    '',
+    '<!--',
+    '旧示例（模板，勿改正式字段）：',
+    '| 最近更新 | 2026-01-01 |',
+    '| 认领日期 | 2026-01-01 |',
+    '-->',
+    '',
+  ].join('\n')
+  assert.deepEqual(deriveTaskAging(commentAfter, ref),
+    { stale: true, overdue: false, updated: '2026-11-05', claimed: null },
+    '注释内旧值不得覆盖真实最近更新/认领日期')
+  // 注释位于真实字段之前 → 同样取真实值
+  const commentBefore = [
+    '## [DEV-6] 注释在真值之前',
+    '',
+    '<!--',
+    '| 最近更新 | 2026-01-01 |',
+    '-->',
+    '',
+    '| 字段 | 内容 |',
+    '|------|------|',
+    '| 最近更新 | 2026-11-05 |',
+    '',
+  ].join('\n')
+  assert.deepEqual(deriveTaskAging(commentBefore, ref),
+    { stale: true, overdue: false, updated: '2026-11-05', claimed: null },
+    '注释内时间戳不算字段')
+  // 仅注释（含时间戳字段）→ 无真实字段 → stale/overdue 均为 null（不编造）
+  const onlyComment = [
+    '## [DEV-7] 仅有注释字段',
+    '',
+    '<!--',
+    '| 最近更新 | 2026-01-01 |',
+    '| 认领日期 | 2026-01-01 |',
+    '-->',
+    '',
+    '| 字段 | 内容 |',
+    '|------|------|',
+    '| 优先级 | P2 |',
+    '',
+  ].join('\n')
+  assert.deepEqual(deriveTaskAging(onlyComment, ref),
+    { stale: null, overdue: null, updated: null, claimed: null },
+    '仅注释含时间戳 → 不编造派生指标')
+  // 未闭合注释（模板区未收尾）→ 视为延伸到块尾，其内字段不计
+  const unterminated = [
+    '## [DEV-8] 未闭合注释',
+    '',
+    '<!-- 模板区未闭合',
+    '| 最近更新 | 2026-01-01 |',
+    '',
+  ].join('\n')
+  assert.deepEqual(deriveTaskAging(unterminated, ref),
+    { stale: null, overdue: null, updated: null, claimed: null },
+    '未闭合注释延伸语义与 parseBlocks 一致')
+})
+
+test('DEV-216 字段抽取 comment-aware 不动 parseBlockFieldMap/updateTaskFields 语义（t7 回归）', async () => {
+  const { parseBlockFieldMap, updateTaskFields } = await import('../src/ledger.js')
+  const md = [
+    '## [DEV-9] 字段语义回归',
+    '',
+    '| 字段 | 内容 |',
+    '|------|------|',
+    '| 优先级 | P2 |',
+    '| 状态 | active |',
+    '',
+    '<!--', '| 最近更新 | 2026-01-01 |', '-->',
+    '',
+  ].join('\n')
+  // parseBlockFieldMap 保持原语义（注释内表格行仍会被抽取——既有 updateTaskFields 契约不变）
+  assert.equal(parseBlockFieldMap(md)['最近更新'], '2026-01-01')
+  // updateTaskFields 按字段名原位更新，不受注释影响（回归）
+  const res = updateTaskFields(md, { id: 'DEV-9', fields: { 状态: 'verify' } })
+  assert.equal(res.ok, true)
+  assert.match(res.md, /\| 状态 \| verify \|/)
+})

@@ -1,0 +1,2478 @@
+#!/usr/bin/env bash
+# awf — agent workflow framework
+#
+# 在空项目（或已有仓库）中生成一套与 harness 无关的 agent 工作流框架：
+#   agent-workflow/ 状态账本 + 流程规范 + 校验工具
+#   AGENTS.md       仓库根入口（生成物，不属于工作流目录）
+#
+# 兼容 bash 3.2（macOS 自带），仅依赖 POSIX 工具。
+set -eu
+
+AWF_VERSION="1"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KIT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TPL_DIR="$KIT_DIR/templates"
+
+say() { printf '%s\n' "$*"; }
+warn() { printf 'WARN  %s\n' "$*" >&2; }
+die() { printf 'FAIL  %s\n' "$*" >&2; exit 1; }
+
+today() { date '+%Y-%m-%d'; }
+now() { date '+%Y-%m-%d %H:%M'; }
+
+# awk 包装（DEV-117）：统一以 LC_ALL=C 调用，避免 macOS awk 20200816 在
+# en_US.UTF-8 等 UTF-8 locale 下多字节中文 `==` 字符串比较恒真（实测
+# "状态"=="字段" → 1），导致账本字段名误判（如把 `| 证伪方法 | z |` 的 z 当
+# 状态 → check 报「状态非法：z」）。LC_ALL=C 使字符串比较退回字节语义，中文
+# 不再互相误等；输出字节原样透传，UTF-8 内容不受影响（本文件 awk 均为 ASCII
+# 锚点 + 字面替换，无字符级截断中文的依赖，C locale 下行为一致）。
+awfk() {
+  LC_ALL=C awk "$@"
+}
+
+hash_files() {
+  if command -v shasum >/dev/null 2>&1; then
+    cat "$@" | shasum -a 256 | awfk '{print substr($1,1,8)}'
+  else
+    cat "$@" | sha256sum | awfk '{print substr($1,1,8)}'
+  fi
+}
+
+slug() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/[^a-z0-9][^a-z0-9]*/-/g; s/^-//; s/-$//'
+}
+
+yaml_get() {
+  local key="$1" file="$2"
+  # 只取「有值」的匹配行：跳过空值键行（如模板曾预置的空 `role: ` 行），
+  # 保证重复键时取第一个有值项（DEV-119，旧项目双 role 键兼容）。
+  sed -n "s/^${key}:[[:space:]]*//p" "$file" \
+    | grep -v '^[[:space:]]*$' \
+    | head -n 1 \
+    | sed 's/[[:space:]]*$//'
+}
+
+# worker 名牌（DEV-118/119）：读项目 project.yaml 的 role 字段（一句话自述）；
+# 缺省回退到 name，再缺省输出 `-`。只读，不改索引（yaml 为单一事实源）。
+project_role() {
+  local y="$1/agent-workflow/project.yaml" r n
+  if [ -f "$y" ]; then
+    r="$(yaml_get role "$y")"
+    n="$(yaml_get name "$y")"
+  fi
+  r="$(printf '%s' "$r" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"   # 判空前置 trim
+  if [ -n "$r" ]; then printf '%s\n' "$r"
+  elif [ -n "$n" ]; then printf '%s\n' "$n"
+  else printf '%s\n' '-'
+  fi
+}
+
+# 版本锚点路径（DEV-076 方案 B / DEV-145）：读目标 project.yaml 的 version_file，
+# 默认仓库根 VERSION（未配置的项目行为不变，向后兼容）。
+# 锚点必须放在 clang 头文件搜索路径（如 Bee 的 -I"."）之外；否则在 macOS 大小写
+# 不敏感 FS 上会与 C++ 标准库头 <version> 撞名，导致 Unity IL2CPP 全量编译失败
+# （#include <version> 被解析成该文本文件，报 expected unqualified-id）。
+project_version_file() {
+  local y="$1/agent-workflow/project.yaml" vf
+  if [ -f "$y" ]; then
+    vf="$(yaml_get version_file "$y")"
+  fi
+  if [ -n "$vf" ]; then printf '%s\n' "$1/$vf"
+  else printf '%s\n' "$1/VERSION"
+  fi
+}
+
+# 骨架版本（DEV-205 双版本模型）：读 $1/agent-workflow/FRAMEWORK_VERSION，无 → 空。
+# 与技能版本（agent-workflow/VERSION，发版即 bump，插件显示、技能实体安装消费）解耦：
+# 骨架版本固定路径 agent-workflow/FRAMEWORK_VERSION，仅骨架契约变化时 bump，
+# awf upgrade 判定与插件 outdated 消费；不走 version_file、不进 project.yaml 键。
+project_framework_version() {
+  local f="$1/agent-workflow/FRAMEWORK_VERSION"
+  if [ -f "$f" ]; then cat "$f"; fi
+}
+
+usage() {
+  cat <<'EOF'
+awf — agent workflow framework
+
+用法:
+  awf init [目录] [--name 名称] [--id 标识] [--purpose 一句话] [--role 能力自述] [--stack 类型]
+           [--keep-docs] [--force] [--gitignore]
+      在目标目录生成 agent-workflow/ 框架与仓库根 AGENTS.md。
+      --role 能力自述（一句话）写入 project.yaml 的 role 字段作为 worker 名牌，
+             init 即带能力定义；缺省保留空 role 键，可稍后在 project.yaml 补充。
+      --keep-docs  已存在的 README.md 与 workflows/*.md 不覆盖（迁移旧项目用）。
+      --no-register 不写入全局索引（默认自动登记，便于跨项目检索）。
+      --gitignore  把本机私有工作流写入目标 .gitignore（/agent-workflow/、
+             /AGENTS.md、/CLAUDE.md，根锚定；幂等）——团队项目不想把私有
+             工作流入库时使用；存量项目可用 awf gitignore 补写。
+
+  awf gitignore [目录]
+      把本机私有工作流写入项目 .gitignore（/agent-workflow/、/AGENTS.md、
+      /CLAUDE.md，根锚定；幂等，已含标记则跳过）。为已初始化的存量项目补
+      忽略用；新建项目可在 init 时直接加 --gitignore。
+
+  awf bootstrap
+      按当前 project.yaml 重建 AGENTS.md 受控区块（只替换区块，不动其他内容）。
+      若项目已在全局索引中，会顺带刷新其路径与别名。
+
+  awf check [--with-smoke]
+      校验框架完整性、AGENTS.md 入口新鲜度、进行中任务的必填字段、
+      status.md 新鲜度、done.md 归档块与生成副本漂移（kit 仓库）。
+      状态枚举只允许 active/blocked/review/verify/handoff。
+      --with-smoke：check 全过后追加运行 bash test/smoke.sh（有 test/smoke.sh
+      时；无则跳过），把冒烟并入日常门禁。默认只在末尾提示「请跑 smoke」。
+
+  awf install-hooks [--check | --uninstall]
+      git pre-commit 钩子管理（日常门禁）：安装/检查/卸载 .git/hooks/pre-commit
+      ——提交前自动运行 ./agent-workflow/check_workflow.sh，非零即拒绝提交并输出
+      中文提示。模板来自 templates/pre-commit（kit）或
+      agent-workflow/templates/pre-commit（由 awf upgrade 复制）；需在 git 仓库内的
+      agent-workflow 项目中执行。钩子不入库、不 push、不自动卸载。
+
+  awf status
+      从 tasks/*/current.md、todo.md、done.md 生成 tasks/status.md。
+
+  awf log [<任务ID>] [--note 说明] [--type 类型] [--owner 谁]
+      给任务文档的 `### Execution Log` 节追加一条执行记录，行格式：
+        - 时间 · 类型 · @谁 · 说明
+      只增不改；文档无该节时自动补。ID 缺省时仅在恰有一个进行中任务时推断。
+      已归档（done/）任务拒绝追加。`awf log --help` 看完整用法。
+
+  awf validate
+      只读一致性体检（绝不修改文件）：任务文件标题/字段表格式、必填字段、
+      状态枚举 todo/active/blocked/review/verify/handoff/done、归档完成日期、
+      三目录 README 索引与任务文件对齐。有问题逐条列清单并非零退出；索引
+      类问题用 awf status 重生成（validate 不代劳）。
+
+  awf register
+      把当前项目登记到全局索引（~/.agents/projects.tsv 与 AGENTS.md）。
+
+  awf projects
+      打印已登记的项目（别名 → 路径 → 角色；角色来自各项目 project.yaml 的
+      role 字段即 worker 名牌，缺省回退到 name）。
+
+  awf find <别名|ID>
+      按别名或 ID 查找项目路径；输出 `id\t路径\t角色`（角色缺省回退 name）。
+
+  awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
+      一键发版装配：先检测生成副本漂移（bin/awf /
+      templates/ ↔ agent-workflow/），有漂移即拒绝覆盖；无漂移才刷新生成副本
+      与 AGENTS 入口、写账本、改版本锚点（project.yaml 的 version_file，默认根 VERSION）/
+      CHANGELOG、跑校验并归档；
+      只打印下一步 git 命令，不自动 commit/tag/push。
+
+  awf upgrade [目录] [--dry-run] [--force]
+      升级已有项目的 agent-workflow 框架到当前 kit 版本（一等操作）：
+      复制骨架文件（templates/AGENTS.md.tmpl、
+      README.md、workflows/*.md、check_workflow.sh 兼容入口）→ bootstrap
+      刷新 AGENTS.md 入口 → check 校验；保留 project.yaml、tasks/**、
+      memory/**、tools/** 与账本历史。旧账本格式问题（归档块缺「状态」、
+      旧英文表头 | Status |）由 check 输出修复指引。
+      详细步骤与验收见 skills/upgrade/SKILL.md。
+
+  awf-dispatch <别名|目录> <任务文件>
+      跨项目派发（DSH 会话适配）：检查目标工作流/工作区后，在目标工作区创建会话执行。
+      由 cross-project-dispatch 技能的 scripts/awf-dispatch 提供，不属于脚手架。
+
+说明:
+  init 之后请编辑 agent-workflow/project.yaml，再运行 awf bootstrap。
+  check 的退出码 = 失败项数量，可直接用于 pre-commit / CI（install-hooks 已内置）。
+EOF
+}
+
+# ---------------------------------------------------------------- 项目根发现
+
+find_root() {
+  local d="$PWD"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/agent-workflow/project.yaml" ]; then
+      printf '%s\n' "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------- 模板渲染
+
+# 使用调用方设置的 P_* 变量渲染模板；字面替换，不受正则或 & 影响。
+render() {
+  local tpl="$1" out="$2"
+  awfk \
+    -v v_id="$P_ID" \
+    -v v_name="$P_NAME" \
+    -v v_purpose="$P_PURPOSE" \
+    -v v_role="$P_ROLE" \
+    -v v_aliases="$P_ALIASES" \
+    -v v_stack="$P_STACK" \
+    -v v_gate="$P_GATE" \
+    -v v_compile="$P_COMPILE" \
+    -v v_test="$P_TEST" \
+    -v v_scopes="$P_SCOPES" \
+    -v v_serialized="$P_SERIALIZED" \
+    -v v_digest="$P_DIGEST" \
+    -v v_version="$AWF_VERSION" \
+    -v v_date="$(today)" '
+    function rep(s, k, v,   out, i) {
+      out = ""
+      while ((i = index(s, k)) > 0) {
+        out = out substr(s, 1, i - 1) v
+        s = substr(s, i + length(k))
+      }
+      return out s
+    }
+    {
+      l = $0
+      l = rep(l, "{{ID}}", v_id)
+      l = rep(l, "{{NAME}}", v_name)
+      l = rep(l, "{{PURPOSE}}", v_purpose)
+      l = rep(l, "{{ROLE}}", v_role)
+      l = rep(l, "{{ALIASES}}", v_aliases)
+      l = rep(l, "{{STACK}}", v_stack)
+      l = rep(l, "{{GATE}}", v_gate)
+      l = rep(l, "{{COMPILE}}", v_compile)
+      l = rep(l, "{{TEST}}", v_test)
+      l = rep(l, "{{SCOPES}}", v_scopes)
+      l = rep(l, "{{SERIALIZED}}", v_serialized)
+      l = rep(l, "{{DIGEST}}", v_digest)
+      l = rep(l, "{{VERSION}}", v_version)
+      l = rep(l, "{{DATE}}", v_date)
+      print l
+    }
+  ' "$tpl" > "$out"
+}
+
+load_project() {
+  local f="$1" tpl
+  [ -f "$f" ] || die "缺少 $f"
+
+  P_ID="$(yaml_get id "$f")"
+  P_NAME="$(yaml_get name "$f")"
+  P_PURPOSE="$(yaml_get purpose "$f")"
+  P_ALIASES="$(yaml_get aliases "$f")"
+  P_STACK="$(yaml_get stack "$f")"
+  P_GATE="$(yaml_get gate "$f")"
+  P_COMPILE="$(yaml_get compile "$f")"
+  P_TEST="$(yaml_get test "$f")"
+  P_SCOPES="$(yaml_get scopes "$f")"
+  P_SERIALIZED="$(yaml_get serialized "$f")"
+  P_ROLE="$(yaml_get role "$f")"
+
+  [ -n "$P_ID" ] || die "$f 缺少 id"
+  [ -n "$P_NAME" ] || die "$f 缺少 name"
+
+  # 入口里展示“未配置”，但 project.yaml 本身保持空值，避免把占位文字当命令执行
+  [ -n "$P_PURPOSE" ] || P_PURPOSE="$P_NAME 项目"
+  [ -n "$P_ALIASES" ] || P_ALIASES="$P_NAME"
+  [ -n "$P_GATE" ] || P_GATE="./agent-workflow/check_workflow.sh"
+  [ -n "$P_COMPILE" ] || P_COMPILE="（未配置，见 agent-workflow/project.yaml）"
+  [ -n "$P_TEST" ] || P_TEST="（未配置，见 agent-workflow/project.yaml）"
+  [ -n "$P_SCOPES" ] || P_SCOPES="主工程(.)"
+  [ -n "$P_SERIALIZED" ] || P_SERIALIZED="无"
+
+  tpl="$(dirname "$f")/templates/AGENTS.md.tmpl"
+  if [ -f "$tpl" ]; then
+    P_DIGEST="$(hash_files "$f" "$tpl")"
+  else
+    P_DIGEST="$(hash_files "$f")"
+  fi
+}
+
+# 只替换 <!-- awf:begin --> 与 <!-- awf:end --> 之间；无标记则追加。
+write_agents() {
+  local root="$1" block="$2" f="$1/AGENTS.md"
+
+  if [ ! -f "$f" ]; then
+    cp "$block" "$f"
+    return 0
+  fi
+
+  if grep -q '<!-- awf:begin' "$f"; then
+    local nb ne
+    nb="$(grep -c '<!-- awf:begin' "$f" || true)"
+    ne="$(grep -c '<!-- awf:end' "$f" || true)"
+    if [ "$nb" != "$ne" ] || [ "$nb" -gt 1 ]; then
+      die "AGENTS.md 受控区块不完整（begin $nb / end ${ne}）：请手工补成一对 <!-- awf:begin --> … <!-- awf:end --> 后重试；本次未改写文件"
+    fi
+    awfk -v bf="$block" '
+      BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
+      /<!-- awf:begin/ { printf "%s", blk; skip = 1; next }
+      /<!-- awf:end/   { skip = 0; next }
+      !skip { print }
+    ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  else
+    { printf '\n'; cat "$block"; } >> "$f"
+  fi
+}
+
+# ---------------------------------------------------------------- init
+
+detect_stack() {
+  local d="$1"
+  if [ -f "$d/Cargo.toml" ]; then echo rust
+  elif [ -f "$d/go.mod" ]; then echo go
+  elif [ -f "$d/package.json" ]; then echo node
+  elif [ -f "$d/pom.xml" ]; then echo maven
+  elif [ -f "$d/gradlew" ] || [ -f "$d/build.gradle" ] || [ -f "$d/build.gradle.kts" ]; then echo gradle
+  elif [ -d "$d/Assets" ] && [ -d "$d/ProjectSettings" ]; then echo unity
+  else echo generic
+  fi
+}
+
+default_verify() {
+  case "$1" in
+    rust)   echo "cargo build|cargo test" ;;
+    go)     echo "go build ./...|go test ./..." ;;
+    node)   echo "npm run build|npm test" ;;
+    maven)  echo "./mvnw -q package|./mvnw -q test" ;;
+    gradle) echo "./gradlew build|./gradlew test" ;;
+    *)      echo "|" ;;
+  esac
+}
+
+put_if_absent() {
+  local f="$1"
+  if [ -f "$f" ]; then
+    cat >/dev/null
+  else
+    cat > "$f"
+  fi
+}
+
+write_aux_files() {
+  local root="$1"
+
+  put_if_absent "$root/agent-workflow/memory/README.md" <<'EOF'
+# memory 模块
+
+- `cache/`：临时证据、日志片段、待确认结论。超过 7 天应清理或转存。
+- `history/`：长期归档，存放完整修复过程与**可复用结论**。
+
+命名：
+
+```text
+cache/   <主题>_<YYYY-MM-DD>.md
+history/ <主题>_<YYYY-MM-DD>.md
+```
+
+长期任务可在文件内写 `<!-- long-term: true -->` 免于过期清理。
+
+## 何时沉淀（DEV-124）
+
+- 任务收尾归档时（`done.md` 有可复用结论）
+- 问题解决后（根因明确、修法验证过）
+- 发现反直觉行为时（下次会再踩的坑）
+
+## 何为可复用（不等于过程记录）
+
+只沉淀以下四类，**不存一次性琐事**：
+
+1. **根因与修法**——「为什么坏 + 怎么修好」（修复类最有价值）
+2. **技术决策**——「选了什么 + 为什么，以及没选什么」
+3. **踩坑与规避**——「什么情况会踩 + 如何避开」
+4. **可复用命令**——「屡次手敲的命令序列」（整段命令的归宿是 `../tools/` 晋升脚本）
+
+一次性排查日志、临时输出、未验证猜测 → 留在 `cache/` 或直接删除。
+
+## 内容结构（单篇建议）
+
+```text
+- 背景：触发场景 / 关联任务 ID（如 [DEV-124]）
+- 结论：可直接引用的根因/修法/决策（一句话能说清最好）
+- 验证：怎么证明结论成立（命令 / 复现步骤）
+- 关联任务：任务 ID 与归档位置（tasks/*/done.md）
+```
+EOF
+
+  put_if_absent "$root/agent-workflow/memory/cache/README.md" <<'EOF'
+# cache
+
+临时证据放这里。任务归档时删除或转存到 `../history/`。
+EOF
+
+  put_if_absent "$root/agent-workflow/memory/history/README.md" <<'EOF'
+# history
+
+长期归档放这里。`tasks/*/done.md` 的归档链接应指向本目录。
+EOF
+
+  put_if_absent "$root/agent-workflow/tools/README.md" <<'EOF'
+# tools
+
+项目操作手册：构建、测试、调试、分支规范。
+
+只写经过验证、可直接执行的命令；实验记录写 `../memory/`，结论写 `../docs/`。
+
+## 脚本 → 正式工具晋升标准（DEV-124）
+
+`tools/` 中的脚本/命令是 worker 的**可复用资产**，满足以下三要素即可从
+「临时脚本」（`../memory/cache/` 或 shell 历史）晋升为正式工具：
+
+1. **可执行文件**：有 shebang/入口（`#!/usr/bin/env bash` 等），可直接 `./xxx` 运行
+2. **用法注释**：文件头写明用途、参数、示例（谁都能照注释用）
+3. **归属明确**：对应本 worker 的重复性操作（做第二次就该考虑收录）
+
+目录示意：
+
+```text
+tools/
+├── README.md
+├── verify.sh        # 构建+校验一条龙（shebang + 用法注释 + 重复性操作）
+└── release.sh        # 发版流程封装
+```
+
+替换本文件时建议保留三类内容：
+
+1. 构建与验证命令（可直接复制执行）
+2. 环境前置条件与已知限制
+3. 常见问题与排查入口
+EOF
+
+  put_if_absent "$root/agent-workflow/check_workflow.sh" <<'EOF'
+#!/bin/sh
+# 兼容入口（DEV-186 工具技能化）：等价于技能 agent-workflow-scaffold 的 bin/awf check。
+# 工具在技能（~/.dsh/skills/agent-workflow-scaffold = kit 仓库符号链接），项目内不复制副本。
+exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"
+EOF
+  chmod +x "$root/agent-workflow/check_workflow.sh"
+}
+
+write_task_files() {
+  local dir="$1" t b name
+  for t in dev debug docs; do
+    for b in todo current done; do
+      mkdir -p "$dir/$t/$b"
+      case "$t:$b" in
+        dev:todo)   name="待开发（todo）目录" ;;
+        dev:current) name="进行中（current）目录" ;;
+        dev:done)   name="已完成（done）目录" ;;
+        debug:todo) name="待调试（todo）目录" ;;
+        debug:current) name="进行中（current）目录" ;;
+        debug:done) name="已完成（done）目录" ;;
+        docs:todo)  name="待撰写（todo）目录" ;;
+        docs:current) name="进行中（current）目录" ;;
+        docs:done)  name="已完成（done）目录" ;;
+      esac
+      put_if_absent "$dir/$t/$b/README.md" <<EOF
+# $name 索引
+
+> 由 \`awf status\` 生成，请勿手改；任务事实以本目录下 \`<ID>.md\` 文件为准。
+
+| ID | 说明 |
+|----|------|
+EOF
+    done
+  done
+}
+
+# ---------------------------------------------------------------- 账本（DEV-127 目录式：todo/current/done 三目录）
+
+# 返回 tasks/<type>/<bucket>/ 下单任务文件（排除 README.md）
+ledger_task_files() {
+  local type="$1" bucket="$2"
+  find "agent-workflow/tasks/$type/$bucket" -maxdepth 1 -type f -name '*.md' 2>/dev/null \
+    ! -name 'README.md' | sort
+}
+
+# 读任务文件字段（第一个匹配行的值；无则输出空）
+task_field() {
+  local f="$1" key="$2"
+  # awfk（LC_ALL=C）包装：中文键比较必须在 C locale 下逐字节进行（DEV-117 同款坑，
+  # en_US.UTF-8 下多字节中文 == 恒真会把任意字段行当成目标，导致 status 块不一致）
+  awfk -F'|' -v k="$key" '
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    trim($2) == k { print trim($3); exit }
+  ' "$f"
+}
+
+# 读任务文件标题（## [ID] 标题 的标题部分）
+task_title() {
+  local f="$1"
+  awk '
+    index($0, "## [") == 1 {
+      line = substr($0, 5)
+      c = index(line, "] ")
+      if (c > 0) { print substr(line, c + 2); exit }
+    }
+  ' "$f"
+}
+
+# 读任务文件块 ID（## [ID] …）
+task_id() {
+  local f="$1"
+  awk 'index($0, "## [") == 1 { line = substr($0, 5); c = index(line, "] "); if (c > 0) { print substr(line, 1, c - 1); exit } }' "$f"
+}
+
+# 迁移旧账本（含块大文件 / todo 表行）→ 三目录；幂等。由 awf status 在重生成 README 前调用。
+migrate_ledger_files() {
+  local t f bucket blocks miss bid rowid leftover
+  for t in dev debug docs; do
+    mkdir -p "agent-workflow/tasks/$t/todo" "agent-workflow/tasks/$t/current" "agent-workflow/tasks/$t/done"
+    for f in agent-workflow/tasks/$t/todo.md agent-workflow/tasks/$t/current.md agent-workflow/tasks/$t/done.md; do
+      [ -f "$f" ] || continue
+      case "$f" in */todo.md) bucket="todo" ;; */current.md) bucket="current" ;; */done.md) bucket="done" ;; esac
+      # 1) 含块 → 拆到对应目录（不覆盖已存在文件；完成判定=所有块 ID 都有文件，幂等）
+      if grep -q '^## \[' "$f"; then
+        blocks="$(grep -c '^## \[' "$f")"
+        awk -v dir="agent-workflow/tasks/$t/$bucket" '
+          index($0, "## [") == 1 {
+            if (id != "" && buf != "") write_file(id, buf)
+            line = substr($0, 5); c = index(line, "] ")
+            id = (c > 0 ? substr(line, 1, c - 1) : "")
+            buf = $0 "\n"
+            next
+          }
+          { if (id != "") buf = buf $0 "\n" }
+          END { if (id != "" && buf != "") write_file(id, buf) }
+          function write_file(i, content,   p, n, k, ln, out) {
+            p = dir "/" i ".md"
+            if (system("test -f \"" p "\"") == 0) return
+            # 历史归档状态值归一（archived/完成/Archive → done），保持新枚举严格
+            n = split(content, ln, "\n")
+            out = ""
+            for (k = 1; k <= n; k++) {
+              if (ln[k] ~ /^\| *状态 *\| *archived *\|$/) ln[k] = "| 状态 | done |"
+              else if (ln[k] ~ /^\| *状态 *\| *完成 *\|$/) ln[k] = "| 状态 | done |"
+              else if (ln[k] ~ /^\| *Status *\| *archived *\|$/) ln[k] = "| 状态 | done |"
+              # v1.0.0 补丁：取消（历史撤销任务归档语义=关闭）同样归一为 done
+              else if (ln[k] ~ /^\| *状态 *\| *取消 *\|$/) ln[k] = "| 状态 | done |"
+              out = out ln[k] "\n"
+            }
+            print out > p
+            close(p)
+            print "账本迁移：已拆分 " p > "/dev/stderr"
+          }
+        ' "$f"
+        for bid in $(grep -o '## \[[A-Z]*-[0-9]*' "$f" | sed 's/## \[//'); do
+          [ -f "agent-workflow/tasks/$t/$bucket/$bid.md" ] || miss="$miss $bid"
+        done
+        if [ -z "$miss" ]; then
+          say "账本迁移：$f 已全部拆出 $blocks 块 → tasks/$t/$bucket/（移除旧文件）"
+          rm -f "$f"
+        else
+          say "账本迁移：$f 仍有未拆出块（$miss），保留原文件待人工处理"
+          continue
+        fi
+      fi
+      # 2) todo 表行（ID | 优先级 | 描述 | 日期）→ todo/ 下未建档任务生成文件
+      #    仅处理 todo.md（done.md 的 summary 表是历史完成记录，不得误生成）；
+      #    ID 已存在于 current/ 或 done/ 的登记行视为残留，跳过。
+      if [ "$bucket" = "todo" ]; then
+      awk -F'|' -v ts="$(now)" -v dir="agent-workflow/tasks/$t/todo" -v cur="agent-workflow/tasks/$t/current" -v don="agent-workflow/tasks/$t/done" '
+        function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+        NR > 2 && $2 ~ /^[ \t]*[A-Z]+-[0-9]+/ {
+          id = trim($2); pri = trim($3); desc = trim($4); date = trim($5)
+          p = dir "/" id ".md"
+          if (system("test -f \"" p "\"") == 0) next
+          if (system("test -f \"" cur "/" id ".md\"") == 0) next
+          if (system("test -f \"" don "/" id ".md\"") == 0) next
+          printf "## [%s] %s\n\n", id, desc > p
+          printf "| 字段 | 内容 |\n|------|------|\n" > p
+          printf "| 优先级 | %s |\n", (pri == "" ? "P2" : pri) > p
+          printf "| 状态 | todo |\n" > p
+          printf "| 登记日期 | %s |\n", (date == "" ? "?" : date) > p
+          printf "| Owner | 待认领 |\n" > p
+          printf "\n### 目标\n（由旧 todo 登记迁移，待补全）\n\n### 验收标准\n- [ ] 待补全\n\n### 下一步\n认领：改状态为 active 并补全字段后运行 awf status。\n\n### Execution Log\n- %s · created · @agent · 旧 todo 登记迁移建档\n", ts > p
+          close(p)
+          print "账本迁移：todo 登记生成 " p > "/dev/stderr"
+        }
+      ' "$f"
+      fi
+      # 3) 内容已迁移的旧大文件删除（空表/表头也删）；未拆完的保留（上面 continue）
+      if ! grep -q '^## \[' "$f" && ! grep -qE '^\| *[A-Z]+-[0-9]+' "$f"; then
+        rm -f "$f"
+        say "账本迁移：移除空旧文件 $f"
+      elif ! grep -q '^## \[' "$f" && grep -qE '^\| *[A-Z]+-[0-9]+' "$f"; then
+        # 表行已消费：确认 todo/ 下已有对应文件后删除
+        leftover=0
+        for rowid in $(awk -F'|' '{ gsub(/ /, "", $2); if ($2 ~ /^[A-Z]+-[0-9]+$/) print $2 }' "$f"); do
+          [ -f "agent-workflow/tasks/$t/todo/$rowid.md" ] || leftover=1
+        done
+        if [ "$leftover" -eq 0 ]; then
+          rm -f "$f"
+          say "账本迁移：移除已迁移表行文件 $f"
+        fi
+      fi
+    done
+  done
+  ledger_cleanup_files
+}
+
+# DEV-127：清理任务文件尾部（拆块时并入的旧归档裸行 / 多余空行）
+ledger_cleanup_files() {
+  local t b f
+  for t in dev debug docs; do
+    for b in todo current done; do
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        awk '
+          { buf[++n] = $0 }
+          END {
+            while (n > 0 && (buf[n] ~ /^[ \t]*$/ || buf[n] ~ /^\| *[A-Z]+-[0-9]+.*\|$/)) n--
+            for (i = 1; i <= n; i++) print buf[i]
+          }
+        ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+      done < <(ledger_task_files "$t" "$b")
+    done
+  done
+}
+
+# 重生成三目录 README（检索索引），数据源=目录内任务文件
+render_ledger_readmes() {
+  local t b f id pri st owner title date rows
+  for t in dev debug docs; do
+    for b in todo current done; do
+      rows=""
+      for f in $(ledger_task_files "$t" "$b"); do
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        title="$(task_title "$f")"
+        pri="$(task_field "$f" 优先级)"; [ -n "$pri" ] || pri="-"
+        case "$b" in
+          todo)
+            date="$(task_field "$f" 登记日期)"; [ -n "$date" ] || date="-"
+            rows="$rows| $id | $pri | $title | $date |\n" ;;
+          current)
+            st="$(task_field "$f" 状态)"; [ -n "$st" ] || st="active"
+            owner="$(task_field "$f" Owner)"; [ -n "$owner" ] || owner="-"
+            rows="$rows| $id | $pri | $st | $owner | $title |\n" ;;
+          done)
+            date="$(task_field "$f" 完成日期)"; [ -n "$date" ] || date="-"
+            rows="$rows| $id | $pri | $title | $date |\n" ;;
+        esac
+      done
+      case "$t:$b" in
+        dev:todo)   name="待开发（todo）目录" ;;
+        dev:current) name="进行中（current）目录" ;;
+        dev:done)   name="已完成（done）目录" ;;
+        debug:todo) name="待调试（todo）目录" ;;
+        debug:current) name="进行中（current）目录" ;;
+        debug:done) name="已完成（done）目录" ;;
+        docs:todo)  name="待撰写（todo）目录" ;;
+        docs:current) name="进行中（current）目录" ;;
+        docs:done)  name="已完成（done）目录" ;;
+      esac
+      {
+        printf '# %s 索引\n\n' "$name"
+        printf '> 由 `awf status` 生成，请勿手改；任务事实以本目录下 `<ID>.md` 文件为准。\n\n'
+        case "$b" in
+          todo)   printf '| ID | 优先级 | 标题 | 登记日期 |\n|----|--------|------|----------|\n' ;;
+          current) printf '| ID | 优先级 | 状态 | Owner | 标题 |\n|----|--------|------|-------|------|\n' ;;
+          done)   printf '| ID | 优先级 | 标题 | 完成日期 |\n|----|--------|------|----------|\n' ;;
+        esac
+        printf '%b' "$rows"
+      } > "agent-workflow/tasks/$t/$b/README.md"
+      [ -n "$rows" ] || rows="（空）"
+      say "已更新 $t/$b README（$rows 行索引）"
+    done
+  done
+}
+
+check_growth_hints() {
+  local archived=0 d f hfiles tfiles
+  for d in agent-workflow/tasks/*/done/; do
+    for f in "$d"[A-Z]*.md; do
+      [ -f "$f" ] || continue
+      archived=$((archived + 1))
+    done
+  done
+  hfiles="$(find agent-workflow/memory/history -maxdepth 1 -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$archived" -ge 3 ] && [ "$hfiles" -eq 0 ]; then
+    say "提示：已有 $archived 条归档任务但 memory/history/ 无沉淀——建议补 <主题>_<日期>.md 沉淀可复用结论（根因/修法/决策/坑，标准见 memory/README.md）"
+  fi
+  tfiles="$(find agent-workflow/tools -maxdepth 1 -type f ! -name 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$archived" -ge 3 ] && [ "$tfiles" -eq 0 ]; then
+    say "提示：如已沉淀过可复用脚本/命令，可按 tools/README.md 晋升三要素（可执行/用法注释/归属）收录进 tools/"
+  fi
+
+  # DEV-198：根目录 VERSION 防踩坑软提示（只提示不 FAIL）——macOS 大小写不敏感 FS 上，
+  # 项目根 VERSION 文本文件会与 C++ 标准库头 <version> 撞名：Bee clang（Unity IL2CPP）带 -I"."，
+  # libc++ cstddef 内 #include <version> 命中 ./VERSION → expected unqualified-id 级联错误（SP-302，
+  # uxrsample 2026-11-07 实测：移走即 0 错误）。version_file 默认根 VERSION 的项目（纯脚本）同样提示，
+  # 自行判断：有 C++/Unity 构建即迁移；锚点位置规范见 skills/release/SKILL.md 与 templates/project.yaml.tmpl。
+  if [ -f VERSION ]; then
+    local vf_root
+    vf_root="$(project_version_file .)"
+    case "$vf_root" in
+      ./agent-workflow/*) vf_root="${vf_root#./}" ;;
+      ./*) vf_root="${vf_root#./}" ;;
+    esac
+    if [ "$vf_root" = "VERSION" ]; then
+      say "提示：项目根存在 VERSION 文件（version_file 未配置，默认根 VERSION）——若本项目用 C++/Unity 构建（clang -I. 会遮蔽 libc++ <version> 头，见 SP-302），建议迁移：git mv VERSION agent-workflow/VERSION 并在 agent-workflow/project.yaml 设 version_file: agent-workflow/VERSION；纯脚本项目可忽略"
+    else
+      say "提示：项目根存在残留 VERSION 文件（version_file 已指向 $vf_root）——仍可能遮蔽 libc++ <version> 头，建议 git mv VERSION agent-workflow/VERSION 或删除；纯脚本项目可忽略"
+    fi
+  fi
+
+  # DEV-205 双版本模型：项目缺 agent-workflow/FRAMEWORK_VERSION → 软提示迁移补写（只提示不 FAIL）。
+  # 骨架版本 = 固定路径 FRAMEWORK_VERSION（仅骨架契约变化时 bump），与技能版本（version_file
+  # 锚点，发版即 bump）解耦；存量项目未登记骨架版时 upgrade 会按迁移补写（不写技能版锚点）。
+  if [ ! -f agent-workflow/FRAMEWORK_VERSION ]; then
+    say "提示：未登记骨架版本（agent-workflow/FRAMEWORK_VERSION 缺失）——建议运行 awf upgrade 补写（双版本模型迁移：骨架版 = 固定 FRAMEWORK_VERSION，技能版 = version_file 锚点，两版解耦；技能更新不需升级项目）"
+  fi
+}
+
+cmd_init() {
+  local target="." name="" id="" purpose="" role="" stack="" force=0 keep_docs=0 no_register=0 gitignore=0
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name)    name="$2"; shift 2 ;;
+      --name=*)  name="${1#*=}"; shift ;;
+      --id)      id="$2"; shift 2 ;;
+      --id=*)    id="${1#*=}"; shift ;;
+      --purpose) purpose="$2"; shift 2 ;;
+      --purpose=*) purpose="${1#*=}"; shift ;;
+      --role)    role="$2"; shift 2 ;;
+      --role=*)  role="${1#*=}"; shift ;;
+      --stack)   stack="$2"; shift 2 ;;
+      --stack=*) stack="${1#*=}"; shift ;;
+      --keep-docs) keep_docs=1; shift ;;
+      --no-register) no_register=1; shift ;;
+      --gitignore) gitignore=1; shift ;;
+      --force)   force=1; shift ;;
+      -h|--help) usage; return 0 ;;
+      -*)        die "未知参数：$1" ;;
+      *)         target="$1"; shift ;;
+    esac
+  done
+
+  # DEV-184 技能化：模板检查改为要求 AGENTS.md.tmpl 存在（workflows/ 已退役，细节在技能）
+  if [ ! -f "$TPL_DIR/README.md" ] || [ ! -f "$TPL_DIR/AGENTS.md.tmpl" ]; then
+    die "当前 awf 是项目内副本，只能执行 bootstrap / check / status；新建项目请使用全局技能 agent-workflow-scaffold 的 bin/awf"
+  fi
+
+  mkdir -p "$target"
+  target="$(cd "$target" && pwd)"
+
+  if [ -e "$target/agent-workflow/project.yaml" ] && [ "$force" -ne 1 ]; then
+    die "$target 已存在 agent-workflow，如需覆盖请加 --force"
+  fi
+
+  local base
+  base="$(basename "$target")"
+  [ "$base" = "/" ] && base="project"
+
+  [ -n "$name" ] || name="$base"
+  [ -n "$id" ] || id="$(slug "$name")"
+  [ -n "$id" ] || id="$(slug "$base")"
+  [ -n "$id" ] || id="project"
+  [ -n "$purpose" ] || purpose="$name 项目"
+  [ -n "$stack" ] || stack="$(detect_stack "$target")"
+
+  local verify_pair compile test
+  verify_pair="$(default_verify "$stack")"
+  compile="${verify_pair%%|*}"
+  test="${verify_pair#*|}"
+
+  mkdir -p "$target/agent-workflow/tasks/dev" \
+           "$target/agent-workflow/tasks/debug" \
+           "$target/agent-workflow/tasks/docs" \
+           "$target/agent-workflow/memory/cache" \
+           "$target/agent-workflow/memory/history" \
+           "$target/agent-workflow/tools" \
+           "$target/agent-workflow/bin" \
+           "$target/agent-workflow/templates"
+
+  # DEV-205 双版本模型：init 登记当前骨架版本（固定路径 agent-workflow/FRAMEWORK_VERSION）。
+  # 源 = 技能实体（安装后的唯一事实源），未安装回退 kit 仓库。技能版本（VERSION）由发版
+  # 流程维护，init 不写——骨架版与技能版解耦，技能更新不需项目升级。
+  local kff_src
+  kff_src="$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION"
+  [ -f "$kff_src" ] || kff_src="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
+  if [ -f "$kff_src" ]; then
+    cp "$kff_src" "$target/agent-workflow/FRAMEWORK_VERSION"
+  fi
+
+  if [ "$keep_docs" -eq 1 ] && [ -f "$target/agent-workflow/README.md" ]; then
+    say "skip  已存在，保留：agent-workflow/README.md"
+  else
+    cp "$TPL_DIR/README.md" "$target/agent-workflow/README.md"
+  fi
+  # DEV-184 彻底技能化：不再生成 workflows/ 目录——流程细节在技能 agent-workflow-scaffold
+  # （skills/ 各流程技能），AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
+  # 存量项目迁移用 awf upgrade --slim（清掉全量副本）。
+  cp "$TPL_DIR/AGENTS.md.tmpl" "$target/agent-workflow/templates/AGENTS.md.tmpl"
+  if [ -f "$TPL_DIR/pre-commit" ]; then
+    cp "$TPL_DIR/pre-commit" "$target/agent-workflow/templates/pre-commit"
+  fi
+  # DEV-186 工具技能化：不再复制 bin/awf / bin/awf-dispatch 到项目——
+  # 工具是技能的一部分（agent-workflow-scaffold = kit 仓库符号链接，一处维护），
+  # 项目内命令统一调技能路径 ~/.dsh/skills/agent-workflow-scaffold/bin/awf。
+  # check_workflow.sh 兼容入口由 write_aux_files 生成并指向技能工具。
+
+  write_task_files "$target/agent-workflow/tasks"
+  write_aux_files "$target"
+
+  P_ID="$id"
+  P_NAME="$name"
+  P_PURPOSE="$purpose"
+  P_ROLE="$role"
+  P_ALIASES="$name"
+  P_STACK="$stack"
+  P_GATE="./agent-workflow/check_workflow.sh"
+  P_COMPILE="$compile"
+  P_TEST="$test"
+  P_SCOPES="主工程(.)"
+  P_SERIALIZED="无"
+  P_DIGEST="0"
+
+  if [ ! -f "$target/agent-workflow/project.yaml" ]; then
+    render "$TPL_DIR/project.yaml.tmpl" "$target/agent-workflow/project.yaml"
+  else
+    say "skip  已存在，保留：agent-workflow/project.yaml"
+  fi
+
+  # 从事实文件重新加载：统一空值回退逻辑，并计算入口 digest
+  load_project "$target/agent-workflow/project.yaml"
+  render "$TPL_DIR/AGENTS.md.tmpl" "$target/AGENTS.md.block"
+  write_agents "$target" "$target/AGENTS.md.block"
+  rm -f "$target/AGENTS.md.block"
+
+  if [ ! -f "$target/CLAUDE.md" ]; then
+    cat > "$target/CLAUDE.md" <<'EOF'
+# CLAUDE.md
+
+本仓库的 agent 协作入口是 [AGENTS.md](AGENTS.md)（由 agent-workflow 生成）。
+请按 AGENTS.md 的顺序读取任务账本与工作流；不要在本文件重复定义流程。
+EOF
+  fi
+
+  if [ "$gitignore" -eq 1 ]; then
+    append_gitignore "$target"
+  fi
+  # DEV-183：本机派发产物忽略段默认写入（dispatch 流水/回报/运行时状态，任何项目都不该入库）
+  append_dispatch_gitignore "$target"
+
+  (
+    cd "$target"
+    ~/.dsh/skills/agent-workflow-scaffold/bin/awf status >/dev/null
+  )
+
+  say "已生成工作流框架：$target"
+  say ""
+  say "  AGENTS.md                    入口（生成物，在工作流目录之外）"
+  say "  CLAUDE.md                    Claude Code 指针"
+  say "  agent-workflow/"
+  say "  ├── project.yaml             项目事实（唯一输入）"
+  say "  ├── README.md                规范正文"
+  say "  ├── workflows/               dev / debug / docs / review / cross-project / release"
+  say "  ├── tasks/                   任务账本（todo/current/done + status）"
+  say "  ├── memory/                  cache / history"
+  say "  ├── tools/                   操作手册"
+  say "  ├── bin/awf                  bootstrap / check / status"
+  say "  └── check_workflow.sh        兼容入口"
+  say ""
+  if [ "$gitignore" -eq 1 ]; then
+    say "  已写入 .gitignore：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
+    say ""
+  fi
+  say "  已写入 .gitignore：派发流水/回报/运行时状态不入库（dispatch/log.md、reports/、headless/、.agent-teams/）"
+  say "下一步：编辑 agent-workflow/project.yaml，然后运行"
+  say "  ~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap"
+  say ""
+
+  ( cd "$target" && ~/.dsh/skills/agent-workflow-scaffold/bin/awf check )
+
+  if [ "$no_register" -eq 0 ] && [ "${AWF_NO_REGISTER:-0}" != "1" ]; then
+    if ( cd "$target" && ~/.dsh/skills/agent-workflow-scaffold/bin/awf register >/dev/null ); then
+      say "已写入全局索引：$AGENTS_HOME/AGENTS.md（可用 awf projects / awf find 检索）"
+    else
+      warn "全局索引写入失败；框架已生成，可稍后运行 ~/.dsh/skills/agent-workflow-scaffold/bin/awf register"
+    fi
+  else
+    say "已跳过全局索引登记（--no-register）"
+  fi
+
+  if [ -z "$role" ]; then
+    say "提示：在 agent-workflow/project.yaml 的 role 字段填写本项目的 worker 能力自述（如：擅长…），awf find / awf projects 检索时可见"
+  fi
+}
+
+# ---------------------------------------------------------------- gitignore
+
+# 本机私有工作流忽略块：固定标记行（幂等锚点）+ 三条根锚定路径
+GITIGNORE_MARK='# agent-workflow（本机私有工作流，不入库）'
+# 本机派发产物忽略块（DEV-183 追加）：跨项目派发的流水/回报/运行时状态，任何项目都不该入库。
+# 与 --gitignore（忽略整个工作流）独立：本段由 init 默认写入，--gitignore 仍按需单独启用。
+DISPATCH_GITIGNORE_MARK='# agent-workflow（本机派发产物，不入库）'
+
+# 把忽略块写入 $1/.gitignore；已含标记则跳过，末尾无换行先补换行再追加。
+append_gitignore() {
+  local root="$1" gi="$1/.gitignore"
+  if [ -f "$gi" ] && grep -qF "$GITIGNORE_MARK" "$gi"; then
+    say "已忽略：$gi 已包含 agent-workflow（未重复追加）"
+    return 0
+  fi
+  # 末尾无换行时先补一行，避免忽略块粘在上一行末尾
+  if [ -s "$gi" ] && [ -n "$(tail -c 1 "$gi")" ]; then
+    printf '\n' >> "$gi"
+  fi
+  {
+    printf '%s\n' "$GITIGNORE_MARK"
+    printf '%s\n' '/agent-workflow/'
+    printf '%s\n' '/AGENTS.md'
+    printf '%s\n' '/CLAUDE.md'
+  } >> "$gi"
+  say "已写入 $gi：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
+}
+
+# 把本机派发产物忽略段写入 $1/.gitignore（init 默认执行；已含标记则跳过）。
+# 覆盖：派发流水 log、回报 reports（含 inbox）、headless 输出、AgentTeams 运行时状态。
+append_dispatch_gitignore() {
+  local gi="$1/.gitignore"
+  if [ -f "$gi" ] && grep -qF "$DISPATCH_GITIGNORE_MARK" "$gi"; then
+    return 0
+  fi
+  if [ -s "$gi" ] && [ -n "$(tail -c 1 "$gi")" ]; then
+    printf '\n' >> "$gi"
+  fi
+  {
+    printf '%s\n' "$DISPATCH_GITIGNORE_MARK"
+    printf '%s\n' '/dispatch/log.md'
+    printf '%s\n' '/dispatch/reports/'
+    printf '%s\n' '/dispatch/headless/'
+    printf '%s\n' '/.agent-teams/'
+  } >> "$gi"
+  say "已写入 $gi：派发流水/回报/运行时状态不入库"
+}
+
+cmd_gitignore() {
+  local target="."
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help) usage; return 0 ;;
+      -*)        die "未知参数：$1（用法：awf gitignore [目录]）" ;;
+      *)         target="$1"; shift ;;
+    esac
+  done
+  target="$(cd "$target" 2>/dev/null && pwd)" || die "目录不存在：$target"
+  [ -f "$target/agent-workflow/project.yaml" ] \
+    || die "目标不是 agent-workflow 项目：$target（没有 agent-workflow/project.yaml；新项目请用 awf init --gitignore）"
+  append_gitignore "$target"
+}
+
+# ---------------------------------------------------------------- bootstrap
+
+cmd_bootstrap() {
+  local root
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+
+  load_project "agent-workflow/project.yaml"
+  local block=".awf-block.tmp"
+  render "agent-workflow/templates/AGENTS.md.tmpl" "$block"
+  write_agents "$root" "$block"
+  rm -f "$block"
+
+  say "已刷新 AGENTS.md 受控区块（digest: ${P_DIGEST}）"
+
+  if is_registered; then
+    if write_registration; then
+      say "已刷新全局索引：$P_ID → $PWD"
+    else
+      warn "全局索引刷新失败（不影响本次 bootstrap）"
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------- check
+
+# 校验任务块（mode=current 时状态值必须 ∈ 工作态枚举，下一步必填；
+# mode=done 时归档块同解析，状态保留归档时原值不强制枚举，下一步不强制，
+# 并额外校验归档表行：ID 格式 + 优先级 P0-P3 + YYYY-MM-DD 完成日期）。
+check_current_file() {
+  local f="$1" type="$2" mode="${3:-current}"
+  awfk -v wf="$type" -v m="$mode" '
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    function flush(   miss) {
+      if (id == "") return
+      miss = ""
+      if (!st) miss = miss " 状态"
+      if (!ow) miss = miss " Owner"
+      if (m == "current" && !nx && st_v != "done") miss = miss " 下一步"
+      if (miss != "") {
+        # FAIL 自解释：迁移类（旧英文表头 / 归档块）给出可直接执行的修复指引
+        printf "FAIL  %s [%s] 缺少字段:%s\n", wf, id, miss
+        if (!st) {
+          if (st_en) printf "      → 修复：旧英文表头 `| Status |` 改为 `| 状态 |`，且历史值统一为 `| 状态 | done |`（archived/完成/Archive/取消 均已归一为 done），再跑 awf check\n"
+          else if (m == "done") printf "      → 修复：归档块字段表补一行 `| 状态 | <归档时状态> |`（历史归档可写 `完成`），再跑 awf check\n"
+          else printf "      → 修复：字段表补一行 `| 状态 | active`（DEV-127 后可为 todo/done）\n"
+        }
+        if (!ow) printf "      → 修复：字段表补一行 `| Owner | <承担者> |`\n"
+        if (m == "current" && !nx && st_v != "done") printf "      → 修复：补 `### 下一步` 小节\n"
+        bad++
+      }
+      else if (m == "current" && st_v !~ /^(active|blocked|review|verify|handoff|todo|done)$/) {
+        printf "FAIL  %s [%s] 状态非法：%s（应为 todo/active/blocked/review/verify/handoff/done）\n", wf, id, st_v
+        bad++
+      }
+      else printf "ok    %s [%s] 字段完整\n", wf, id
+      id = ""
+    }
+    incomment { if ($0 ~ /-->/) incomment = 0; next }
+    /<!--/ && !/-->/ { incomment = 1; next }
+    index($0, "## [") == 1 {
+      flush()
+      line = substr($0, 5)
+      c = index(line, "] ")
+      id = substr(line, 1, c - 1)
+      if (c == 0 || id !~ /^[A-Z]+-[0-9]+$/) {
+        printf "FAIL  %s 任务块 ID 非法：%s（应为 类型-数字，如 DEV-001）\n", wf, (c > 0 ? id : line)
+        bad++
+        id = ""
+        next
+      }
+      st = 0; ow = 0; nx = 0; st_v = ""; st_en = 0
+      next
+    }
+    /^### *下一步/ { if (id != "") nx = 1 }
+    m == "done" && id == "" && $0 ~ /^\|/ {
+      if ($0 ~ /^\|[ \t]*-/ || $0 ~ /^\| *任务ID/) next
+      rid = trim($2)
+      if (rid == "") next
+      if (rid !~ /^[A-Z]+-[0-9]+$/) {
+        printf "FAIL  %s 归档行 ID 非法：%s（应为 类型-数字，如 DEV-001）\n", wf, rid
+        bad++
+        next
+      }
+      okpri = (trim($3) ~ /^P[0-3]$/)
+      hasdate = 0
+      for (i = 4; i <= NF; i++) if ($i ~ /^ *[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *$/) hasdate = 1
+      if (!okpri || !hasdate) {
+        printf "FAIL  %s 归档行格式错：%s（需 优先级 P0-P3 与 YYYY-MM-DD 完成日期）\n", wf, rid
+        bad++
+      }
+    }
+    {
+      if (id == "") next
+      if ($0 !~ /^\|/) next          # 只扫字段表行；正文里引用 `| Status |` 等迁移字样不算字段
+      if (trim($2) == "状态") { st = 1; st_v = trim($3) }
+      else if (trim($2) == "Status") { st_en = 1 }
+      else if (trim($2) == "Owner") ow = 1
+    }
+    END { flush(); exit (bad > 0 ? 1 : 0) }
+  ' FS='|' "$f"
+}
+
+# 生成 status 区块内容（含 当前进行中 / 待处理 / 最近完成）到 $1
+status_build_block() {
+  local block="$1" type f id pri st own title date
+  local cur_rows="" todo_rows="" done_rows=""
+  {
+    printf '> 本区块由 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 生成，请勿手改。\n'
+    printf '> 数据来源：`tasks/<type>/<ID>.md`（单任务文件；todo/current/done README 为检索视图）。\n\n'
+
+    # DEV-127：current/todo/done 段直接扫任务文件（README 只是视图；直接扫文件才能让
+    # check_status_fresh 探测到"账本已改但 status.md 未刷新"）
+    for type in dev debug docs; do
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        pri="$(task_field "$f" 优先级)"; st="$(task_field "$f" 状态)"; own="$(task_field "$f" Owner)"
+        cur_rows="$cur_rows| $type | $id | ${pri:-P1} | ${st:-active} | ${own:-?} | $(task_title "$f") |"$'\n'
+      done < <(ledger_task_files "$type" "current")
+    done
+    if [ -n "$cur_rows" ]; then
+      printf '## 当前进行中\n\n| 工作流 | 任务ID | 优先级 | 状态 | Owner | 任务 |\n' >> "$block"
+      printf '|--------|--------|--------|------|-------|------|\n' >> "$block"
+      printf '%s' "$cur_rows" >> "$block"
+    else
+      printf '## 当前进行中\n\n（无）\n' >> "$block"
+    fi
+    printf '\n' >> "$block"
+
+    printf '## 待处理\n\n' >> "$block"
+    for type in dev debug docs; do
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        pri="$(task_field "$f" 优先级)"; date="$(task_field "$f" 最近更新)"
+        todo_rows="$todo_rows| $type | $id | ${pri:-P1} | $(task_title "$f") | ${date:-} |"$'\n'
+      done < <(ledger_task_files "$type" "todo")
+    done
+    if [ -n "$todo_rows" ]; then
+      printf '| 工作流 | 任务ID | 优先级 | 描述 | 登记日期 |\n' >> "$block"
+      printf '|--------|--------|--------|------|----------|\n' >> "$block"
+      printf '%s' "$todo_rows" >> "$block"
+    else
+      printf '（无）\n' >> "$block"
+    fi
+    printf '\n' >> "$block"
+
+    printf '## 最近完成\n\n' >> "$block"
+    for type in dev debug docs; do
+      while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        id="$(task_id "$f")"; [ -n "$id" ] || continue
+        pri="$(task_field "$f" 优先级)"
+        date="$(task_field "$f" 完成日期)"
+        [ -n "$date" ] || date="$(task_field "$f" 最近更新)"
+        done_rows="$done_rows$type|$id|${pri:-P1}|$(task_title "$f")|${date:-0000-00-00}"$'\n'
+      done < <(ledger_task_files "$type" "done")
+    done
+    if [ -n "$done_rows" ]; then
+      printf '| 工作流 | 任务ID | 优先级 | 描述 | 完成日期 |\n' >> "$block"
+      printf '|--------|--------|--------|------|----------|\n' >> "$block"
+      printf '%s' "$done_rows" | LC_ALL=C sort -t'|' -k5,5r | head -n 8         | awfk -F'|' '{ printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5 }' >> "$block"
+    else
+      printf '（无）\n' >> "$block"
+    fi
+
+    printf '\n*最后更新：%s*\n' "$(now)" >> "$block"
+  } > "$block"
+}
+
+# 校验 status.md 新鲜度：临时重渲染状态摘要并与现有文件 diff（忽略 最后更新 行）
+check_status_fresh() {
+  local block
+  block=".awf-status-fresh.tmp"
+  [ -f "agent-workflow/tasks/status.md" ] || return 0   # 缺失已由 required 计失败
+  status_build_block "$block"
+  local gen act
+  gen="$(grep -v '最后更新' "$block" || true)"
+  act="$(sed -n '/<!-- awf:status:begin -->/,/<!-- awf:status:end -->/p' agent-workflow/tasks/status.md \
+    | sed '1d;$d' | grep -v '最后更新' || true)"
+  rm -f "$block"
+  if [ "$gen" = "$act" ]; then
+    say "ok    tasks/status.md 与账本一致（新鲜）"
+    return 0
+  fi
+  say "FAIL  tasks/status.md 已过期（账本改动后未刷新）"
+  say "      → 运行 ~/.dsh/skills/agent-workflow-scaffold/bin/awf status"
+  return 1
+}
+
+# 生成副本漂移报告（kit 形态：根目录同时有 bin/awf 与 templates/ 时生效）。
+# 返回 0=无漂移；非 0=存在漂移；stdout 逐对打印 ok / FAIL 明细。
+copy_drift_report() {
+  local root="$1" rc=0 pair src dst wf b
+  # DEV-184 技能化：不再要求 templates/workflows 目录（细节在技能，模板 workflows 已退役）
+  if [ ! -f "$root/bin/awf" ] || [ ! -f "$root/templates/README.md" ]; then
+    return 0
+  fi
+  # DEV-186 工具技能化：bin/awf、bin/awf-dispatch 是技能工具本体（根 bin/ 即技能），
+  # 项目内不再复制副本——不再纳入漂移比对；只比对骨架契约文件。
+  for pair in "templates/README.md:agent-workflow/README.md" \
+              "templates/AGENTS.md.tmpl:agent-workflow/templates/AGENTS.md.tmpl"; do
+    src="${pair%%:*}"; dst="${pair#*:}"
+    [ -f "$root/$src" ] || continue
+    if [ ! -f "$root/$dst" ]; then
+      say "FAIL  生成副本缺失：$root/${dst}（源 $root/${src}）"
+      rc=1
+    elif ! cmp -s "$root/$src" "$root/$dst"; then
+      say "FAIL  生成副本漂移：$src ≠ $dst"
+      say "      → 同步 agent-workflow/ 对应文件，或运行 ./bin/awf init . --force --no-register 有意刷新（会覆盖 agent-workflow 侧改动）"
+      rc=1
+    else
+      say "ok    $src 与 $dst 副本一致"
+    fi
+  done
+  for wf in "$root"/templates/workflows/*.md; do
+    [ -f "$wf" ] || continue
+    b="$(basename "$wf")"
+    # DEV-184 彻底技能化：项目内 workflows/ 可选——无目录 = 技能化形态（细节在技能，
+    # AGENTS.md 路由内联状态机），不 FAIL；有目录 = 存量全量/骨架副本，比对模板防漂移。
+    if [ ! -f "$root/agent-workflow/workflows/$b" ]; then
+      if [ -d "$root/agent-workflow/workflows" ]; then
+        say "FAIL  生成副本缺失：$root/agent-workflow/workflows/${b}（源 ${wf}）"
+        rc=1
+      else
+        say "ok    workflows/ 未生成（技能化形态：细节在技能 agent-workflow-scaffold，AGENTS.md 路由即流程入口）"
+      fi
+    elif ! cmp -s "$wf" "$root/agent-workflow/workflows/$b"; then
+      say "FAIL  生成副本漂移：templates/workflows/$b ≠ agent-workflow/workflows/$b"
+      say "      → 同步 agent-workflow/ 对应文件，或运行 ./bin/awf init . --force --no-register 有意刷新（会覆盖 agent-workflow 侧改动）；技能化项目可删 workflows/ 目录（细节已在技能）"
+      rc=1
+    else
+      say "ok    templates/workflows/$b 与 agent-workflow/workflows/$b 副本一致"
+    fi
+  done
+  return "$rc"
+}
+
+cmd_check() {
+  local with_smoke=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --with-smoke) with_smoke=1; shift ;;
+      -h|--help)
+        say "用法：awf check [--with-smoke]" \
+             "  --with-smoke   check 全过后追加运行 bash test/smoke.sh（有则跑，无则跳过）"
+        return 0 ;;
+      *) die "未知参数：$1（用法：awf check [--with-smoke]）" ;;
+    esac
+  done
+
+  local root fails=0 out f
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
+  cd "$root"
+
+  local required="
+AGENTS.md
+agent-workflow/project.yaml
+agent-workflow/README.md
+agent-workflow/tasks/status.md
+agent-workflow/templates/AGENTS.md.tmpl
+agent-workflow/tasks/dev/todo/README.md
+agent-workflow/tasks/dev/current/README.md
+agent-workflow/tasks/dev/done/README.md
+agent-workflow/tasks/debug/todo/README.md
+agent-workflow/tasks/debug/current/README.md
+agent-workflow/tasks/debug/done/README.md
+agent-workflow/tasks/docs/todo/README.md
+agent-workflow/tasks/docs/current/README.md
+agent-workflow/tasks/docs/done/README.md
+"
+  for f in $required; do
+    if [ -f "$f" ]; then
+      say "ok    $f"
+    else
+      # 兼容旧形态：有对应该类型的旧大文件（tasks/<type>/<bucket>.md）时不算缺
+      if case "$f" in
+           agent-workflow/tasks/*/[a-z]*/README.md)
+             oldf="${f%/README.md}.md"
+             [ -f "$oldf" ] ;;
+           *) false ;;
+         esac; then
+        say "ok    ${f}（旧形态 ${f%/README.md}.md 存在；跑 awf status 自动迁移为目录）"
+      else
+        say "FAIL  缺少 $f"
+        fails=$((fails + 1))
+      fi
+    fi
+  done
+
+  local nb ne
+  nb="$(grep -c '<!-- awf:begin' AGENTS.md || true)"
+  ne="$(grep -c '<!-- awf:end' AGENTS.md || true)"
+  if [ "$nb" = "1" ] && [ "$ne" = "1" ]; then
+    say "ok    AGENTS.md 受控区块标记成对"
+  else
+    say "FAIL  AGENTS.md 受控区块标记不成对（begin $nb / end ${ne}）"
+    fails=$((fails + 1))
+  fi
+
+  local actual recorded
+  actual="$(hash_files agent-workflow/project.yaml agent-workflow/templates/AGENTS.md.tmpl)"
+  recorded="$(sed -n 's/.*<!-- awf:begin v[0-9][0-9]* digest:\([0-9a-f]\{8\}\).*/\1/p' AGENTS.md | head -n 1)"
+  if [ "$actual" = "$recorded" ]; then
+    say "ok    AGENTS.md 入口与 project.yaml 同步（digest: ${actual}）"
+  else
+    say "FAIL  AGENTS.md 入口已过期（记录: ${recorded:-无} / 实际: ${actual}）"
+    say "      → 运行 ~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap"
+    fails=$((fails + 1))
+  fi
+
+  # F6：生成副本漂移（kit 形态：项目根同时有 bin/awf 与 templates/）
+  local drift_out drift_n
+  drift_out="$(copy_drift_report "$root" || true)"
+  drift_n="$(printf '%s\n' "$drift_out" | grep -c '^FAIL' || true)"
+  [ "$drift_n" -gt 0 ] && fails=$((fails + drift_n))
+  printf '%s\n' "$drift_out" | grep -v '^$' || true
+
+  # F3：新形态（DEV-127）目录式单任务文件 tasks/<type>/{todo,current,done}/<ID>.md 逐个解析
+  local t2 f2 b2
+  for t2 in dev debug docs; do
+    for b2 in todo current done; do
+      while IFS= read -r f2; do
+        [ -f "$f2" ] || continue
+        # v1.0.0 补丁：目录式按桶传 mode——done/ 归档文件不强制工作态枚举/下一步
+        # （done 分支只校验归档表行；历史状态值如 完成/取消 在迁移归一后即为 done）
+        case "$b2" in
+          done)  m2="done" ;;
+          *)     m2="current" ;;
+        esac
+        out="$(check_current_file "$f2" "$t2" "$m2")" || true
+        if printf '%s' "$out" | grep -q 'FAIL'; then
+          fails=$((fails + 1))
+        fi
+        printf '%s\n' "$out" | grep -v '^$' || true
+      done < <(ledger_task_files "$t2" "$b2")
+    done
+  done
+
+  # F3b：旧形态兼容——含块的大 current/done（迁移前 / 手工维护项目）仍按旧规则解析
+  for f in agent-workflow/tasks/dev/current.md agent-workflow/tasks/debug/current.md agent-workflow/tasks/docs/current.md \
+           agent-workflow/tasks/dev/done.md agent-workflow/tasks/debug/done.md agent-workflow/tasks/docs/done.md; do
+    [ -f "$f" ] || continue
+    grep -q '^## \[' "$f" || continue
+    case "$f" in
+      */dev/*)   t="dev" ;;
+      */debug/*) t="debug" ;;
+      */docs/*)  t="docs" ;;
+    esac
+    case "$f" in
+      */done.md) m="done" ;;
+      *)         m="current" ;;
+    esac
+    out="$(check_current_file "$f" "$t" "$m")" || true
+    if printf '%s' "$out" | grep -q 'FAIL'; then
+      fails=$((fails + 1))
+    fi
+    printf '%s\n' "$out" | grep -v '^$' || true
+  done
+
+  # F2：status.md 新鲜度（账本改动后必须 awf status 刷新）
+  if out="$(check_status_fresh)"; then
+    printf '%s\n' "$out" | grep -v '^$' || true
+  else
+    fails=$((fails + 1))
+    printf '%s\n' "$out" | grep -v '^$' || true
+  fi
+
+  if [ "$fails" -eq 0 ]; then
+    say ""
+    say "全部检查通过"
+  else
+    say ""
+    say "发现 $fails 处问题"
+  fi
+
+  # DEV-117：smoke 并入日常门禁——默认只在末尾提示；--with-smoke 实际执行
+  if [ -f "test/smoke.sh" ]; then
+    say ""
+    say "提示：改动/发版后请运行 bash test/smoke.sh，或直接用 awf check --with-smoke 一并执行"
+    if [ "$with_smoke" -eq 1 ]; then
+      if [ "$fails" -gt 0 ]; then
+        say "skip  check 存在 $fails 处问题，跳过 smoke（先修 FAIL 再 --with-smoke）"
+      else
+        say "== 运行 bash test/smoke.sh（--with-smoke）=="
+        local smoke_rc=0
+        bash test/smoke.sh || smoke_rc=$?
+        if [ "$smoke_rc" -ne 0 ]; then
+          say "FAIL  冒烟测试未通过（退出码 ${smoke_rc}）；修复后重跑"
+          return 1
+        fi
+        say ""
+        say "ok    smoke 全绿（日常门禁通过）"
+      fi
+    fi
+  elif [ "$with_smoke" -eq 1 ]; then
+    say ""
+    say "skip  test/smoke.sh 不存在（项目内副本无冒烟测试；kit 形态才可 --with-smoke）"
+  fi
+
+  check_growth_hints   # DEV-124：经验/工具积累软提示（只提示不 FAIL）
+  return "$fails"
+}
+
+# ---------------------------------------------------------------- status
+
+cmd_status() {
+  local root block target f r
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+
+  block="agent-workflow/tasks/status.md.block.tmp"
+  target="agent-workflow/tasks/status.md"
+
+  # DEV-127：先迁移旧账本（若有含块大文件），再重生成三视图，最后刷新 status.md
+  migrate_ledger_files
+  render_ledger_readmes
+
+  status_build_block "$block"
+
+  if [ ! -f "$target" ]; then
+    {
+      printf '# 全局状态摘要\n\n'
+      printf '<!-- awf:status:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:status:end -->\n'
+    } > "$target"
+  elif grep -q 'awf:status:begin' "$target"; then
+    awfk -v bf="$block" '
+      BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
+      /<!-- awf:status:begin/ { printf "<!-- awf:status:begin -->\n"; printf "%s", blk; skip = 1; next }
+      /<!-- awf:status:end/   { skip = 0; printf "<!-- awf:status:end -->\n"; next }
+      !skip { print }
+    ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+  else
+    {
+      printf '\n<!-- awf:status:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:status:end -->\n'
+    } >> "$target"
+  fi
+
+  rm -f "$block"
+  say "已更新 $target"
+}
+
+# ---------------------------------------------------------------- 发版装配
+
+release_usage() {
+  cat <<'EOF'
+用法：awf release-prep <X.Y.Z> [--root 目录] [--dry-run]
+
+一键发版装配（在 kit 仓库根运行）：
+  0. 检查生成副本漂移（bin/awf / templates/ ↔ agent-workflow/），有漂移即拒绝
+  1. ./bin/awf init . --force --no-register + bootstrap 刷新生成副本与 AGENTS 入口
+  2. 在 agent-workflow/tasks/dev/current/ 写入 release-prep 任务文件（release_write_current）
+  3. 改版本锚点（project.yaml 的 version_file 指向的文件，默认根 VERSION）；把 CHANGELOG.md 顶部 ## [Unreleased] 改为 ## [<X.Y.Z>] - 今天
+  4. 跑 ./agent-workflow/check_workflow.sh 与 bash test/smoke.sh
+  5. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status 刷新 status.md，并把任务文件归档到 dev/done/（状态 done + 完成日期）
+  6. 打印下一步 git add/commit/tag/push 命令与建议 commit 消息
+
+--dry-run   只打印将执行的动作，不改文件、不跑命令
+说明：本命令不自动 commit / tag / push；推送必须由用户明确触发。
+EOF
+}
+
+release_version_ok() {
+  case "$1" in
+    *[!0-9.]*|.*|*.|*..*|"") return 1 ;;
+  esac
+  printf '%s' "$1" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+}
+
+release_next_dev_id() {
+  local max
+  max="$(cat "$ROOT"/agent-workflow/tasks/dev/todo/*.md "$ROOT"/agent-workflow/tasks/dev/current/*.md "$ROOT"/agent-workflow/tasks/dev/done/*.md 2>/dev/null \
+    | grep -o 'DEV-[0-9][0-9]*' \
+    | sed 's/DEV-//; s/^0*//' \
+    | sort -n | tail -n 1 || true)"
+  [ -n "$max" ] || max=0
+  printf 'DEV-%03d' "$((max + 1))"
+}
+
+release_current_id() {
+  # DEV-127：扫 current/ 目录任务文件（非 done 且标题含 release-prep <ver>）
+  local f
+  for f in "$ROOT"/agent-workflow/tasks/dev/current/[A-Z-]*.md; do
+    [ -f "$f" ] || continue
+    if head -n 1 "$f" | grep -q "release-prep $VERSION"; then
+      printf '%s' "$(task_id "$f")"
+      return 0
+    fi
+  done
+  return 0
+}
+
+release_done_id() {
+  local f
+  for f in "$ROOT"/agent-workflow/tasks/dev/done/[A-Z-]*.md; do
+    [ -f "$f" ] || continue
+    if head -n 1 "$f" | grep -q "release-prep $VERSION"; then
+      printf '%s' "$(task_id "$f")"
+      return 0
+    fi
+  done
+  return 0
+}
+
+release_write_current() {
+  # DEV-127：写入 tasks/dev/current/<TASK_ID>.md（README 由 awf status 生成）
+  local target="$ROOT/agent-workflow/tasks/dev/current/$TASK_ID.md"
+  if [ -f "$target" ]; then
+    say "账本：复用已有任务文件 ${TASK_ID}（release-prep ${VERSION}）"
+    return 0
+  fi
+  {
+    printf '## [%s] release-prep %s\n\n' "$TASK_ID" "$VERSION"
+    printf '| 字段 | 内容 |\n|------|------|\n'
+    printf '| 优先级 | P1 |\n'
+    printf '| 状态 | active |\n'
+    printf '| Owner | agent |\n'
+    printf '| 协作模式 | single |\n'
+    printf '| 来源任务 | 用户直接触发 |\n'
+    printf '| 修改范围 | 版本锚点（project.yaml 的 version_file，默认根 VERSION）/ CHANGELOG.md / 生成副本 / 账本 |\n'
+    printf '| 分支/工作区 | N/A |\n'
+    printf '| 依赖 | 无 |\n'
+    printf '| 最近更新 | %s |\n\n' "$(today)"
+    printf '### 目标\n一键发版装配 %s。\n\n' "$VERSION"
+    printf '### 验收标准\n- [ ] ./agent-workflow/check_workflow.sh 通过\n- [ ] bash test/smoke.sh 通过\n\n'
+    printf '### 下一步\n执行 release-prep 打印的 git add/commit/tag/push 命令（由人触发）。\n\n'
+    printf '### Execution Log\n- %s · created · @agent · 任务建档（release-prep %s）\n' "$(now)" "$VERSION"
+  } > "$target"
+  say "账本：$target 写入 ${TASK_ID}（release-prep ${VERSION}）"
+}
+
+release_archive() {
+  # DEV-127：归档 = 移到 done/ 目录 + 状态改 done + 完成日期（README 由 awf status 重生成）
+  local src="$ROOT/agent-workflow/tasks/dev/current/$TASK_ID.md"
+  local dst="$ROOT/agent-workflow/tasks/dev/done/$TASK_ID.md"
+  if [ -f "$src" ]; then
+    if [ -n "$(release_done_id)" ]; then
+      say "账本：${TASK_ID} 已有 release-prep ${VERSION} 归档记录（幂等跳过）"
+      return 0
+    fi
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+    task_set_status_done "$dst" "$(today)"
+    say "账本：已归档 ${TASK_ID}（→ done/，状态=done，完成日期 $(today)）"
+  elif [ -f "$dst" ]; then
+    say "账本：${TASK_ID} 已在 done/（幂等跳过）"
+  else
+    say "账本：任务文件 ${TASK_ID} 不存在，跳过归档（release-prep 未建账？）"
+  fi
+}
+
+# 把任务文件状态字段改为 done，并补/更新完成日期行
+task_set_status_done() {
+  local f="$1" date="$2"
+  awk -v d="$date" '
+    /^\| *状态 *\|/ { sub(/\|[^\|]*\|$/, "| done |"); print; next }
+    /^\| *完成日期 *\|/ { found = 1; printf "| 完成日期 | %s |\n", d; next }
+    { print }
+    END { if (!found) printf "| 完成日期 | %s |\n", d }
+  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+}
+
+release_run() {
+  say "+ $*"
+  ( cd "$ROOT" && "$@" ) || die "步骤失败：$*"
+}
+
+cmd_release_prep() {
+  local version="" root="" dry_run=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --root)
+        [ $# -ge 2 ] || { release_usage >&2; die "缺少 --root 的目录参数"; }
+        root="$2"; shift 2 ;;
+      --dry-run) dry_run=1; shift ;;
+      -h|--help) release_usage; return 0 ;;
+      --*) release_usage >&2; die "未知选项：$1" ;;
+      *)
+        [ -z "$version" ] || { release_usage >&2; die "只能指定一个版本号"; }
+        version="$1"; shift ;;
+    esac
+  done
+
+  if [ -z "$version" ]; then
+    release_usage >&2
+    die "缺少版本号（用法：awf release-prep <X.Y.Z>）"
+  fi
+  if ! release_version_ok "$version"; then
+    release_usage >&2
+    die "版本号格式错误：${version}（应为 X.Y.Z）"
+  fi
+  VERSION="$version"
+
+  if [ -n "$root" ]; then
+    [ -d "$root" ] || die "目录不存在：$root"
+    ROOT="$(cd "$root" && pwd)"
+  else
+    ROOT="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  fi
+  [ -f "$ROOT/agent-workflow/project.yaml" ] || die "不是 agent-workflow 项目：$ROOT"
+  CURRENT="$ROOT/agent-workflow/tasks/dev/current.md"
+  DONE="$ROOT/agent-workflow/tasks/dev/done.md"
+
+  TASK_ID="$(release_done_id)"
+  if [ -z "$TASK_ID" ]; then
+    TASK_ID="$(release_current_id)"
+  fi
+  if [ -z "$TASK_ID" ]; then
+    TASK_ID="$(release_next_dev_id)"
+  fi
+
+  # 版本锚点路径在 dry-run 与执行两处共用（DEV-145）：读 project.yaml 的 version_file，
+  # 默认仓库根 VERSION；锚点不得放进 clang 头文件搜索路径（macOS IL2CPP 撞名，见 project_version_file）
+  local VF
+  VF="$(project_version_file "$ROOT")"
+
+  if [ "$dry_run" -eq 1 ]; then
+    say "[dry-run] cd $ROOT"
+    say "[dry-run] 检查生成副本漂移（bin/awf / templates/ ↔ agent-workflow/，有漂移即拒绝）"
+    say "[dry-run] ./bin/awf init . --force --no-register"
+    say "[dry-run] ./bin/awf bootstrap"
+    if [ -n "$(release_done_id)" ]; then
+      say "[dry-run] 账本：release-prep ${version} 已归档（${TASK_ID}），跳过写入"
+    else
+      say "[dry-run] 账本：写 $ROOT/agent-workflow/tasks/dev/current/$TASK_ID.md [${TASK_ID}] release-prep ${version}，校验后归档到 dev/done/"
+    fi
+    say "[dry-run] 写版本锚点 ${VF} = ${version}（路径 = project.yaml 的 version_file，默认仓库根 VERSION）"
+    if [ -f "$ROOT/CHANGELOG.md" ] && grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
+      say "[dry-run] CHANGELOG: ## [Unreleased] → ## [$version] - $(today)"
+    else
+      say "[dry-run] CHANGELOG: 未找到 ## [Unreleased]，将提示手动处理"
+    fi
+    say "[dry-run] ./agent-workflow/check_workflow.sh"
+    say "[dry-run] bash test/smoke.sh"
+    say "[dry-run] 归档任务文件到 dev/done/（状态 done + 完成日期）"
+    say "[dry-run] $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status"
+    say "[dry-run] 下一步（不会执行）：git add -A && git commit -m \"release: v${version}（${TASK_ID}）\" && git tag -a v${version} -m \"v${version}\" && git push origin main v$version"
+    return 0
+  fi
+
+  say "== release-prep ${version}（${TASK_ID}）=="
+
+  # a0. 生成副本漂移保护（F6）：先检测再覆盖，禁止静默回滚 agent-workflow 侧改动
+  local drift_out
+  drift_out="$(copy_drift_report "$ROOT" || true)"
+  if printf '%s\n' "$drift_out" | grep -q '^FAIL'; then
+    say ""
+    say "== 检测到生成副本漂移，拒绝覆盖 agent-workflow 侧改动 =="
+    printf '%s\n' "$drift_out" | grep '^FAIL'
+    die "请先同步（或运行 ./bin/awf init . --force --no-register 有意刷新，会覆盖 agent-workflow 侧改动）后再执行 release-prep"
+  fi
+
+  # a. 刷新生成副本与 AGENTS 入口
+  release_run "$ROOT/bin/awf" init . --force --no-register
+  release_run "$ROOT/bin/awf" bootstrap
+
+  # b. 账本（current.md；校验通过后归档）
+  if [ -n "$(release_done_id)" ]; then
+    say "账本：release-prep ${version} 已归档（${TASK_ID}），跳过写入"
+  else
+    release_write_current
+  fi
+
+  # c. 版本与 CHANGELOG
+  if [ ! -f "$ROOT/CHANGELOG.md" ]; then
+    die "缺少 CHANGELOG.md，无法更新版本条目（请手动补）"
+  fi
+  mkdir -p "$(dirname "$VF")"
+  printf '%s\n' "$version" > "$VF"
+  say "已写版本锚点 ${VF}=$version"
+  if grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
+    awfk -v ver="$version" -v day="$(today)" '
+      !done && /^## \[Unreleased\]/ {
+        print "## [" ver "] - " day
+        done = 1
+        next
+      }
+      { print }
+    ' "$ROOT/CHANGELOG.md" > "$ROOT/CHANGELOG.md.tmp" && mv "$ROOT/CHANGELOG.md.tmp" "$ROOT/CHANGELOG.md"
+    say "CHANGELOG：## [Unreleased] → ## [$version] - $(today)"
+  elif grep -q "^## \[${version}\]" "$ROOT/CHANGELOG.md"; then
+    say "CHANGELOG：已有 ## [$version] 条目（幂等跳过）"
+  else
+    warn "CHANGELOG 没有 ## [Unreleased]，也没有 ## [$version]；请手动补版本条目"
+  fi
+
+  # c2. 账本块刚写入 current.md → 先刷新 status.md，避免「status.md 新鲜度」门禁在 d 误拦截
+  #     （F1-F3 门禁加入后 release-prep 的顺序修复；已归档的幂等重跑无需刷新）
+  if [ -z "$(release_done_id)" ]; then
+    release_run $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status
+  fi
+
+  # d. 校验（失败即停，账本保留在 current.md）
+  release_run ./agent-workflow/check_workflow.sh
+  release_run bash test/smoke.sh
+
+  # e. 先归档再刷新 status，确保 status.md 反映最终状态
+  release_archive
+  release_run $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf status
+
+  # f. 下一步（只提示，不执行）
+  say ""
+  say "下一步（未自动执行；push 需用户明确触发）："
+  say "  git add -A"
+  say "  git commit -m \"release: v${version}（${TASK_ID}）\""
+  say "  git tag -a v${version} -m \"v${version}\""
+  say "  git push origin main v$version"
+  say ""
+  say "建议 commit 消息：release: v${version}（${TASK_ID}）"
+  say "一键命令：git add -A && git commit -m \"release: v${version}（${TASK_ID}）\" && git tag -a v${version} -m \"v${version}\" && git push origin main v$version"
+}
+
+# ---------------------------------------------------------------- upgrade
+
+upgrade_usage() {
+  cat <<'EOF'
+用法：awf upgrade [目录] [--dry-run] [--force] [--slim]
+
+升级已有项目的 agent-workflow 框架到当前骨架版本（一等操作，取代“自行推断
+拷贝哪些文件”的隐式流程）。在 kit 根目录运行本命令（项目内副本无 templates
+源，不能执行 upgrade）：
+
+  1. 复制框架文件到目标 agent-workflow/：
+     templates/AGENTS.md.tmpl、README.md、
+     check_workflow.sh 兼容入口（自定义门禁默认保留，见下）
+  2. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap  刷新 AGENTS.md 受控区块（区块外保留）
+  3. $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check      校验（退出码 = 失败项数量）
+
+DEV-205 双版本模型：升级判定 = 骨架版本（agent-workflow/FRAMEWORK_VERSION）差量——
+目标骨架版与源相同 → 默认跳过（打印「骨架已最新」后退出，不复制、不跑 bootstrap/check，
+--force 可强制刷新框架文件）；不同/缺失 → 复制骨架 + 登记目标骨架版。技能更新只在
+技能实体（install.sh 重装），不需升级项目；upgrade 不再把 kit 技能版写目标版本锚点。
+
+v1.2.0 彻底技能化：完整流程细节在技能 agent-workflow-scaffold（skills/ 各流程技能），
+项目内无 workflows/ 副本——AGENTS.md 路由内联状态机 + 强制加载技能即流程入口。
+upgrade 只同步骨架契约（bin/awf/tmpl/锚点）；存量项目带 workflows/ 副本时，
+用 --slim 清理（细节已在技能，副本不再需要）。
+
+  保留清单（一律不动）：agent-workflow/project.yaml、tasks/**（账本历史）、
+  memory/**、tools/**、AGENTS.md 受控区块外内容。
+
+--dry-run   只打印将变更/保留的文件，不改写任何文件
+--force     覆盖目标自定义的 check_workflow.sh（默认：与标准 3 行兼容入口
+            不同时保留原文件并告警，避免静默丢失项目自定义门禁）；骨架相同
+            时强制刷新框架文件
+
+说明：升级不 bump 版本号、不改写账本内容；旧账本格式问题（归档块缺「状态」
+字段、旧英文表头 | Status |）由 check 输出修复指引。只本地 commit，不 push。
+EOF
+}
+
+cmd_upgrade() {
+  local target="." dry_run=0 force=0 slim=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry_run=1; shift ;;
+      --force)   force=1; shift ;;
+      --slim)    slim=1; shift ;;
+      -h|--help) upgrade_usage; return 0 ;;
+      -*)        die "未知参数：$1（用法见 awf upgrade --help）" ;;
+      *)         target="$1"; shift ;;
+    esac
+  done
+
+  # 只有 kit 形态的 awf 才有 templates 源；项目内副本不能当升级源
+  # DEV-184 技能化：模板检查改为要求 AGENTS.md.tmpl 存在（workflows/ 已退役，细节在技能）
+  if [ ! -f "$TPL_DIR/README.md" ] || [ ! -f "$TPL_DIR/AGENTS.md.tmpl" ]; then
+    die "当前 awf 是项目内副本，不能执行 upgrade；请用 kit 根目录的 bin/awf（如 ./bin/awf upgrade <目标项目>）"
+  fi
+
+  # 先校验目标确为 agent-workflow 项目，再 mkdir/cd，避免失败残留空目录
+  if [ ! -f "$target/agent-workflow/project.yaml" ]; then
+    die "目标不是 agent-workflow 项目：${target}（没有 agent-workflow/project.yaml；新项目请用 awf init）"
+  fi
+  mkdir -p "$target"
+  target="$(cd "$target" && pwd)"
+  local awf_dir="$target/agent-workflow"
+
+  say "== awf upgrade $target =="
+
+  # DEV-205 双版本模型：升级判定 = 骨架版本（agent-workflow/FRAMEWORK_VERSION）差量，
+  # 不再是技能版本。技能版本（agent-workflow/VERSION，发版即 bump，插件显示、技能实体
+  # 安装消费）不参与升级判定，upgrade 也不再把它写目标 version_file 锚点——技能更新只
+  # 发生在技能实体（install.sh 重装），无需项目升级。骨架源读技能实体（安装后的唯一
+  # 事实源），未安装时回退 kit 仓库 agent-workflow/FRAMEWORK_VERSION。
+  local KFF cur_kff
+  KFF="$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION"
+  [ -f "$KFF" ] || KFF="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
+  cur_kff="$(project_framework_version "$target")"
+
+  # 骨架已最新：dry-run 与执行均跳过（不复制、不写锚点、不跑 bootstrap/check）；--force 强刷
+  if [ "$force" -eq 0 ] && [ -f "$KFF" ] && [ -n "$cur_kff" ] && [ "$cur_kff" = "$(cat "$KFF")" ]; then
+    say "骨架已最新 v$(cat "$KFF")（技能更新只在技能实体 install.sh，无需项目升级；--force 可强制刷新框架文件）"
+    return 0
+  fi
+
+  local item src dst
+  # DEV-186 工具技能化：变更清单不再含 bin/awf、bin/awf-dispatch（工具在技能
+  # agent-workflow-scaffold 的 bin/，符号链接一处维护）；只同步骨架契约文件。
+  for item in \
+      "templates/AGENTS.md.tmpl:$TPL_DIR/AGENTS.md.tmpl" \
+      "templates/pre-commit:$TPL_DIR/pre-commit" \
+      "README.md:$TPL_DIR/README.md"; do
+    dst="$awf_dir/${item%%:*}"; src="${item#*:}"
+    [ -f "$src" ] || continue
+    if [ "$dry_run" -eq 1 ]; then
+      say "  将覆盖 ${dst}（源 ${src}）"
+      continue
+    fi
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+    case "$item" in bin/*) chmod +x "$dst" ;; esac
+  done
+
+  local wf
+  # DEV-184 彻底技能化：项目内不再有 workflows/ 目录（细节在技能 agent-workflow-scaffold
+  # 的 skills/ 各流程技能，AGENTS.md 路由内联状态机即流程入口）。upgrade 不再同步 workflows；
+  # --slim 清理存量项目的全量/骨架副本（细节已在技能，副本不再需要），无副本则跳过。
+  if [ -d "$awf_dir/workflows" ]; then
+    if [ "$slim" -eq 1 ]; then
+      if [ "$dry_run" -eq 1 ]; then
+        say "  将删除 $awf_dir/workflows/（存量副本；细节已在技能，AGENTS.md 路由即流程入口）"
+      else
+        rm -rf "$awf_dir/workflows"
+        say "  已删除 $awf_dir/workflows/（技能化迁移完成：细节在技能，AGENTS.md 路由即流程入口）"
+      fi
+    else
+      say "  提示：$awf_dir/workflows/ 为存量副本（技能化后不再需要），可用 awf upgrade --slim 清理（细节已在技能）"
+    fi
+  fi
+
+  # DEV-186 工具技能化：--slim 清理存量项目内复制的 bin/awf、bin/awf-dispatch 副本
+  # （工具在技能 agent-workflow-scaffold/bin/，符号链接一处维护；项目内副本不再需要）。
+  for tool in bin/awf bin/awf-dispatch; do
+    if [ -f "$awf_dir/$tool" ]; then
+      if [ "$slim" -eq 1 ]; then
+        if [ "$dry_run" -eq 1 ]; then
+          say "  将删除 $awf_dir/$tool（存量工具副本；工具在技能 bin/）"
+        else
+          rm -f "$awf_dir/$tool"
+          say "  已删除 $awf_dir/$tool（工具技能化迁移完成：调用技能 ~/.dsh/skills/agent-workflow-scaffold/bin/awf）"
+        fi
+      else
+        say "  提示：$awf_dir/$tool 为存量工具副本（技能化后不再需要），可用 awf upgrade --slim 清理"
+      fi
+    fi
+  done
+
+  # check_workflow.sh：标准 3 行兼容入口直接覆盖；自定义门禁默认保留（--force 覆盖）
+  local shim="$awf_dir/check_workflow.sh" shim_std shim_cur
+  shim_std="$(printf '%s\n' '#!/bin/sh' '# 兼容入口（DEV-186 工具技能化）：等价于技能 agent-workflow-scaffold 的 bin/awf check' 'exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"')"
+  shim_cur="$(cat "$shim" 2>/dev/null || true)"
+  if [ "$shim_cur" != "$shim_std" ] && [ "$force" -eq 0 ]; then
+    if [ "$dry_run" -eq 1 ]; then
+      say "  将保留 ${shim}（与标准兼容入口不同，疑似项目自定义门禁；--force 才覆盖）"
+    else
+      warn "check_workflow.sh 与标准兼容入口不同（疑似项目自定义门禁），已保留原文件；确认可替换时用 --force"
+    fi
+  else
+    if [ "$dry_run" -eq 1 ]; then
+      say "  将覆盖 ${shim}（标准兼容入口）"
+    else
+      # DEV-188 修复：覆盖分支与 shim_std 一致——写技能路径 shim（此前误写旧内容指向已删的 bin/awf）
+      printf '%s\n' '#!/bin/sh' '# 兼容入口（DEV-186 工具技能化）：等价于技能 agent-workflow-scaffold 的 bin/awf check' 'exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"' > "$shim"
+      chmod +x "$shim"
+    fi
+  fi
+
+  if [ "$dry_run" -eq 1 ]; then
+    say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
+    if [ -f "$KFF" ]; then
+      if [ -n "$cur_kff" ]; then
+        say "  将写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = $cur_kff）"
+      else
+        say "  将写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（迁移补写：存量项目未登记骨架版本）"
+      fi
+    fi
+    say "  将运行：$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap（刷新 AGENTS.md 入口；工具在技能，项目内无副本）"
+    say "  将运行：$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check（校验；退出码 = 失败项数量）"
+    return 0
+  fi
+
+  say ""
+  say "保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
+  say ""
+
+  # DEV-205：登记目标骨架版本（落后升级 / 存量迁移补写；相同已在上面跳过，--force 强刷也走到这里）。
+  # 固定路径 agent-workflow/FRAMEWORK_VERSION（不走 version_file、不进 project.yaml 键，
+  # 与锚点铁律同位置规范）；技能版本锚点（version_file 指向）由项目自身发版流程维护，upgrade 不写。
+  if [ -f "$KFF" ]; then
+    cp "$KFF" "$target/agent-workflow/FRAMEWORK_VERSION"
+    if [ -n "$cur_kff" ]; then
+      say "已写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = $cur_kff）"
+    else
+      say "已写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（迁移补写：存量项目未登记骨架版本）"
+    fi
+  fi
+
+  ( cd "$target" && $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap ) || die "bootstrap 失败：$target（技能工具不可用，请先运行 ./install.sh 安装技能）"
+  say "已刷新 AGENTS.md 入口（bootstrap）"
+
+  local rc=0
+  ( cd "$target" && $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf check ) || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    say ""
+    say "升级完成：${target}（check 全部通过）"
+  else
+    say ""
+    say "升级完成：${target}（check 发现 $rc 处问题，见上方 FAIL；旧账本迁移问题按指引修复后重跑 check）"
+  fi
+  [ "$shim_cur" != "$shim_std" ] && [ "$force" -eq 0 ] \
+    && warn "check_workflow.sh 为项目自定义门禁（未覆盖）；请另行确认其通过"
+  say "后续：目标项目只本地 commit（消息含任务 ID），禁止 push"
+  if [ -d "$target/.git" ] && [ -f "$awf_dir/templates/pre-commit" ]; then
+    say "提示：可用 $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf install-hooks 安装 git pre-commit 钩子（提交前自动跑 check，未过即拒绝）"
+  fi
+  return "$rc"
+}
+
+# ---------------------------------------------------------------- install-hooks
+
+install_hooks_usage() {
+  cat <<'EOF'
+用法：awf install-hooks [--check | --uninstall]
+
+git pre-commit 钩子管理（DEV-117 日常门禁）：提交前自动运行
+./agent-workflow/check_workflow.sh，非零即拒绝提交并输出中文提示。
+
+  --check      只检查状态（已安装且一致 / 已安装但过期 / 未安装），不改写任何文件
+  --uninstall  删除已安装的钩子
+  默认         安装：钩子已与模板一致时跳过，否则覆盖为模板版本
+
+模板来源：kit 根 templates/pre-commit，或项目 agent-workflow/templates/pre-commit
+（由 awf upgrade 复制进项目）。需在 git 仓库内的 agent-workflow 项目中执行。
+钩子不入库，不影响其他协作者；只检查、不改写文件、不 push。
+EOF
+}
+
+cmd_install_hooks() {
+  local action="install"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check)     action="check"; shift ;;
+      --uninstall) action="uninstall"; shift ;;
+      -h|--help)   install_hooks_usage; return 0 ;;
+      *) die "未知参数：$1（用法见 awf install-hooks --help）" ;;
+    esac
+  done
+
+  local root tpl hook
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
+  [ -d "$root/.git" ] || die "不是 git 仓库：${root}（钩子需要 .git/hooks/pre-commit）"
+
+  tpl="$root/agent-workflow/templates/pre-commit"
+  if [ ! -f "$tpl" ] && [ -f "$TPL_DIR/pre-commit" ]; then
+    tpl="$TPL_DIR/pre-commit"   # kit 形态兜底（项目副本 upgrade 后通常已有模板）
+  fi
+  [ -f "$tpl" ] || die "找不到钩子模板：$TPL_DIR/pre-commit（kit）或 agent-workflow/templates/pre-commit（先 awf upgrade）"
+
+  hook="$root/.git/hooks/pre-commit"
+  case "$action" in
+    check)
+      if [ -f "$hook" ] && cmp -s "$hook" "$tpl"; then
+        say "ok    钩子已安装且与模板一致：$hook"
+      elif [ -f "$hook" ]; then
+        say "STALE 钩子存在但与模板不一致：${hook}（重跑 install-hooks 可覆盖为模板版本）"
+      else
+        say "NONE  未安装钩子：${hook}（运行 awf install-hooks 安装）"
+      fi
+      return 0
+      ;;
+    uninstall)
+      if [ -f "$hook" ]; then
+        rm -f "$hook"
+        say "已卸载钩子：$hook"
+      else
+        say "提示：钩子不存在，无需卸载"
+      fi
+      return 0
+      ;;
+  esac
+
+  if [ -f "$hook" ] && cmp -s "$hook" "$tpl"; then
+    say "ok    钩子已是最新，跳过安装：$hook"
+    return 0
+  fi
+  mkdir -p "$root/.git/hooks"
+  cp "$tpl" "$hook"
+  chmod +x "$hook"
+  say "已安装钩子：$hook"
+  say "效果：git commit 前自动跑 ./agent-workflow/check_workflow.sh，未过即拒绝并提示；确认跳过可用 git commit --no-verify"
+}
+
+# ---------------------------------------------------------------- 全局索引
+
+AGENTS_HOME="${DSH_AGENTS_HOME:-$HOME/.agents}"
+REGISTRY="$AGENTS_HOME/projects.tsv"
+REGISTRY_INDEX="$AGENTS_HOME/AGENTS.md"
+# 全局索引写锁（详见 registry_lock）：register / bootstrap 并发时串行化读改写
+REGISTRY_LOCK="$AGENTS_HOME/.awf-registry.lock"
+REGISTRY_LOCK_MODE=""          # 当前锁类型：flock | mkdir（空 = 未持有）
+REGISTRY_LOCK_TRY=100          # 获取锁的重试上限（次）
+REGISTRY_LOCK_SLEEP=0.3        # 重试间隔（秒）→ 总等待约 30s
+REGISTRY_LOCK_STALE=30         # mkdir 锁陈旧回收阈值（秒）
+
+trim() {
+  printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+# 文件 mtime（epoch 秒）：Darwin 用 stat -f，其他平台用 stat -c
+file_mtime() {
+  local out
+  if [ "$(uname -s)" = "Darwin" ]; then
+    out="$(stat -f %m "$1" 2>/dev/null)" || out=0
+  else
+    out="$(stat -c %Y "$1" 2>/dev/null)" || out=0
+  fi
+  [ -n "$out" ] || out=0
+  printf '%s' "$out"
+}
+
+# 获取全局索引写锁：优先 flock（内核在进程退出时自动释放；Linux 默认路径）。
+# 不可用时退化为 mkdir 原子自旋锁（macOS 默认路径），带陈旧锁超时回收
+# （持有者超过 REGISTRY_LOCK_STALE 秒未释放视为崩溃，可回收）。
+# 持锁期间串行化对 REGISTRY / REGISTRY_INDEX 的全部读改写；进程退出由
+# EXIT trap 兜底释放。
+registry_lock() {
+  mkdir -p "$AGENTS_HOME"
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$REGISTRY_LOCK"
+    local i=0
+    while ! flock -n 9; do
+      i=$((i + 1))
+      if [ "$i" -ge "$REGISTRY_LOCK_TRY" ]; then
+        die "等待全局索引锁超时（flock 重试 ${REGISTRY_LOCK_TRY} 次）：$REGISTRY_LOCK"
+      fi
+      sleep "$REGISTRY_LOCK_SLEEP"
+    done
+    REGISTRY_LOCK_MODE=flock
+  else
+    local i=0
+    while ! mkdir "$REGISTRY_LOCK" 2>/dev/null; do
+      i=$((i + 1))
+      if [ -d "$REGISTRY_LOCK" ]; then
+        # 陈旧锁回收：超过阈值视为持有进程已崩溃/挂起，可安全抢占
+        if [ "$(($(date +%s) - $(file_mtime "$REGISTRY_LOCK")))" -gt "$REGISTRY_LOCK_STALE" ]; then
+          rmdir "$REGISTRY_LOCK" 2>/dev/null || true
+          continue
+        fi
+      fi
+      if [ "$i" -ge "$REGISTRY_LOCK_TRY" ]; then
+        die "等待全局索引锁超时（mkdir 自旋 ${REGISTRY_LOCK_TRY} 次）：$REGISTRY_LOCK"
+      fi
+      sleep "$REGISTRY_LOCK_SLEEP"
+    done
+    REGISTRY_LOCK_MODE=mkdir
+  fi
+  trap 'registry_unlock' EXIT
+}
+
+# 释放全局索引写锁（幂等；进程退出时由 EXIT trap 兜底调用）
+registry_unlock() {
+  if [ "$REGISTRY_LOCK_MODE" = flock ]; then
+    flock -u 9 2>/dev/null || true
+    exec 9>&- 2>/dev/null || true
+  elif [ "$REGISTRY_LOCK_MODE" = mkdir ]; then
+    rmdir "$REGISTRY_LOCK" 2>/dev/null || true
+  fi
+  REGISTRY_LOCK_MODE=""
+}
+
+# 重建 AGENTS.md 受控区块；write_registration 在持锁状态下调用。
+# 独立调用时也会自行取锁，保证该入口同样被串行化保护。
+write_registry_index() {
+  local block="$AGENTS_HOME/.projects.block.tmp"
+  local hold=0
+  if [ -z "$REGISTRY_LOCK_MODE" ]; then
+    registry_lock
+    hold=1
+  fi
+  mkdir -p "$AGENTS_HOME"
+  {
+    printf '## 项目索引（awf 生成，勿手改）\n\n'
+    printf '| 项目ID | 别名 | 路径 | 入口 |\n'
+    printf '|--------|------|------|------|\n'
+    while IFS='|' read -r rid ralias rpath rentry; do
+      [ -n "$(trim "$rid")" ] || continue
+      case "$(trim "$rid")" in \#*) continue ;; esac
+      printf '| %s | %s | %s | %s |\n' \
+        "$(trim "$rid")" "$(trim "$ralias")" "$(trim "$rpath")" "$(trim "$rentry")"
+    done < "$REGISTRY"
+    printf '\n## 命中后\n\n'
+    printf '1. 切到表中路径，读该仓库的 `AGENTS.md`\n'
+    printf '2. 只读定位可直接进行；要写入请把该目录设为会话工作区\n'
+    printf '3. 路径或别名变化后，在该项目内重跑 `awf register`\n'
+  } > "$block"
+
+  if [ ! -f "$REGISTRY_INDEX" ]; then
+    {
+      printf '# 全局项目索引\n\n'
+      printf '> 由 `awf register` 维护，只放指针，不写项目细节。\n\n'
+      printf '<!-- awf:projects:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:projects:end -->\n'
+    } > "$REGISTRY_INDEX"
+  elif grep -q 'awf:projects:begin' "$REGISTRY_INDEX"; then
+    awfk -v bf="$block" '
+      BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
+      /<!-- awf:projects:begin/ { printf "<!-- awf:projects:begin -->\n"; printf "%s", blk; skip = 1; next }
+      /<!-- awf:projects:end/   { skip = 0; printf "<!-- awf:projects:end -->\n"; next }
+      !skip { print }
+    ' "$REGISTRY_INDEX" > "$REGISTRY_INDEX.tmp" && mv "$REGISTRY_INDEX.tmp" "$REGISTRY_INDEX"
+  else
+    {
+      printf '\n<!-- awf:projects:begin -->\n'
+      cat "$block"
+      printf '<!-- awf:projects:end -->\n'
+    } >> "$REGISTRY_INDEX"
+  fi
+  rm -f "$block"
+  if [ "$hold" -eq 1 ]; then
+    registry_unlock
+  fi
+}
+
+# 使用当前 P_* 与 ${PWD}；调用前必须已 load_project 且 cd 到项目根。
+# 全程持锁：锁内重新读取当前 REGISTRY、按 P_ID 合并本行后原子替换，
+# 再重建 AGENTS.md 受控区块，杜绝并发 register/bootstrap 的丢失更新。
+write_registration() {
+  registry_lock
+  mkdir -p "$AGENTS_HOME"
+  [ -f "$REGISTRY" ] || : > "$REGISTRY"
+  grep -v -F "$P_ID |" "$REGISTRY" > "$REGISTRY.tmp" || true
+  printf '%s | %s | %s | AGENTS.md\n' "$P_ID" "$P_ALIASES" "$PWD" >> "$REGISTRY.tmp"
+  mv "$REGISTRY.tmp" "$REGISTRY"
+  write_registry_index
+  registry_unlock
+}
+
+is_registered() {
+  [ -f "$REGISTRY" ] && grep -F -q "$P_ID |" "$REGISTRY"
+}
+
+cmd_register() {
+  local root role
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中"
+  cd "$root"
+  load_project "agent-workflow/project.yaml"
+
+  write_registration
+  say "已登记：$P_ID → $root"
+  say "全局索引：$REGISTRY_INDEX"
+  role="$(yaml_get role "agent-workflow/project.yaml")"
+  if [ -n "$role" ]; then
+    say "已登记 worker 名牌：$role"
+  else
+    say "提示：可在此项目 project.yaml 添加 role 字段作为 worker 名牌（一句话自述；router 检索工作群时可见）"
+  fi
+}
+
+cmd_projects() {
+  [ -f "$REGISTRY" ] || die "尚未登记任何项目（在项目内运行 $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf register）"
+  printf '| 项目ID | 别名 | 路径 | 角色 |\n|--------|------|------|------|\n'
+  local rid ralias rpath rentry rp role
+  while IFS='|' read -r rid ralias rpath rentry; do
+    [ -n "$(trim "$rid")" ] || continue
+    case "$(trim "$rid")" in \#*) continue ;; esac
+    rp="$(trim "$rpath")"
+    role="$(project_role "$rp")"
+    printf '| %s | %s | %s | %s |\n' "$(trim "$rid")" "$(trim "$ralias")" "$rp" "$role"
+  done < "$REGISTRY"
+}
+
+cmd_find() {
+  local q="${1:-}"
+  [ -n "$q" ] || die "用法：awf find <别名|ID>"
+  [ -f "$REGISTRY" ] || die "尚未登记任何项目"
+  local hits
+  hits="$(grep -i -- "$q" "$REGISTRY" || true)"
+  if [ -z "$hits" ]; then
+    say "未找到：$q"
+    return 1
+  fi
+  # 输出 `id\t路径\t角色`：role 读目标项目 project.yaml（yaml 为单一事实源，
+  # 手动加 role 立即生效，无需 re-register）；缺省回退 name，再缺省 `-`。
+  local rid ralias rpath rentry role
+  printf '%s\n' "$hits" | while IFS='|' read -r rid ralias rpath rentry; do
+    rid="$(trim "$rid")"
+    [ -n "$rid" ] || continue
+    role="$(project_role "$(trim "$rpath")")"
+    printf '%s\t%s\t%s\n' "$rid" "$(trim "$rpath")" "$role"
+  done
+}
+
+# ---------------------------------------------------------------- log（DEV-216：执行记录只增不改）
+
+log_usage() {
+  cat <<'EOF'
+用法：awf log [<任务ID>] [--note 说明] [--type 类型] [--owner 谁]
+
+给任务文档的 `### Execution Log` 节追加一条执行记录（只增不改）：
+  - YYYY-MM-DD HH:MM · 类型 · @谁 · 说明
+
+  <任务ID>  任务 ID（如 DEV-216）；省略时仅在 current/ 恰有一个进行中任务时自动推断。
+  --note    说明（必填；也可把说明作为末尾位置参数）
+  --type    记录类型（默认 log；可写 claim / implement / verify / review / archive 等）
+  --owner   执行者（默认 $AWF_OWNER / $AWF_AGENT → project.yaml 的 role/name → $USER）
+  任务文档无该节时自动在文末补 `### Execution Log`（兼容旧别名 `### 执行记录`）。
+  已归档（done/）任务拒绝追加：执行记录只写未归档任务（todo/current/）。
+
+示例：awf log DEV-216 --note "实现 awf log/validate，smoke 全绿" --type implement
+EOF
+}
+
+# 在 tasks/<type>/{current,todo,done}/ 中定位任务文件；输出路径，找不到返回 1。
+log_find_task() {
+  local id="$1" t b f
+  for t in dev debug docs; do
+    for b in current todo done; do
+      f="agent-workflow/tasks/$t/$b/$id.md"
+      if [ -f "$f" ]; then printf '%s\n' "$f"; return 0; fi
+    done
+  done
+  return 1
+}
+
+# 推断唯一进行中任务（current/ 下恰一个任务文件）；多个/无 → 返回 1。
+log_current_task() {
+  local t f found=""
+  for t in dev debug docs; do
+    for f in agent-workflow/tasks/$t/current/[A-Z]*.md; do
+      [ -f "$f" ] || continue
+      [ "$(basename "$f")" = "README.md" ] && continue
+      if [ -n "$found" ]; then return 1; fi
+      found="$f"
+    done
+  done
+  [ -n "$found" ] && printf '%s\n' "$found"
+}
+
+cmd_log() {
+  local id="" note="" etype="log" owner=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --note)   [ $# -ge 2 ] || die "--note 缺少值"; note="$2"; shift 2 ;;
+      --note=*) note="${1#*=}"; shift ;;
+      --type)   [ $# -ge 2 ] || die "--type 缺少值"; etype="$2"; shift 2 ;;
+      --type=*) etype="${1#*=}"; shift ;;
+      --owner|--who) [ $# -ge 2 ] || die "--owner 缺少值"; owner="$2"; shift 2 ;;
+      --owner=*|--who=*) owner="${1#*=}"; shift ;;
+      -h|--help) log_usage; return 0 ;;
+      -*) die "未知参数：$1（用法：awf log [<任务ID>] --note 说明）" ;;
+      *)
+        if [ -z "$id" ]; then id="$1"; else note="${note:+$note }$1"; fi
+        shift ;;
+    esac
+  done
+
+  local root
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
+  cd "$root"
+
+  if [ -z "$id" ]; then
+    local auto
+    auto="$(log_current_task)" || die "存在多个进行中任务，无法推断任务；请显式指定 ID（如 awf log DEV-216 --note ...）"
+    [ -n "$auto" ] || die "没有进行中任务可推断；请显式指定 ID（如 awf log DEV-216 --note ...）"
+    id="$(basename "$auto" .md)"
+  fi
+  printf '%s' "$id" | grep -Eq '^[A-Z]+-[0-9]+$' || die "任务 ID 非法：$id（应为 类型-数字，如 DEV-216）"
+
+  local f
+  f="$(log_find_task "$id")" || die "未找到任务 $id（已查 tasks/{dev,debug,docs}/{todo,current,done}/$id.md）"
+  case "$f" in
+    */done/*) die "任务 $id 已归档（$f）；执行记录只追加到未归档任务（todo/current/），如需补记请先移回 current/" ;;
+  esac
+
+  [ -n "$note" ] || die "缺少说明：用 --note 说明（或把说明作为末尾位置参数）"
+  if [ -z "$owner" ]; then
+    owner="${AWF_OWNER:-${AWF_AGENT:-}}"
+  fi
+  if [ -z "$owner" ]; then
+    owner="$(project_role "$root")"
+    [ "$owner" = "-" ] && owner="${USER:-agent}"
+  fi
+  # 单行化：说明/类型/执行者里的换行压成空格，避免借换行伪造多条记录
+  note="$(printf '%s' "$note" | tr '\n\r' '  ')"
+  etype="$(printf '%s' "$etype" | tr '\n\r' '  ')"
+  owner="$(printf '%s' "$owner" | tr '\n\r' '  ')"
+  [ -n "$etype" ] || etype="log"
+  [ -n "$owner" ] || owner="agent"
+
+  local entry="- $(now) · $etype · @$owner · $note"
+  local tmp="$f.awf-log.tmp"
+  # 追加规则：已存在 `### Execution Log`（或旧别名 `### 执行记录`）节 → 插到该节末尾
+  # （下一条 `### ` 前）；无节 → 文末补 `### Execution Log`。旧行只透传，不改一字。
+  if ! ENTRY="$entry" awfk '
+    function flush_entry() { if (!done) { print ENVIRON["ENTRY"]; done = 1 } }
+    index($0, "### Execution Log") == 1 || index($0, "### 执行记录") == 1 {
+      if (!insec) { insec = 1; found = 1 }
+      print; next
+    }
+    insec && index($0, "### ") == 1 { flush_entry(); insec = 0 }
+    { print }
+    END {
+      if (!found) { print ""; print "### Execution Log"; print ENVIRON["ENTRY"] }
+      else flush_entry()
+    }
+  ' "$f" > "$tmp"; then
+    rm -f "$tmp"
+    die "追加执行记录失败：$f"
+  fi
+  mv "$tmp" "$f"
+  say "已追加 $id 执行记录：$entry"
+}
+
+# ---------------------------------------------------------------- validate（DEV-216：只读一致性体检）
+
+validate_usage() {
+  cat <<'EOF'
+用法：awf validate
+
+只读一致性体检（绝不修改任何文件）：
+  1. 任务文件：标题 `## [ID]` 与文件名一致、字段表两列格式、必填字段
+     （优先级 P0-P3 / 状态 / Owner）、状态枚举
+     todo|active|blocked|review|verify|handoff|done
+  2. 完成日期：done/ 归档任务状态必须 done 且含 YYYY-MM-DD 完成日期
+  3. 三目录 README 索引：tasks/{dev,debug,docs}/{todo,current,done}/README.md
+     所列任务 ID 与目录内任务文件一一对齐（缺/多均报）
+  发现问题逐条列清单（FAIL 行）并以非零退出；绝不代修——索引类问题请运行
+  `awf status` 重生成。
+
+退出码：0 = 无问题；1 = 存在一处或多处问题。
+EOF
+}
+
+# 计问题数的小工具（供 validate 共用；输出 FAIL 行并累加）
+vfail() {
+  printf 'FAIL  %s\n' "$*"
+  VAL_FAILS=$((VAL_FAILS + 1))
+}
+
+# 单文件体检：标题/字段表/状态枚举/完成日期。输出 FAIL 行，并计入 VAL_FAILS。
+validate_task_file() {
+  local f="$1" bucket="$2" type="$3" id hid out
+  id="$(basename "$f" .md)"
+  if ! printf '%s' "$id" | grep -Eq '^[A-Z]+-[0-9]+$'; then
+    vfail "$type/$bucket 文件 ID 非法：$id（应为 类型-数字，如 DEV-001）"
+    return 1
+  fi
+  hid="$(task_id "$f")"
+  if [ -z "$hid" ]; then
+    vfail "$type/$bucket/$id 缺任务标题（首行应为 \`## [$id] 标题\`）"
+    return 1
+  fi
+  if [ "$hid" != "$id" ]; then
+    vfail "$type/$bucket/$id 标题 ID 与文件名不一致：标题 [$hid] / 文件 $id"
+  fi
+  if out="$(awfk -v wf="$type" -v bucket="$bucket" -v id="$id" '
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    BEGIN { FS = "|"; intable = 0; tabledone = 0; seen = 0; bad = 0 }
+    index($0, "## [") == 1 { next }
+    tabledone == 0 {
+      if ($0 ~ /^[ \t]*$/) next
+      if ($0 ~ /^\|/) { intable = 1 }
+      else { tabledone = 1; next }
+    }
+    intable == 1 {
+      if ($0 !~ /^\|/) { intable = 0; tabledone = 1; next }
+      seen = 1
+      if (NF != 4) {
+        printf "FAIL  %s/%s/%s 字段表格式错（每行需两列 `|<字段>|<内容>|`）：%s\n", wf, bucket, id, $0
+        bad++; next
+      }
+      key = trim($2); val = trim($3)
+      if (key == "优先级") { has_pri = 1; pri = val }
+      else if (key == "状态") { has_st = 1; st = val }
+      else if (key == "Owner") { has_ow = 1; ow = val }
+      else if (key == "完成日期") { has_date = 1; cdate = val }
+      next
+    }
+    END {
+      if (!seen) { printf "FAIL  %s/%s/%s 缺字段表（`|<字段>|<内容>|`）\n", wf, bucket, id; bad++ }
+      if (!has_pri) { printf "FAIL  %s/%s/%s 缺字段 优先级\n", wf, bucket, id; bad++ }
+      else if (pri !~ /^P[0-3]$/) { printf "FAIL  %s/%s/%s 优先级值非法：%s（应为 P0-P3）\n", wf, bucket, id, pri; bad++ }
+      if (!has_st) { printf "FAIL  %s/%s/%s 缺字段 状态\n", wf, bucket, id; bad++ }
+      else if (st !~ /^(todo|active|blocked|review|verify|handoff|done)$/) {
+        printf "FAIL  %s/%s/%s 状态非法：%s（应为 todo/active/blocked/review/verify/handoff/done）\n", wf, bucket, id, st
+        bad++
+      }
+      if (!has_ow) { printf "FAIL  %s/%s/%s 缺字段 Owner\n", wf, bucket, id; bad++ }
+      else if (ow == "") { printf "FAIL  %s/%s/%s Owner 为空\n", wf, bucket, id; bad++ }
+      if (has_date && cdate !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
+        printf "FAIL  %s/%s/%s 完成日期格式非法：%s（应为 YYYY-MM-DD）\n", wf, bucket, id, cdate
+        bad++
+      }
+      if (bucket == "done") {
+        if (has_st && st != "done") { printf "FAIL  %s/%s/%s 归档任务状态应为 done（当前 %s）\n", wf, bucket, id, st; bad++ }
+        if (!has_date) { printf "FAIL  %s/%s/%s 缺完成日期（归档任务必填 YYYY-MM-DD）\n", wf, bucket, id; bad++ }
+      } else if (has_st && st == "done") {
+        printf "FAIL  %s/%s/%s 状态 done 的归档任务应位于 done/ 目录（当前 %s/）\n", wf, bucket, id, bucket
+        bad++
+      }
+      exit (bad > 0 ? 1 : 0)
+    }
+  ' "$f")"; then
+    :
+  fi
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out"
+    VAL_FAILS=$((VAL_FAILS + $(printf '%s\n' "$out" | grep -c '^FAIL' || true)))
+  fi
+  return 0
+}
+
+# 目录内任务文件 ID（排除 README.md），逐行输出
+validate_dir_ids() {
+  local dir="$1" f
+  for f in "$dir"/[A-Z]*.md; do
+    [ -f "$f" ] || continue
+    [ "$(basename "$f")" = "README.md" ] && continue
+    basename "$f" .md
+  done | LC_ALL=C sort
+}
+
+# README 索引中列出的任务 ID（第一列），逐行输出
+validate_readme_ids() {
+  local readme="$1"
+  awfk -F'|' '
+    function trim(s) { gsub(/^[ \t]+/, "", s); gsub(/[ \t]+$/, "", s); return s }
+    trim($2) ~ /^[A-Z]+-[0-9]+$/ { print trim($2) }
+  ' "$readme"
+}
+
+cmd_validate() {
+  VAL_FAILS=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h|--help) validate_usage; return 0 ;;
+      *) die "未知参数：$1（用法：awf validate；无参数）" ;;
+    esac
+  done
+
+  local root
+  root="$(find_root)" || die "当前目录不在 agent-workflow 项目中（找不到 agent-workflow/project.yaml）"
+  cd "$root"
+
+  local t b dir readme f file_ids readme_ids id
+  for t in dev debug docs; do
+    for b in todo current done; do
+      dir="agent-workflow/tasks/$t/$b"
+      if [ ! -d "$dir" ]; then
+        vfail "缺目录 tasks/$t/$b（运行 awf init 重建或手工补目录）"
+        continue
+      fi
+      readme="$dir/README.md"
+      if [ ! -f "$readme" ]; then
+        vfail "$t/$b 缺 README 索引（运行 awf status 生成）"
+      fi
+      for f in "$dir"/[A-Z]*.md; do
+        [ -f "$f" ] || continue
+        [ "$(basename "$f")" = "README.md" ] && continue
+        validate_task_file "$f" "$b" "$t"
+      done
+      # README 索引与目录内任务文件对齐（缺/多均报；索引由 awf status 重生成）
+      if [ -f "$readme" ]; then
+        file_ids="$(validate_dir_ids "$dir")"
+        readme_ids="$(validate_readme_ids "$readme")"
+        if [ "$file_ids" != "$readme_ids" ]; then
+          for id in $file_ids; do
+            printf '%s\n' "$readme_ids" | grep -qxF "$id" \
+              || vfail "$t/$b README 索引缺任务 $id（文件存在但索引未列；运行 awf status 重生成）"
+          done
+          for id in $readme_ids; do
+            printf '%s\n' "$file_ids" | grep -qxF "$id" \
+              || vfail "$t/$b README 索引含多余任务 $id（无对应文件；运行 awf status 重生成）"
+          done
+        fi
+      fi
+    done
+  done
+
+  if [ "$VAL_FAILS" -eq 0 ]; then
+    say "全部检查通过（只读体检：未修改任何文件）"
+    return 0
+  fi
+  say ""
+  say "发现 $VAL_FAILS 处问题（只读体检：未修改任何文件；索引类问题请运行 awf status 重生成）"
+  return 1
+}
+
+# ---------------------------------------------------------------- main
+
+main() {
+  local cmd="${1:-}"
+  [ $# -gt 0 ] && shift || true
+
+  case "$cmd" in
+    init)      cmd_init "$@" ;;
+    bootstrap) cmd_bootstrap ;;
+    check)     cmd_check "$@" ;;
+    status)    cmd_status ;;
+    log)       cmd_log "$@" ;;
+    validate)  cmd_validate "$@" ;;
+    register)  cmd_register ;;
+    projects)  cmd_projects ;;
+    find)      cmd_find "$@" ;;
+    gitignore) cmd_gitignore "$@" ;;
+    release-prep) cmd_release_prep "$@" ;;
+    upgrade)     cmd_upgrade "$@" ;;
+    install-hooks) cmd_install_hooks "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *) die "未知命令：${cmd}（可用：init / bootstrap / check / status / log / validate / register / projects / find / gitignore / release-prep / upgrade / install-hooks）" ;;
+  esac
+}
+
+main "$@"

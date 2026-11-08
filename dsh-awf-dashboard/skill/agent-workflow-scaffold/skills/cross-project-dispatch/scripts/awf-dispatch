@@ -1,0 +1,3344 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""awf-dispatch — 跨项目派发器（DSH 会话适配）。
+
+先在调度方项目里做四道前置检查：
+  G1 目标有 agent-workflow / AGENTS.md
+  G2 目标已登记为 DSH 工作区
+  G3 目标没有已跟踪改动 / 其他 active 任务
+  G4 DSH GUI 与会话通道可用
+
+全过时默认复用目标工作区里「目标项目」对应的常驻会话（标题 `[awf] [派发者] [任务名]`——
+目标 worker 承接派发任务的会话，任务名随派发动态更新）；
+选中的会话正在运行时进入**等待队列**（默认最多等 180s，`--queue-timeout` 可调；
+回合结束等待仍走 --wait/--timeout），超时才报队列超时，不再立即失败；
+没有可用会话时才新建。随后发送任务并立即返回
+（默认异步，不等待回合）。需要本回合结果时加 --wait（默认最多等 300s，--timeout 可调；
+等待超时不代表失败——任务已送达、会话继续执行，稍后在 GUI 查看即可）；需要隔离/调试时加 --new；
+也可以用 --session <id> 直接续跑某个指定会话。会话留在 GUI 里，用户可以继续提细节。
+旧格式（无 [awf] 标记）会话默认不再自动迁移，避免误吞用户
+自建会话；确认要迁移时加 --allow-legacy-reuse（有派发任务包标记的旧会话仍会自动迁移）。
+
+模块来源：`--module` > 票据「模块：」行 > 默认「通用」；模块只影响票据分类展示。
+会话标题统一为 `[awf] [派发者] [任务名]`（DEV-134）：派发者 = `--sender` > 票据
+「派发者：」行 > 调度方项目名（默认）；任务名 = 当次票据的 `ID 短标题`（动态）。会话收敛：
+同一派发者在同一目标项目最多 3 个 [awf] 任务会话——池内空闲（running=False）
+优先复用（改名接新任务）；都忙且池未满则新建扩充；池满（>=3）都忙才排队等待
+（--queue-timeout，默认 180s；超时按队列超时报错）。
+
+用法：
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --sender agent-workflow-kit
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team
+
+票据清理（用完即删；默认为 dry-run，只打印计划）：
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune --apply
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune --json
+
+票据来源（激活式 router）：派发前读取任务文件头部的「来源：用户 | 工作流」标记。
+缺省视为用户来源（旧票据无该字段仍可用，向后兼容）；DEV-128 起**允许**标记
+「来源：工作流」的票据按需继续向下一层转派（深度不限，不再禁止），派发时仅提示
+核对转派理由并在票据记录路由裁决，不拦截（见 --help 的 epilog）。
+
+设计约束：只依赖 Python 3 标准库；不打印、不落盘 GUI 认证 cookie。
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import contextlib
+import datetime
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # 非 Unix（Windows 等）：文件锁退化为空操作
+    fcntl = None  # type: ignore[assignment]
+
+DEFAULT_WEB_URL = "http://127.0.0.1:51439"
+DEFAULT_TIMEOUT = 300
+# 默认异步：只创建会话并发送任务，立即返回；显式 --wait 才等待回合结束。
+DEFAULT_WAIT = False
+# 默认复用目标工作区已有的常驻会话，避免每次派发都新建、会话数线性增长。
+DEFAULT_REUSE = True
+# 上下文压力只作提示：达到该值提醒可考虑 --new，但不自动切换会话。
+PRESSURE_HINT_LIMIT = 0.9
+# 兼容保留：DEV-126 起会话繁忙的队列等待由 DEFAULT_QUEUE_TIMEOUT 控制；本常量仅保留解析/校验。
+DEFAULT_IDLE_WAIT = 300
+# DEV-134：会话标题 = [awf] [派发者] [任务名]——派发者（--sender > 票据「派发者：」行 >
+# 调度方项目名（DEV-136：默认 = 发起派发的会话所在项目，如 agent-workflow-kit））
+# + 当前任务摘要（ID + 短标题，随派发动态更新）；前缀保持 [awf]（DEV-126 澄清）。
+AWF_TITLE_PREFIX = "[awf]"
+# DEV-134/DEV-210：同一项目 [awf] 任务会话总数上限（用户语义「一个项目 [awf] 会话 ≤3」）。
+# 池内空闲优先复用（在 [awf] 中取闲置会话改名接新任务）；都忙且池未满 → 新建扩充；
+# 池满（>=MAX）都忙 → 等待空闲。复用不受此限；仅「需要新建」时按项目池总数判断。
+# 无全局 [awf] 会话总数上限（DEV-183 全局上限已按用户要求移除——用户只要每项目 ≤3）。
+MAX_SENDER_SESSIONS = 3
+# 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
+# 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
+DEFAULT_QUEUE_TIMEOUT = 180
+SESSION_TITLE_LIMIT = 40
+# 票据没写「模块：」、命令行也没给 --module 时的默认模块。
+MODULE_DEFAULT = "通用"
+# wait_for_idle 的返回值：会话在轮询中消失/被归档，与「等待超时」区分。
+SESSION_GONE = object()
+# 无进展快失败：回合结束且耗时低于该值、又没有任何输出/工具调用 → 疑似僵尸会话。
+ZOMBIE_TURN_SECONDS = 5.0
+# 回合结束后的落地轮询间隔（等目标 commit 或归档）。
+LANDING_POLL_SECONDS = 10.0
+# 退出码：0 成功；2 前置门/派发失败；3 等待或落地超时；4 疑似僵尸会话；
+# 5 headless --wait 子进程非零退出（独立状态，不再伪装成 3 的超时/未落地语义）。
+EXIT_OK = 0
+EXIT_FAIL = 2
+EXIT_TIMEOUT = 3
+EXIT_ZOMBIE = 4
+EXIT_HEADLESS_FAIL = 5
+DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+# DISPATCH-146：回执投递通道——目标会话回执推送进派发方会话收件箱（RPC 主通道，
+# inbox 自动触发其回合处理，派发方无需轮询）；RPC 不可达 / 未注入派发方会话时
+# 降级写收件箱文件（默认目录相对派发方/目标侧 cwd）。回执内容仍按必报点表组织。
+REPORT_MARKER = "【回执请求】"
+REPORT_INBOX_DIR = "dispatch/reports/inbox"
+# DEV-214：本地归档台账（派发方 cwd 下的 dispatch/ 目录，不入库）——记录被 --cleanup
+# 经 workspace/archiveSession 归档的会话 id；组装复用池/统计每项目 [awf] 会话数时排除。
+ARCHIVED_LEDGER_NAME = "archived-sessions.json"
+# DEV-214：同项目新建决策互斥锁文件名前缀（dispatch/.lock-<project>）。
+LOCK_FILE_PREFIX = ".lock-"
+
+
+class DispatchError(Exception):
+    """前置检查或派发失败；main 统一转成退出码 2。"""
+
+
+def emit(message: str, json_mode: bool = False) -> None:
+    if json_mode:
+        print(message, file=sys.stderr)
+    else:
+        print(message)
+
+
+def dsh_home() -> Path:
+    return Path(os.environ.get("DSH_HOME", str(Path.home() / ".dsh")))
+
+
+def agents_home() -> Path:
+    return Path(os.environ.get("DSH_AGENTS_HOME", str(Path.home() / ".agents")))
+
+
+# ---------------------------------------------------------------- 目标解析
+
+
+def resolve_target(value: str) -> Path:
+    direct = Path(value).expanduser()
+    if direct.is_dir():
+        return direct.resolve()
+
+    registry = agents_home() / "projects.tsv"
+    if not registry.is_file():
+        raise DispatchError(
+            "未找到全局索引 ~/.agents/projects.tsv；先在目标项目运行 awf register"
+        )
+
+    exact = []
+    loose = []
+    for raw in registry.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 3:
+            continue
+        project_id, aliases, path = parts[0], parts[1], parts[2]
+        names = [project_id] + [a.strip() for a in aliases.split(",")]
+        if any(value.lower() == name.lower() for name in names):
+            exact.append((project_id, path))
+        elif any(value.lower() in name.lower() for name in names):
+            loose.append((project_id, path))
+
+    candidates = exact or loose
+    if not candidates:
+        raise DispatchError(f"未找到项目：{value}（检查 awf projects / 全局索引）")
+    project_id, path = candidates[0]
+    target = Path(path).expanduser().resolve()
+    if not target.is_dir():
+        raise DispatchError(f"索引里的路径不存在：{target}（先运行 awf bootstrap / register）")
+    return target
+
+
+TICKET_REQUIRED_FIELDS = [
+    ("目标项目", "目标项目行（- 目标项目：<别名>（<路径>））"),
+    ("任务编号", "任务编号行（- 任务编号：…，由目标自排）"),
+    ("来源", "来源行（- 来源：用户 | 工作流）"),
+    ("路由裁决", "路由裁决行（- 路由裁决（<派发方> → <目标>）：目标 / 通道 / 理由）"),
+]
+
+
+def read_task(path: str):
+    task = Path(path).expanduser().resolve()
+    if not task.is_file():
+        raise DispatchError(f"任务文件不存在：{task}")
+    text = task.read_text(encoding="utf-8")
+    if not text.strip():
+        raise DispatchError(f"任务文件为空：{task}")
+    # M1（DISPATCH-138）：票据零校验——只查「存在 + 非空」时，缺「目标项目/任务编号/
+    # 来源/路由裁决」的坏票据也照发，到目标侧才暴露；这里缺失即拒发并明示缺项。
+    missing = [
+        f"{key}（{desc}）"
+        for key, desc in TICKET_REQUIRED_FIELDS
+        if not any(
+            re.match(
+                r"^\s*(?:[-*]\s*)?%s\s*(?:[（(].*?[）)])?\s*[：:]\s*\S" % key,
+                line,
+            )
+            for line in text.splitlines()
+        )
+    ]
+    if missing:
+        raise DispatchError(
+            "任务票据缺少必备字段，拒绝派发（坏票据会到目标侧才暴露）："
+            + "；".join(missing)
+            + "。请按任务包头部格式补全后重试。"
+        )
+    return task, text
+
+
+def clean_title(value: str, limit: int = 60) -> str:
+    value = re.sub(r"[`*_\[\]（）()]+", "", value).strip(" -—:：·")
+    value = re.sub(r"\s+", " ", value)
+    return value[:limit].strip() or "未命名任务"
+
+
+def task_title(task: Path, text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("任务：", "任务:")):
+            return clean_title(stripped[3:])
+    for line in text.splitlines():
+        match = re.match(r"^#{1,3}\s+(.+)", line.strip())
+        if match:
+            return clean_title(match.group(1))
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith(("|", "-", "#", ">", "```")):
+            return clean_title(stripped)
+    return clean_title(task.stem)
+
+
+def task_type(text: str) -> str:
+    # DEV-184 技能化：技能路径 skills/{kind}/SKILL.md 与旧 workflows/{kind}.md 都识别
+    match = re.search(r"(?:skills/)?workflows/(dev|debug|docs)\.md", text)
+    if match:
+        return match.group(1)
+    match = re.match(r"\s*(DEV|DEBUG|DOCS)-", text)
+    if match:
+        return {"DEV": "dev", "DEBUG": "debug", "DOCS": "docs"}[match.group(1)]
+    return "dev"
+
+
+def awf_session_title(sender: str, task_name: str = "",
+                      limit: int = SESSION_TITLE_LIMIT) -> str:
+    """会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者标识 + 当前任务摘要；
+    任务名随派发动态更新；同项目一个常驻会话（复用/排队），不因任务增多新建会话。"""
+    sender_clean = clean_title(sender, limit=20) if (sender or "").strip() else clean_title(os.path.basename(os.getcwd().rstrip("/")) or "project", limit=20)
+    task_clean = clean_title(task_name, limit=limit) if (task_name or "").strip() else "未命名任务"
+    return (f"{AWF_TITLE_PREFIX} [{sender_clean}] "
+            f"[{task_clean}]")
+
+
+def ticket_sender(text: str) -> str:
+    """读取票据头部「派发者：<名>」行；没写返回空串。"""
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*]\s*)?派发者\s*[：:]\s*(.+?)\s*$", line)
+        if match:
+            return clean_title(match.group(1))
+    return ""
+
+
+def resolve_sender(text: str, override: str = "") -> str:
+    """派发者来源（DEV-136）：`--sender` > 票据「派发者：」行 >
+    默认「调度方项目名」（发起派发的会话所在项目，如 agent-workflow-kit）——标题
+    `[awf] [派发者] [任务名]` 的派发者段要能看出是谁的项目派的，而不是笼统的 lead。"""
+    if (override or "").strip():
+        return clean_title(override)
+    ticket = ticket_sender(text)
+    if ticket:
+        return ticket
+    cwd = os.getcwd().rstrip("/")
+    return os.path.basename(cwd) or "project"
+
+
+def task_display(task: Path, text: str, limit: int = SESSION_TITLE_LIMIT) -> str:
+    """当前任务摘要：**仅短标题**（DEV-136：会话标题的任务名段不写任务编号——
+    我们没有 UP 等编号类型；票据作者把想显示的任务名写在 `# 标题` / `任务：` 行，
+    派发者照写、截断即可）。"""
+    return clean_title(task_title(task, text), limit=limit)
+
+
+def ticket_module(text: str) -> str:
+    """从票据正文读取可选「模块：<名称>」行；没写返回空串。"""
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*]\s*)?模块\s*[：:]\s*(.+?)\s*$", line)
+        if match:
+            return clean_title(match.group(1), limit=SESSION_TITLE_LIMIT)
+    return ""
+
+
+def resolve_module(text: str, override: str = "") -> str:
+    """模块来源：`--module` > 票据「模块：」行 > 默认「通用」。"""
+    if (override or "").strip():
+        return clean_title(override, limit=SESSION_TITLE_LIMIT)
+    return ticket_module(text) or MODULE_DEFAULT
+
+
+def ticket_source(text: str) -> str:
+    """读取票据头部「来源：用户 | 工作流」标记；缺失或缺省值按用户处理（向后兼容）。
+
+    激活式 router 协议（DEV-115 定义、DEV-128 放开转派）：来源=用户的票据面向
+    用户原始请求（节点可自行决策执行或派发）；来源=工作流的票据是已派发任务，
+    **允许按需继续向下一层转派**（不再限制深度）。返回 "user" / "workflow"。
+    "workflow" 仅用于记录链路与提示，不构成硬拦截。非头部位置文字不误判。
+    """
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:[-*]\s*)?来源\s*[：:]\s*(.+?)\s*$", line)
+        if match:
+            value = match.group(1).strip()
+            if "工作流" in value or value.lower() in ("workflow", "wf"):
+                return "workflow"
+            return "user"
+    return "user"
+
+
+# ---------------------------------------------------------------- 前置检查
+
+
+def check_workflow(target: Path) -> None:
+    # DEV-184 彻底技能化：流程细节在技能 agent-workflow-scaffold（skills/ 各流程技能），
+    # AGENTS.md 路由内联状态机 + 强制加载技能即流程入口——workflows/ 不再是必需文件。
+    required = [
+        "AGENTS.md",
+        "agent-workflow/project.yaml",
+        "agent-workflow/README.md",
+        "agent-workflow/check_workflow.sh",
+    ]
+    missing = [rel for rel in required if not (target / rel).exists()]
+    if missing:
+        raise DispatchError(
+            "G1 工作流失败：目标缺少 " + "、".join(missing) + "；先运行 awf init 或补齐工作流"
+        )
+
+    proc = subprocess.run(
+        ["./agent-workflow/check_workflow.sh"],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    if proc.returncode != 0:
+        output = proc.stdout + proc.stderr
+        fail_lines = [ln for ln in output.strip().splitlines() if "FAIL" in ln]
+        # P2（DISPATCH-139）：status.md 过期是「账本在动的瞬态」不是真缺损——
+        # check 缺失项只有「status.md 未刷新」（账本在动、缺的只是摘要）时降级 warn 放行。
+        only_status_stale = bool(fail_lines) and all(
+            "status.md 已过期" in ln for ln in fail_lines
+        )
+        if only_status_stale:
+            print(
+                "提示：G1 瞬态豁免（DISPATCH-139）——目标 check 仅缺「status.md 已过期」"
+                "（账本在动、缺的只是摘要，属瞬态），已放行；建议目标侧稍后运行 "
+                "./agent-workflow/bin/awf status 刷新摘要后再提交。",
+                file=sys.stderr,
+            )
+            return
+        detail = output.strip().splitlines()[-8:]
+        raise DispatchError(
+            "G1 工作流校验失败；先让目标项目通过 check_workflow.sh：\n"
+            + "\n".join(detail)
+        )
+
+
+def _is_generated_change(line: str) -> bool:
+    """--allow-dirty=tasks 豁免的账本自我生成物（DISPATCH-139 P1）：
+    agent-workflow/tasks/status.md、tasks/<type>/<dir>/README.md、dispatch/log.md
+    （由 awf status / 工具再生成）；业务/代码改动不豁免。"""
+    path = line[3:].strip()
+    if path == "agent-workflow/tasks/status.md":
+        return True
+    if path.startswith("agent-workflow/tasks/") and path.endswith("/README.md"):
+        return True
+    if path == "dispatch/log.md":
+        return True
+    return False
+
+
+def check_git(target: Path, allow_dirty: bool, allow_dirty_scope: str = "") -> str:
+    if not (target / ".git").exists():
+        return "非 git 仓库（跳过）"
+    proc = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    changes = [line for line in proc.stdout.splitlines() if line.strip()]
+    if changes and not allow_dirty:
+        raise DispatchError(
+            "G3 可写失败：目标有已跟踪改动，先提交/清理，或加 --allow-dirty；"
+            "只想豁免账本自我生成物（status/README/log）时用 --allow-dirty=tasks：\n"
+            + "\n".join(changes[:10])
+        )
+    if changes and allow_dirty and allow_dirty_scope == "tasks":
+        blocked = [line for line in changes if not _is_generated_change(line)]
+        if blocked:
+            raise DispatchError(
+                "G3 可写失败：--allow-dirty=tasks 只豁免账本自我生成物"
+                "（tasks/status.md、tasks/*/README.md、dispatch/log.md）；"
+                "业务/代码改动仍拦截：\n"
+                + "\n".join(blocked[:10])
+                + "\n→ 先提交/清理业务改动；确实要全豁免再用裸 --allow-dirty"
+            )
+        return f"有 {len(changes)} 处改动（均为账本自我生成物，已豁免）"
+    return "clean" if not changes else f"有 {len(changes)} 处改动（已允许）"
+
+
+def check_active(target: Path, allow_active: bool) -> str:
+    """G3 active 防护。目录式账本（v1.0.0+）：tasks/<type>/current/<ID>.md（状态=所在目录，
+    DEV-127）；旧大文件格式：tasks/<type>/current.md 内 `## [ID]` 块。两者都扫，README 跳过。"""
+    active = []
+    tasks_dir = target / "agent-workflow/tasks"
+    # 目录式：current/ 下每个任务单文件（README.md 是检索索引，跳过）
+    for current in sorted(tasks_dir.glob("*/current/*.md")):
+        if current.name == "README.md":
+            continue
+        match = re.search(r"^## \[([A-Z]+-[0-9]+)\]\s*(.+)$",
+                          current.read_text(encoding="utf-8"), re.M)
+        if match:
+            active.append(f"{match.group(1)} {match.group(2).strip()}")
+    # 旧大文件兼容：current.md 内多个 `## [ID]` 块
+    for current in sorted(tasks_dir.glob("*/current.md")):
+        text = current.read_text(encoding="utf-8")
+        for match in re.finditer(r"^## \[([A-Z]+-[0-9]+)\]\s*(.+)$", text, re.M):
+            active.append(f"{match.group(1)} {match.group(2).strip()}")
+    if active and not allow_active:
+        raise DispatchError(
+            "G3 可写失败：目标已有 active 任务，避免多写者。三选项："
+            "① 等它完成后再派；② 确认无冲突后加 --allow-active；"
+            "③ 加 --new 新建独立会话隔离派发。当前 active：\n"
+            + "\n".join(active)
+        )
+    return "无 active 任务" if not active else f"{len(active)} 个 active 任务（已允许）"
+
+
+# ---------------------------------------------------------------- role 软校验（DEV-122）
+
+
+def target_role(target: Path):
+    """读目标 agent-workflow/project.yaml 的 role 字段（worker 名牌）。
+
+    与 awf 的 yaml_get 同语义：取第一个**非空值**匹配行（跳过空 `role:` 键，
+    DEV-119 后不再有字面空键，但旧项目可能遗留）；没有则返回 None。
+    """
+    y = target / "agent-workflow/project.yaml"
+    if not y.is_file():
+        return None
+    try:
+        for line in y.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^role\s*:\s*(.+?)\s*$", line)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+    except OSError:
+        return None
+    return None
+
+
+# 中文泛词停用表（DEV-123）：这些词不构成领域特征，从 n-gram 中剔除后再比较，
+# 避免「脚手架生成」与「生成周报」共现二元组「生成」导致的跨领域误判。
+ZH_STOPWORDS = {
+    "生成", "校验", "开发", "管理", "维护", "支持", "负责", "擅长", "进行",
+    "相关", "项目", "工作", "使用", "提供", "完成", "实现", "服务", "平台",
+    "功能", "优化", "处理", "以及", "包括", "一个", "一些", "我们", "这个",
+    "要求", "需要", "任务", "目标",
+}
+
+
+def _zh_ngrams(s: str, n: int) -> list:
+    """取中文连续串的 n-gram（n 个字）。"""
+    joined = "".join(c for c in s if "\u4e00" <= c <= "\u9fff")
+    return [joined[i : i + n] for i in range(len(joined) - n + 1)]
+
+
+def _significant(gram: str) -> bool:
+    """gram 不含任何泛词（整体含停用词子串即视为泛词片段，剔除）。"""
+    return not any(w in gram for w in ZH_STOPWORDS)
+
+
+def _role_tokens(s: str) -> set:
+    """关键词集合：英文词（≥3 字母，小写归一）+ 中文 2/3/4-gram（剔除泛词停用表）。
+
+    DEV-123：2-gram 单独不足以作领域证据（高频泛词「生成」可被 role 与任务共现），
+    故混入 3/4-gram 并过滤泛词；停用后领域 2 字词（周报/联调/镜像）仍可单命中，
+    即算匹配——不引入最小命中数，避免「周报生成」这类短任务被误判。
+    """
+    toks = set(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", s.lower()))
+    for n in (2, 3, 4):
+        for g in _zh_ngrams(s, n):
+            if _significant(g):
+                toks.add(g)
+    return toks
+
+
+def role_matches(role: str, task_text: str) -> bool:
+    """role 与任务文本是否有关键词交集（泛词剔除后，领域词命中即算匹配）。"""
+    if not role or not task_text:
+        return False
+    return bool(_role_tokens(role) & _role_tokens(task_text))
+
+
+def check_role(target: Path, task_text: str, args) -> None:
+    """--check-role 软校验：匹配通过 / 不匹配警告（--allow-role-mismatch 静默）/ 无 role 提示。
+
+    只 emit 不 raise：role 匹配是软校验，不硬拒合法派发（DEV-122 明确不做硬门禁）。
+    """
+    if not args.check_role:
+        return
+    role = target_role(target)
+    if role is None:
+        emit("role 校验：目标未填 role 字段（软校验，不阻塞；可后续在 project.yaml 补充）", args.json)
+        return
+    if role_matches(role, task_text):
+        emit(f"role 校验：匹配（任务关键词命中目标 role：{role}）", args.json)
+        return
+    if args.allow_role_mismatch:
+        emit(
+            f"role 校验：目标 role（{role}）与任务描述无明显匹配（--allow-role-mismatch 已静默，仍继续）",
+            args.json,
+        )
+        return
+    emit(
+        f"警告：目标 role（{role}）与任务描述关键词无明显匹配"
+        "（软校验不硬拒，继续派发；可用 --allow-role-mismatch 静默）",
+        args.json,
+    )
+
+
+# ---------------------------------------------------------------- 工作区
+
+
+def load_workspaces() -> list:
+    path = dsh_home() / "storages/workspace.json"
+    if not path.is_file():
+        raise DispatchError(f"找不到 DSH 工作区注册表：{path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    table = (data.get("tables", {}) or {}).get("workspaces", {}) or {}
+    result = []
+    for workspace_id, workspace in table.items():
+        item = dict(workspace)
+        item["workspaceId"] = workspace_id
+        result.append(item)
+    return result
+
+
+def find_workspace(target: Path):
+    real = os.path.realpath(str(target))
+    for workspace in load_workspaces():
+        path = workspace.get("path") or ""
+        if path and os.path.realpath(path) == real:
+            return workspace
+    return None
+
+
+# ---------------------------------------------------------------- DSH Web API
+
+
+def cookie_candidates() -> list:
+    home = Path.home()
+    values = [
+        os.environ.get("DSH_COOKIE_DB"),
+        str(home / "Library/Application Support/@deepseek-ai/dsh-desktop/Cookies"),
+        str(home / ".config/@deepseek-ai/dsh-desktop/Cookies"),
+        str(home / ".config/dsh-desktop/Cookies"),
+    ]
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        values.append(str(Path(appdata) / "@deepseek-ai/dsh-desktop/Cookies"))
+    return [Path(v) for v in values if v and Path(v).is_file()]
+
+
+def read_auth_cookie(authority: str) -> str:
+    databases = cookie_candidates()
+    if not databases:
+        raise DispatchError(
+            "G4 通道失败：找不到 DSH 桌面端 Cookies 数据库；"
+            "确认 GUI 正在运行，或使用 --headless / --handoff"
+        )
+
+    fd, tmp = tempfile.mkstemp(prefix="awf-cookies-", suffix=".db")
+    os.close(fd)
+    best = None
+    try:
+        shutil.copyfile(databases[0], tmp)
+        os.chmod(tmp, 0o600)
+        con = sqlite3.connect(tmp)
+        rows = con.execute(
+            "select name, value, expires_utc from cookies where host_key in ('127.0.0.1', 'localhost')"
+        ).fetchall()
+        con.close()
+        now = time.time() + 11644473600  # Chrome epoch
+        for name, value, expires in rows:
+            parts = value.split(".")
+            if len(parts) < 3:
+                continue
+            payload = parts[1] + "=" * (-len(parts[1]) % 4)
+            try:
+                data = json.loads(base64.urlsafe_b64decode(payload))
+            except Exception:
+                continue
+            if data.get("authority") != authority:
+                continue
+            if expires and (expires / 1e6) <= now:
+                continue
+            issued = data.get("issuedAt", 0)
+            if best is None or issued > best[0]:
+                best = (issued, name, value)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+    if best is None:
+        raise DispatchError(
+            f"G4 通道失败：没有 {authority} 的有效 GUI 认证 cookie；"
+            "重开 GUI URL 后重试，或使用 --headless / --handoff"
+        )
+    return f"{best[1]}={best[2]}"
+
+
+class DshApi:
+    def __init__(self, web_url: str = ""):
+        self.base = (web_url or os.environ.get("DSH_WEB_URL") or DEFAULT_WEB_URL).rstrip("/")
+        parsed = urllib.parse.urlparse(self.base)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise DispatchError(f"无效的 DSH Web URL：{self.base}")
+        self.authority = parsed.netloc
+        self.cookie = read_auth_cookie(self.authority)
+
+    def rpc(self, endpoint: str, args: dict, timeout: int = 60):
+        body = json.dumps(
+            {
+                "type": "client-request",
+                "rpcId": str(uuid.uuid4()),
+                "method": endpoint,
+                "payload": {"args": args},
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base}/api/{endpoint}",
+            data=body,
+            method="POST",
+            headers={
+                "content-type": "application/json",
+                "Origin": self.base,
+                "Cookie": self.cookie,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code == 401:
+                raise DispatchError(
+                    "G4 通道失败：DSH Web 认证失效；重开 GUI 打印的 URL 后重试"
+                )
+            if error.code == 404:
+                raise DispatchError(f"DSH Web 不支持端点 {endpoint}（版本不匹配？）")
+            raise DispatchError(f"DSH Web HTTP {error.code}：{endpoint}")
+        except (urllib.error.URLError, ConnectionError) as error:
+            raise DispatchError(
+                f"G4 通道失败：连不上 DSH GUI（{self.base}）；"
+                f"确认 GUI 正在运行，或用 --headless / --handoff（{error}）"
+            )
+
+        result = data.get("result") or {}
+        if not result.get("ok"):
+            detail = json.dumps(result.get("error"), ensure_ascii=False)
+            raise DispatchError(f"{endpoint} 失败：{detail}")
+        return result.get("value")
+
+    def sessions(self) -> list:
+        return self.rpc("session/list", {"_request": {}}).get("items", [])
+
+    def create_session(self, workspace_id: str) -> dict:
+        return self.rpc("session/create", {"request": {"workspaceId": workspace_id}})
+
+    def rename(self, session_id: str, title: str) -> None:
+        self.rpc("session/rename", {"request": {"sessionId": session_id, "title": title}})
+
+    def prompt(self, session_id: str, text: str, request_id: str) -> None:
+        self.rpc(
+            "session/prompt",
+            {
+                "request": {
+                    "requestId": request_id,
+                    "sessionId": session_id,
+                    "mode": "queue",
+                    "content": [{"type": "text", "text": text}],
+                    "clientTimeZone": "Asia/Shanghai",
+                }
+            },
+        )
+
+    def workspace_create(self, path: Path) -> dict:
+        value = self.rpc("workspace/create", {"request": {"path": str(path)}})
+        return value.get("workspace", {})
+
+    def archive_session(self, session_id: str) -> None:
+        """经 workspace/archiveSession 归档会话（--cleanup 使用）。"""
+        self.rpc("workspace/archiveSession", {"request": {"sessionId": session_id}})
+
+
+# ---------------------------------------------------------------- 本机状态感知（DISPATCH-143）
+
+
+def _session_locked_cg() -> bool:
+    """CoreGraphics 锁屏判定（macOS）。CoreGraphics ctypes 探针在部分环境/机型会段错误
+    （CFDictionaryGetValue 指针传递不稳），因此**必须经子进程运行**，段错误只杀子进程、
+    绝不崩派发器主进程；子进程异常/超时一律返回 False（由 pmset 熄屏判据兜底）。
+    锁屏不可探测时该场景自动退化为按熄屏（off/locked 都会判定为远程办公状态（remote），
+    由派发端经 IM 即时通知用户决策——不是「离线」，是用户远程办公的正常流程）。
+    """
+    code = (
+        "import ctypes,sys\n"
+        "cg=ctypes.cdll.LoadLibrary('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')\n"
+        "cf=ctypes.cdll.LoadLibrary('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')\n"
+        "cg.CGSessionCopyCurrentDictionary.restype=ctypes.c_void_p\n"
+        "cf.CFStringCreateWithCString.restype=ctypes.c_void_p\n"
+        "cf.CFStringCreateWithCString.argtypes=[ctypes.c_void_p,ctypes.c_char_p,ctypes.c_uint32]\n"
+        "cf.CFDictionaryGetValue.argtypes=[ctypes.c_void_p,ctypes.c_void_p]\n"
+        "cf.CFDictionaryGetValue.restype=ctypes.c_void_p\n"
+        "cf.CFBooleanGetValue.argtypes=[ctypes.c_void_p]\n"
+        "cf.CFBooleanGetValue.restype=ctypes.c_uint8\n"
+        "kUTF8=0x08000100\n"
+        "key=cf.CFStringCreateWithCString(None,b'CGSSessionScreenIsLocked',kUTF8)\n"
+        "d=cg.CGSessionCopyCurrentDictionary()\n"
+        "if not d: sys.exit(0)\n"
+        "v=cf.CFDictionaryGetValue(d,key)\n"
+        "sys.exit(1 if (v and cg.CFBooleanGetValue(v)) else 0)\n"
+    )
+    try:
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=5)
+        return proc.returncode == 1
+    except Exception:
+        return False
+
+
+def _display_state_from_log(text: str):
+    """解析 `pmset -g log` 文本：日志按时间序，取最近一次 Display 电源转事件后的状态
+    （"on"/"off"）；完全没有转事件或解析不了返回 None。纯函数，供单元断言。
+    限制：pmset Display 事件行前缀为定宽 `YYYY-MM-DD HH:MM:SS`，同偏移下整行字典序
+    ＝时间序（真实日志单偏移 +0800）；跨时区偏移或同秒双事件理论上可能误序，
+    当前判据对此不敏感（熄屏/亮屏窗口远大于秒级）。"""
+    last_on = None
+    last_off = None
+    for line in text.splitlines():
+        if "Display is turned on" in line:
+            last_on = line
+        elif "Display is turned off" in line:
+            last_off = line
+    if last_off and last_on:
+        return "off" if last_off >= last_on else "on"
+    if last_off:
+        return "off"
+    if last_on:
+        return "on"
+    return None
+
+
+def detect_screen_state() -> str:
+    """macOS 本机显示器状态：on（亮屏）/ off（熄屏）/ locked（锁屏）/ unknown（未知）。
+
+    判据（DISPATCH-143）：锁屏用 CoreGraphics CGSessionCopyCurrentDictionary 的
+    CGSSessionScreenIsLocked（ctypes，纯 stdlib）；熄屏用 `pmset -g log` 最近一次
+    Display is turned off/on 中较新者。任何一步失败都保守返回 unknown——
+    绝不把熄屏误报成亮屏。非 macOS 直接 unknown。
+    off/locked 的语义解释为远程办公状态（remote，DISPATCH-143 定义升级：用户不在电脑前、
+    但经 IM 在线可随时决策），由回执标记与派发端承载，本函数只报物理状态。
+    """
+    if sys.platform != "darwin":
+        return "unknown"
+    if _session_locked_cg():
+        return "locked"
+    try:
+        proc = subprocess.run(
+            ["pmset", "-g", "log"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+    except Exception:
+        return "unknown"
+    if proc.returncode != 0:
+        return "unknown"
+    state = _display_state_from_log(proc.stdout)
+    return state if state in ("on", "off") else "unknown"
+
+
+# ---------------------------------------------------------------- 回执投递通道（DISPATCH-146）
+
+
+def dispatcher_session_env() -> str:
+    """返回当前进程所在会话的 DSH_SESSION_ID（若有）。
+
+    派发方运行 awf-dispatch 时 = 派发方会话 ID（注入文本告知目标回执投递目标）；
+    目标会话运行 --report 时 = 目标会话 ID（作为 --from 默认来源）。"""
+    return (os.environ.get("DSH_SESSION_ID") or "").strip()
+
+
+def sanitize_filepart(value: str) -> str:
+    """收件箱文件名安全化：会话 ID / 派发单号只留 [A-Za-z0-9_.-]。"""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", value or "") or "unknown"
+
+
+def session_display_label(api, session_id: str) -> str:
+    """把会话 ID 渲染成「项目名（cwd basename）＋会话标题」的人类可读标签；
+    查不到 / API 不可达时回退原始 ID（投递头不再显示无意义的裸 UUID，DEV-165）。"""
+    if not session_id:
+        return "未知"
+    if api is not None:
+        try:
+            for row in api.sessions():
+                if row.get("sessionId") == session_id:
+                    cwd = row.get("cwd") or ""
+                    project = os.path.basename(os.path.normpath(cwd)) if cwd else ""
+                    values = (row.get("projections") or {}).get("values") or {}
+                    title = values.get("title") or ""
+                    label = (project + ("「%s」" % title)) if (project and title) else (project or title)
+                    return label or session_id
+        except Exception:
+            pass
+    return session_id
+
+
+
+def report_status_of(body: str) -> str:
+    """从回执正文解析状态徽章（DISPATCH-153 格式：`状态：完成` 等）。"""
+    m = re.search(r"状态[:：]\s*(完成|阻塞|失败|进行中|review|待复审)", body or "")
+    return m.group(1) if m else ""
+
+
+def report_json_path(cwd: Path, ticket: str) -> Path:
+    """回执 JSON 落盘路径（DEV-170 架构调整：数据与渲染分离，AgentTeams 式）。"""
+    safe = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", (ticket or "回执").strip()) or "回执"
+    safe = safe[:60]
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Path(cwd) / "dispatch" / "reports" / ("%s-%s.json" % (safe, ts))
+
+
+def write_report_json(cwd, *, ticket: str, source: str, target_session: str, body: str,
+                      source_label: str = "", target_label: str = "") -> Path:
+    """把回执落盘为结构化 JSON（目标项目 dispatch/reports/，供插件面板渲染）。
+
+    纯函数（时间戳当次生成），供 --report 与 smoke 断言。不改业务文件。
+    """
+    data = {
+        "kind": "awf-report",
+        "version": 1,
+        "ticket": (ticket or "").strip(),
+        "time": datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
+        "source": source_label or source or "未知",
+        "dispatcher": target_label or target_session or "",
+        "status": report_status_of(body),
+        "body": (body or "").strip(),
+        "reportedAt": int(time.time() * 1000),
+        "fromSession": source or "",
+        "toSession": target_session or "",
+    }
+    path = report_json_path(cwd, ticket)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def render_report_message(source: str, target_session: str, ticket: str, body: str,
+                          source_label: str = "", target_label: str = "") -> str:
+    """组装回执投递消息：标记行 + 时间戳 + 来源/派发方/派发单 + 回执正文。
+
+    纯函数（时间戳当次生成），供 --report --dry-run 渲染与 smoke 断言。
+    source_label / target_label 传入时投递头显示「项目名＋会话名」（人类可读，DEV-165），
+    否则回退会话 ID（无 API 的降级/离线场景）。
+    """
+    lines = [
+        REPORT_MARKER,
+        "- 时间：%s" % datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
+        "- 来源：%s" % (source_label or source or "未知"),
+    ]
+    if target_session:
+        lines.append("- 派发方：%s" % (target_label or target_session))
+    if ticket:
+        lines.append("- 派发单：%s" % ticket)
+    lines.append("")
+    lines.append((body or "").strip())
+    return "\n".join(lines)
+
+
+def inbox_path_for(source: str, ticket: str = "") -> Path:
+    """收件箱文件路径（降级通道）：<cwd>/dispatch/reports/inbox/<来源会话ID>[-<派发单>].md。"""
+    name = sanitize_filepart(source)
+    if ticket:
+        name = "%s-%s" % (name, sanitize_filepart(ticket))
+    return Path.cwd() / REPORT_INBOX_DIR / ("%s.md" % name)
+
+
+def append_inbox(source: str, ticket: str, body: str, fallback_note: str = "") -> Path:
+    """把回执追加进收件箱文件（RPC 不可达 / 未注入派发方会话时的降级通道）。"""
+    path = inbox_path_for(source, ticket)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(render_report_message(source, "", ticket, body) + "\n")
+        if fallback_note:
+            handle.write("- 降级原因：%s\n" % fallback_note)
+        handle.write("\n")
+    return path
+
+
+def report_channel_section(dispatcher_session: str = "") -> str:
+    """build_prompt 补充约定的「回执投递通道（DISPATCH-146）」小节。
+
+    派发方会话已知 → 注入 --to 命令示例；未知（派发方环境无 DSH_SESSION_ID，
+    如人工终端调用）→ 目标自动降级写收件箱文件。回执「说什么」仍走必报点表。
+    """
+    if dispatcher_session:
+        target_part = "本任务派发方会话：%s；" % dispatcher_session
+        cmd = ("`awf-dispatch --report --to %s \"<回执文本>\"`"
+               "（--from 默认取当前会话 env DSH_SESSION_ID，--ticket 可带派发单号）" % dispatcher_session)
+    else:
+        target_part = "本任务未注入派发方会话（派发方环境无 DSH_SESSION_ID）；"
+        cmd = ("`awf-dispatch --report \"<回执文本>\"`"
+               "（将自动降级写收件箱文件 `dispatch/reports/inbox/<来源会话ID>.md`）")
+    return (
+        "- **回执投递**：" + target_part + "回执时运行 " + cmd
+        + "（推送派发方收件箱；RPC 不可达自动降级写 `dispatch/reports/inbox/`）。\n"
+        "  细则（必报点表/时机/字段）见技能 `skills/cross-project-dispatch/SKILL.md`，此处不重复。\n"
+    )
+
+
+# DISPATCH-147：空闲/收尾/自检回执（DISPATCH-147 追加）——「无事发生」也报平安，
+# 复用 --report 通道投递派发方，不新造通道。与静默=违规衔接：正常空闲 ≠ 静默失联，
+# 区别在于空闲心跳是否发出；无心跳且无回执 → 派发方仍按疑似失联处理。
+IDLE_REPORT_SECTION = (
+    "- **空闲/收尾/自检（DISPATCH-147）**：完成收尾句「任务完成，会话空闲，可续发」；"
+    "停留 >10 分钟无新回执时发空闲心跳（空闲+仍在线+上次动作时间+无卡死声明），每 ≥10 分钟一次；"
+    "非任务动作可选发「自检状态」回执——细则见技能 `skills/cross-project-dispatch/SKILL.md`「空闲/收尾/自检」节，"
+    "此处不重复。\n"
+)
+
+
+def run_report(args) -> int:
+    """--report 模式：把回执文本投递到派发方会话收件箱（RPC 主通道），
+    失败 / 无目标时降级写收件箱文件。不派发任务、不改目标仓库业务文件。"""
+    text = (args.text or "").strip()
+    if not text:
+        # 第一个位置参数即回执文本（与 `--report "<回执文本>"` 的宣传形式一致）
+        text = (args.target or "").strip()
+    if not text and not sys.stdin.isatty():
+        text = sys.stdin.read().strip()
+    if not text:
+        raise DispatchError("--report 需要回执文本：用 --text / 第一个位置参数提供，或经 stdin 管道传入")
+    source = (args.from_id or dispatcher_session_env() or "").strip()
+    target_session = (args.to or "").strip()
+    ticket = (args.ticket or "").strip()
+    try:
+        _label_api = DshApi()
+        source_label = session_display_label(_label_api, source) if source else ""
+        target_label = session_display_label(_label_api, target_session) if target_session else ""
+    except Exception:
+        source_label, target_label = "", ""
+    message = render_report_message(source, target_session, ticket, text,
+                                    source_label=source_label, target_label=target_label)
+    if args.dry_run:
+        emit("dry-run：回执投递通道（DISPATCH-146），未实际发送", args.json)
+        emit("投递目标：%s" % (target_session or "未指定（将降级写收件箱文件）"), args.json)
+        print(message)
+        return 0
+    if target_session:
+        try:
+            DshApi().prompt(target_session, message, str(uuid.uuid4()))
+            report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                            target_session=target_session, body=text,
+                                            source_label=source_label, target_label=target_label)
+            emit("回执已落盘：%s（DEV-170 数据与渲染分离）" % report_path, args.json)
+        except DispatchError as error:
+            emit("RPC 投递到 %s 失败，降级写收件箱文件：%s" % (target_session, error), args.json)
+            append_inbox(source, ticket, text, fallback_note=str(error))
+            report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                            target_session=target_session, body=text,
+                                            source_label=source_label, target_label=target_label)
+            emit("已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (inbox_path_for(source, ticket), report_path), args.json)
+            return 0
+        emit("已投递到派发方会话 %s 收件箱（inbox；触发其回合处理，派发方无需轮询即可收到）"
+             % target_session, args.json)
+        return 0
+    path = append_inbox(source, ticket, text, fallback_note="未注入派发方会话（--to 缺失）")
+    report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                    target_session=target_session, body=text,
+                                    source_label=source_label, target_label=target_label)
+    emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (path, report_path), args.json)
+    return 0
+
+
+# ---------------------------------------------------------------- 任务包与等待
+
+
+TEAM_SECTION = (
+    "\n可选：用 AgentTeams 执行\n"
+    "- 如果本会话具备团队协作能力，可先把任务拆成 2–3 个可并行的子任务，"
+    "声明子任务之间的依赖，再由队长汇总各子任务结果；拆分后仍需满足本任务包的验收标准。\n"
+    "- 若任务包含文档或契约步骤，按「文档 → 实现 → 独立复核」的顺序组织子任务；"
+    "复核必须独立重跑验证命令，不能只看实现者的自述。\n"
+    "- 任务账本只由一个 Owner 写入；并行子任务只返回结果，汇总时再统一记账，避免多写者冲突。\n"
+    "- 完成后把验收证据（命令输出、目标 HEAD）写回任务包要求的回执格式。\n"
+    "- 如果团队协作插件不可用，直接忽略本节，在普通会话中按任务包完成，不需要额外说明。\n"
+)
+
+
+def build_prompt(target: Path, title: str, kind: str, text: str, team: bool = False,
+                 dispatcher_session: str = "") -> str:
+    prompt = (
+        f"请在本会话中执行下面的跨项目任务。目标仓库：{target}。\n"
+        f"必须遵守本仓库 AGENTS.md 与技能 agent-workflow-scaffold 的 skills/{kind}/SKILL.md（按任务类型加载对应流程手册）。\n\n"
+        "----- 任务包开始 -----\n"
+        f"{text.rstrip()}\n"
+        "----- 任务包结束 -----\n\n"
+        "补充约定：\n"
+        "- 目标项目的任务账本由你维护；派发方不会改你的 current.md / status.md。\n"
+        "- 只允许本地 commit，禁止 push；仓库里的验证命令必须实际执行。\n"
+        "- **回执规范**：按技能 `skills/cross-project-dispatch/SKILL.md`「必报点总表 / 回执时机 / 回执字段 / 违约后果」执行（必报点 1-11：受理/开始/里程碑/状态转换/review/修复/复审/需用户确认/阻塞/完成/空闲收尾；时机、字段、违约规则在技能内，此处不重复）。\n"
+        "- 需用户确认或阻塞时按技能「必报点 8/9」走（不在本会话问用户，回执由派发端转述）；远程办公判定按技能「远程办公状态」节（`awf-dispatch --screen-state`）。\n"
+    )
+    prompt += report_channel_section(dispatcher_session)
+    prompt += IDLE_REPORT_SECTION
+    prompt += (
+        "- 完成后按任务文件要求的回执格式回复，并保留本会话（多轮续跑）；"
+        "用户后续细节与决策经派发端转达（`awf-dispatch --session <会话ID>` 续发）。\n"
+    )
+    if team:
+        prompt += TEAM_SECTION
+    return prompt
+
+
+def find_session_in(rows, session_id: str):
+    for row in rows or []:
+        if row.get("sessionId") == session_id:
+            return row
+    return None
+
+
+def find_session(api: DshApi, session_id: str):
+    return find_session_in(api.sessions(), session_id)
+
+
+def session_title(row: dict) -> str:
+    projections = row.get("projections") or {}
+    values = projections.get("values") or {}
+    return values.get("title") or ""
+
+
+def session_pressure(row: dict):
+    """上下文压力 = pressureTokens / contextWindow；拿不到完整数据时返回 None。"""
+    projections = row.get("projections") or {}
+    values = projections.get("values") or {}
+    pressure = values.get("contextPressure") or {}
+    tokens = pressure.get("pressureTokens")
+    window = pressure.get("contextWindow")
+    if not isinstance(tokens, (int, float)) or isinstance(tokens, bool):
+        return None
+    if not isinstance(window, (int, float)) or isinstance(window, bool) or window <= 0:
+        return None
+    return float(tokens) / float(window)
+
+
+def awf_title_sender(title: str) -> str:
+    """提取 `[awf] [<派发者>] ...` 标题的派发者段；非 [awf] / 无派发者段返回 ''。"""
+    if not title.startswith(AWF_TITLE_PREFIX):
+        return ""
+    body = title[len(AWF_TITLE_PREFIX):].lstrip()
+    match = re.match(r"^\[([^\]]*)\]", body)
+    return match.group(1).strip() if match else ""
+
+
+def row_sender_key(title: str) -> str:
+    """会话的派发者键：`[awf] [<派发者>]` 取派发者段；旧格式 `[awf] <项目>`
+    （DEV-126 时代、无派发者段）按 lead 处理（--session 串台校验 M2 使用）。"""
+    if not title.startswith(AWF_TITLE_PREFIX):
+        return ""
+    return awf_title_sender(title) or "lead"
+
+
+def is_legacy_session_title(title: str, project: str) -> bool:
+    """旧格式标题（无 `[awf]` 标记）：`<项目> · <任务>`（DEV-126 前，用户自建/旧派发
+    产物）。带 `[awf]` 前缀的一律走 [awf] 复用池，不进 legacy 分支。"""
+    title = (title or "").strip()
+    if not title or title.startswith(AWF_TITLE_PREFIX):
+        return False
+    return title.startswith(f"{project} · ")
+
+
+def reuse_rename_needed(row: dict, session_name: str) -> bool:
+    """复用会话的标题不符合命名约定（含旧格式）时需要顺手改名。"""
+    return session_title(row) != session_name
+
+
+def _reuse_rank(row: dict):
+    updated = row.get("updatedAt")
+    updated = updated if isinstance(updated, (int, float)) else 0
+    idle = row.get("running") is False
+    return (0 if idle else 1, -updated)
+
+
+def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
+                         legacy_probe=None, sender: str = "", archived_ids=None):
+    """选承接会话（复用规则：**在 `[awf]` 前缀会话中取闲置会话，改名接新任务**）：
+
+    同 cwd（目标项目）下标题以 `[awf]` 开头的会话构成复用池——**不区分
+    派发者段/任务名/新旧格式**（`[awf] [派发者] [任务]` 新格式与
+    `[awf] <项目> · <模块>` DEV-134 前旧常驻都算）：
+    - 池里有空闲（running=False）→ 选最新空闲的复用（改名接新任务）；
+    - 池里都忙：池未满（<{MAX}）→ 返回 None，调用方新建扩充并发；
+    - 池满（>={MAX}）都忙 → 返回一个忙碌候选，调用方等它空闲（不新建第 {MAX}+1 个）。
+    任务名段不参与判定，复用后由调用方改名覆盖。
+    非 `[awf]` 前缀的会话（用户自建/普通）不进池；池为空时的无前缀旧格式
+    （DEV-126 前 `<项目> · <任务>`）迁移由 legacy_probe 把关闭（RT-1）。
+    DEV-214：本地归档台账（dispatch/archived-sessions.json）记录的会话 id 不进池——
+    组装复用池与统计每项目 [awf] 会话数时排除（archived_ids 缺省从台账读取）。""".format(MAX=MAX_SENDER_SESSIONS)
+    project = Path(target).name
+    real = os.path.realpath(str(target))
+    if archived_ids is None:
+        archived_ids = load_archived_session_ids()
+    same = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("sessionId")) in archived_ids:
+            continue
+        cwd = row.get("cwd") or ""
+        if not cwd or os.path.realpath(cwd) != real:
+            continue
+        if row.get("blank") is not False:
+            continue
+        same.append(row)
+
+    pool = [row for row in same if (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX)]
+    if pool:
+        idle = [row for row in pool if row.get("running") is False]
+        if idle:
+            return sorted(idle, key=_reuse_rank)[0]
+        if len(pool) >= MAX_SENDER_SESSIONS:
+            # 并发达上限（每项目 [awf] 会话总数 ≤ {MAX}）：都忙就等（调用方
+            # wait_for_idle；超时按 --queue-timeout 报错），不新建第 {MAX}+1 个。
+            return sorted(pool, key=_reuse_rank)[0]
+        # 池未满：新建扩充并发（到第 {MAX} 个为止）
+        return None
+    # [awf] 池为空时的 legacy 兜底：无 [awf] 前缀的旧格式（<项目> · xxx，DEV-126 前）
+    # 只有 probe 确认（--allow-legacy-reuse / 消息含派发任务包标记）且唯一候选才迁移；
+    # 多条不猜、运行中不迁移。带 [awf] 前缀的会话已在上方 [awf] 池处理，不进这里。
+    legacy = [
+        row
+        for row in same
+        if row.get("running") is False
+        and is_legacy_session_title(session_title(row), project)
+    ]
+    if len(legacy) == 1 and legacy_probe is not None:
+        try:
+            if not legacy_probe(legacy[0]):
+                return None
+        except Exception:
+            # 探子读不到消息记录（会话/page 失败等）：宁可不迁移，也不赌。
+            return None
+        return legacy[0]
+    return None
+    return None
+
+
+def pressure_hint(row: dict, limit: float = PRESSURE_HINT_LIMIT) -> str:
+    """上下文接近上限时给出提示（只提示，不切换会话）；未达阈值返回空串。"""
+    ratio = session_pressure(row)
+    if ratio is None or ratio < limit:
+        return ""
+    return (
+        f"该会话上下文接近上限（{ratio:.0%}），可考虑加 --new 新建会话；"
+        "默认仍复用它，上下文收缩交给 harness 的压缩机制"
+    )
+
+
+
+def git_head_short(target) -> str:
+    """目标 HEAD 短 sha；非 git 仓库/读取失败返回 '-'。"""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        return proc.stdout.strip() or "-"
+    except Exception:
+        return "-"
+
+
+def report_mid_status(api, session_id, target, waited, head_before=None, json_mode=False):
+    """等待超时前的中途状态回执（DISPATCH-139 P0）：已等 Xs、目标 HEAD 是否变化、
+    会话最近产出；不静默超时——呼应 DISPATCH-134 必有回执。"""
+    if json_mode:
+        return
+    head_now = git_head_short(target)
+    if head_before:
+        if head_now != head_before:
+            head_part = "、目标 HEAD 已变（%s → %s）" % (head_before, head_now)
+        else:
+            head_part = "、目标 HEAD 未变（%s）" % head_before
+    else:
+        head_part = "、目标 HEAD %s" % head_now
+    msgs = ""
+    row = find_session(api, session_id)
+    if row is not None:
+        records = session_records(api, row)
+        if records:
+            msgs = "、会话消息 %d 条" % len(records)
+        else:
+            seq = (row.get("projections") or {}).get("asOfSeq") or 0
+            msgs = "、会话序列推进到 %s" % seq
+    print(
+        "  … 等待超时前中途状态（已等 %ds%s%s）：任务已送达、仍在执行，不静默超时；"
+        "稍后重试/加长等待，或 GUI 查看会话进度" % (int(waited), head_part, msgs),
+        file=sys.stderr,
+    )
+
+
+def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = False,
+                  interval: float = 3.0, target=None, head_before=None):
+    """轮询 session/list 直到会话空闲。
+
+    返回：空闲的会话行；超时返回 None；会话在轮询中消失/被归档返回 SESSION_GONE。
+    """
+    deadline = time.time() + max(0, timeout)
+    last_note = time.time()
+    while True:
+        row = find_session(api, session_id)
+        if row is None:
+            return SESSION_GONE
+        if row.get("running") is False:
+            return row
+        if time.time() >= deadline:
+            if target is not None:
+                report_mid_status(api, session_id, target, timeout, head_before, json_mode)
+            return None
+        if not json_mode and time.time() - last_note > 15:
+            last_note = time.time()
+            print(
+                "  … 目标会话仍在运行，等它空闲后再发送（Ctrl-C 不打断目标回合）",
+                file=sys.stderr,
+            )
+        time.sleep(max(0.0, min(interval, deadline - time.time())))
+
+
+def wait_for_idle_sessions(api: DshApi, session_ids: list, timeout: int, interval: float = 3.0):
+    """监听多个 [awf] 会话，任一变为空闲即返回其会话行。
+
+    供独立监听子进程使用：达到项目 3 会话上限且全忙时，监听器持续观察整个项目池，
+    任一会话结束就把它交还给派发主流程复用；超时返回 None，会话消失返回 SESSION_GONE。
+    """
+    wanted = {str(x) for x in session_ids}
+    deadline = time.time() + max(0, timeout)
+    while True:
+        rows = api.sessions()
+        seen = {str(row.get("sessionId")): row for row in rows if isinstance(row, dict)}
+        if not wanted.intersection(seen):
+            return SESSION_GONE
+        for sid in session_ids:
+            row = seen.get(str(sid))
+            if row is not None and row.get("running") is False:
+                return row
+        if time.time() >= deadline:
+            return None
+        time.sleep(max(0.0, min(interval, deadline - time.time())))
+
+
+def spawn_idle_listener(api: DshApi, session_ids: list, timeout: int, json_mode: bool = False):
+    """启动独立监听子进程，监听项目 [awf] 会话池直到任一空闲。"""
+    payload = json.dumps([str(x) for x in session_ids], ensure_ascii=False)
+    cmd = [sys.executable, str(Path(__file__).resolve()), "--listen-sessions", payload,
+           "--queue-timeout", str(max(0, timeout))]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        out, err = proc.communicate(timeout=max(0, timeout) + 5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return None
+    if proc.returncode != 0:
+        if not json_mode and err.strip():
+            print("  … 会话监听子进程失败：" + err.strip(), file=sys.stderr)
+        return None
+    try:
+        result = json.loads(out.strip() or "{}")
+    except json.JSONDecodeError:
+        return None
+    if result.get("gone"):
+        return SESSION_GONE
+    return result.get("session")
+
+
+def wait_for_turn(api: DshApi, session_id: str, prompt_ms: int, timeout: int,
+                 json_mode: bool, target=None, head_before=None):
+    """轮询到回合结束；返回 (会话行, 回合耗时秒) 或 (None, None)。
+
+    耗时优先用首次观测到 running 的时刻；瞬时回合可能一次都没观测到 running，
+    此时用 prompt 发送时刻近似（因此僵尸判定阈值只用于「即时结束」）。
+    --wait 只是「想拿本轮结果」的短等待，不是无脑长等：任务已送达，超时则返回
+    （调用方按「派发成功、回合未结束」处理），不阻塞、不重发。
+    """
+    started = False
+    started_at = None
+    deadline = time.time() + timeout
+    last_note = 0
+    wait_start = time.time()
+    while time.time() < deadline:
+        row = find_session(api, session_id)
+        if row:
+            running = bool(row.get("running"))
+            if running:
+                started = True
+                if started_at is None:
+                    started_at = time.time()
+            elif started or (not row.get("blank") and (row.get("updatedAt") or 0) >= prompt_ms):
+                if started_at is None:
+                    started_at = prompt_ms / 1000.0
+                return row, max(0.0, time.time() - started_at)
+        if not json_mode and time.time() - last_note > 15:
+            last_note = time.time()
+            elapsed = int(time.time() - wait_start)
+            print(
+                f"  … 目标会话执行中（已 {elapsed}s / 上限 {timeout}s）——任务已送达，不阻塞。",
+                file=sys.stderr,
+            )
+            print("    Ctrl-C 保持异步，稍后在 GUI 查看会话进度即可", file=sys.stderr)
+        time.sleep(3)
+    if target is not None:
+        report_mid_status(api, session_id, target, time.time() - wait_start, head_before, json_mode)
+    return None, None
+
+
+def session_records(api: DshApi, row: dict):
+    """读取会话消息记录；拿不到（无 asOfSeq / RPC 失败）返回 None。"""
+    projections = row.get("projections") or {}
+    through = projections.get("asOfSeq")
+    if not isinstance(through, int):
+        return None
+    try:
+        page = api.rpc(
+            "session/page",
+            {
+                "request": {
+                    "address": {"kind": "session", "sessionId": row["sessionId"]},
+                    "throughSeq": through,
+                    "maxMessages": 300,
+                }
+            },
+            timeout=30,
+        )
+    except DispatchError:
+        return None
+    return page.get("records", [])
+
+
+def latest_assistant(api: DshApi, row: dict):
+    records = session_records(api, row)
+    if records is None:
+        return None
+    texts = []
+    for record in records:
+        event = record.get("event") or {}
+        if event.get("type") != "assistant/message":
+            continue
+        message = (event.get("data") or {}).get("message") or {}
+        for part in message.get("content") or []:
+            if part.get("type") == "text" and part.get("text"):
+                texts.append(part["text"])
+    return texts[-1] if texts else None
+
+
+def _message_text(message: dict) -> str:
+    parts = []
+    for part in (message or {}).get("content") or []:
+        if part.get("type") == "text" and part.get("text"):
+            parts.append(part["text"])
+    return "\n".join(parts)
+
+
+DISPATCH_MARKER = "任务包开始"
+
+
+def session_has_dispatch_marker(api: DshApi, row: dict,
+                                marker: str = DISPATCH_MARKER) -> bool:
+    """会话消息里是否出现过派发任务包标记（= awf-dispatch 曾在它里面派发过）。
+
+    RT-1：旧格式会话能否迁移，必须确认标记或用户显式 `--allow-legacy-reuse`，
+    避免把用户自建的 `<项目> · xxx` 普通会话误当旧格式复用/改名/注入任务。
+    读不到消息记录（None）时返回 False——宁可不迁移，也不赌。
+    """
+    records = session_records(api, row)
+    if records is None:
+        return False
+    for record in records:
+        event = record.get("event") or {}
+        if "user" not in str(event.get("type") or "").lower():
+            continue
+        message = (event.get("data") or {}).get("message") or {}
+        if marker in _message_text(message):
+            return True
+    return False
+
+
+def turn_activity(api: DshApi, row: dict, since_ms: int = 0) -> dict:
+    """统计「本回合」的活动证据：assistant 文本输出 / 工具调用。
+
+    优先用事件 time 过滤 prompt 之后产生的事件，避免把会话历史当成新回合产出；
+    事件没有时间戳时，退回用最后一个 turn/end 的 turn 号过滤。
+    available=False 表示读不到记录（不能据此判僵尸）。
+    """
+    records = session_records(api, row)
+    if records is None:
+        return {
+            "available": False,
+            "has_output": False,
+            "has_tool": False,
+            "turn_ended": False,
+            "text": None,
+        }
+
+    current_turn = None
+    turn_ended = False
+    for record in records:
+        event = record.get("event") or {}
+        if event.get("type") != "turn/end":
+            continue
+        data = event.get("data") or {}
+        turn = data.get("turn")
+        if isinstance(turn, int):
+            current_turn = turn
+            stamp = event.get("time")
+            if not since_ms or not isinstance(stamp, int):
+                turn_ended = True
+            elif stamp >= since_ms:
+                turn_ended = True
+
+    texts = []
+    has_tool = False
+    for record in records:
+        event = record.get("event") or {}
+        data = event.get("data") or {}
+        event_type = str(event.get("type") or "").lower()
+        stamp = event.get("time")
+        if since_ms and isinstance(stamp, int):
+            # 事件时间最可靠：只统计 prompt 之后产生的事件（历史回合不参与）。
+            if stamp < since_ms:
+                continue
+        elif current_turn is not None and data.get("turn") != current_turn:
+            continue
+        if "tool" in event_type:
+            has_tool = True
+        if event_type == "assistant/message":
+            message = data.get("message") or {}
+            for part in message.get("content") or []:
+                part_type = str(part.get("type") or "").lower()
+                if part_type == "text" and part.get("text"):
+                    texts.append(part["text"])
+                elif "tool" in part_type:
+                    has_tool = True
+    return {
+        "available": True,
+        "has_output": bool(texts),
+        "has_tool": has_tool,
+        "turn_ended": turn_ended,
+        "text": texts[-1] if texts else None,
+    }
+
+
+def wait_for_landing(target: Path, task_id: str, initial_head, timeout: float,
+                     interval: float = LANDING_POLL_SECONDS):
+    """回合结束后等落地：目标 HEAD 变化（commit）或账本 done.md 出现任务 ID（归档）。
+
+    initial_head 为 None 表示不比较 HEAD（目标非 git 仓库，仅等归档）；
+    轮询中的读取失败（None）只跳过本次，不能当作 HEAD 变化。
+    RT-3：HEAD 变化后还要归因——最新 commit 含本任务 ID 才算落地（commit）；
+    无关 commit（其它会话/用户提交）不判落地，继续等 done.md 或超时。
+    没有任务 ID 时退回旧语义（仅按 HEAD 变化判定），避免 ID 缺失票据永远不落地。
+    返回 "commit" / "done" / None（超时未落地）。
+    """
+    deadline = time.time() + max(0.0, timeout)
+    while True:
+        current_head = git_head_sha(target)
+        if (
+            initial_head is not None
+            and current_head is not None
+            and current_head != initial_head
+        ):
+            # RT-3 区间归因：HEAD 变了还要确认区间里有「本任务」的 commit——
+            # initial..HEAD 任一 commit 含任务 ID 即落地（被无关 commit 压顶仍算）；
+            # 区间里只有无关 commit 不判落地，继续等 done.md 或超时。
+            # 没有任务 ID 时退回仅按 HEAD 变化判定（保持 ID 缺失票据兼容）。
+            if not task_id or commit_range_has_id(target, task_id, initial_head):
+                return "commit"
+        if task_id and ledger_has_id(target, task_id):
+            return "done"
+        if time.time() >= deadline:
+            return None
+        time.sleep(max(0.0, min(interval, deadline - time.time())))
+
+
+# ---------------------------------------------------------------- 日志
+
+
+def append_log(entry: str) -> Path:
+    local = Path.cwd() / "dispatch"
+    path = local / "log.md" if local.is_dir() else agents_home() / "dispatch.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(entry.rstrip() + "\n\n")
+    return path
+
+
+def git_head(target: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(target), "log", "-1", "--oneline"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return "N/A"
+
+
+def git_head_sha(target: Path):
+    """落地判定用：HEAD 的 commit sha。
+
+    空仓库（尚无 commit）返回空串 ""；读取失败（非 git、仓库不可读等）
+    返回 None，两者必须严格区分，避免把读取失败误判成「HEAD 变了」。
+    """
+    try:
+        proc = run_git(["git", "-C", str(target), "rev-parse", "HEAD"])
+        if proc.returncode == 0:
+            return proc.stdout.strip() or None
+        # rev-parse HEAD 失败：只有「仓库可读但没有任何 commit」才算空仓库。
+        repo = run_git(["git", "-C", str(target), "rev-parse", "--git-dir"])
+        if repo.returncode == 0:
+            count = run_git(["git", "-C", str(target), "rev-list", "--all", "--count"])
+            if count.returncode == 0 and count.stdout.strip() == "0":
+                return ""
+        return None
+    except OSError:
+        return None
+
+
+def commit_range_has_id(target: Path, task_id: str, since_sha) -> bool:
+    """`since_sha..HEAD` 区间内是否有 commit 消息含本任务 ID（RT-3 区间归因）。
+
+    任务 commit 落地后 10s 内被无关 commit 压顶（HEAD 已不是任务 commit）仍算落地；
+    since_sha 为空（如空仓库基线 ""）时把全部 commit 都视为区间内。
+    没有任务 ID 或读不到日志（非 git 仓库、HEAD 为空等）返回 False——
+    不据不可靠信息判落地。
+    """
+    if not task_id:
+        return False
+    scope = f"{since_sha}..HEAD" if since_sha else "HEAD"
+    proc = run_git(
+        ["git", "-C", str(target), "log", "-E", f"--grep={id_ere(task_id)}",
+         "--format=%H", scope]
+    )
+    if proc.returncode != 0:
+        return False
+    return bool(proc.stdout.strip())
+
+
+def log_entry(alias: str, target: Path, title: str, session_id: str, session_title_value: str,
+              workspace: dict, status: str, final_text: str, task: Path,
+              next_step: str = "", reused=None, session_note: str = "",
+              module: str = "", report_to: str = "") -> str:
+    flat = re.sub(r"\s+", " ", final_text or "").strip()
+    excerpt = flat[:300] + ("…（已截断，完整回执见会话）" if len(flat) > 300 else "")
+    workspace_title = (workspace or {}).get("title", "未知工作区")
+    workspace_id = (workspace or {}).get("workspaceId", "-")
+    if isinstance(reused, str):
+        source = reused
+    else:
+        source = "复用" if reused else "新建"
+    return (
+        f"## {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} → {alias}\n\n"
+        f"- 目标：{target}\n"
+        f"- 任务：{title}（{task}）\n"
+        + (f"- 模块：{module}\n" if module else "")
+        + f"- 工作区：{workspace_title}（{workspace_id}）\n"
+        f"- 会话：{session_id}（{session_title_value or title}）\n"
+        + (f"- 回执通道：派发方会话 {report_to}（目标回执经 `awf-dispatch --report` 投递该会话收件箱）\n"
+           if report_to else "")
+        + (f"- 会话来源：{source}\n" if reused is not None else "")
+        + (f"- 会话提示：{session_note}\n" if session_note else "")
+        + f"- 状态：{status}\n"
+        f"- 目标 HEAD：{git_head(target)}\n"
+        + (f"- 回到会话：{next_step}\n" if next_step else "")
+        + (f"- 回执节选：{excerpt}\n" if excerpt else "")
+    )
+
+
+# ---------------------------------------------------------------- 票据清理（--prune，用完即删）
+
+TICKET_ID_RE = re.compile(r"(?<![A-Za-z0-9])[A-Z]+-[0-9]+(?![0-9])")
+TICKET_TARGET_RE = re.compile(
+    r"^\s*[-*]\s*目标项目\s*[：:]\s*(.+?)\s*[（(]\s*(.+?)\s*[）)]\s*$", re.M
+)
+
+
+def parse_ticket_target(text: str):
+    """从票据正文解析「- 目标项目：<别名>（<绝对路径>）」；解析不到返回 (None, None)。"""
+    match = TICKET_TARGET_RE.search(text or "")
+    if not match:
+        return None, None
+    alias = match.group(1).strip()
+    target = Path(match.group(2).strip()).expanduser()
+    if not alias or not target.is_absolute():
+        return None, None
+    return alias, target
+
+
+def ticket_task_id(name: str):
+    """从票据文件名取任务 ID（`[A-Z]+-[0-9]+`）；不含 ID 返回 None。"""
+    match = TICKET_ID_RE.search(Path(name).name)
+    return match.group(0) if match else None
+
+
+def id_regex(task_id: str):
+    """带边界的 ID 匹配：DEV-007 不命中 DEV-0071。"""
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(task_id)}(?![0-9])")
+
+
+def id_ere(task_id: str) -> str:
+    """git --grep 用的 POSIX ERE（不支持 lookbehind）。"""
+    return rf"(^|[^A-Za-z0-9]){re.escape(task_id)}([^0-9]|$)"
+
+
+def run_git(args) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+
+
+def is_git_repo(target: Path) -> bool:
+    if not target.is_dir():
+        return False
+    return run_git(["git", "-C", str(target), "rev-parse", "--git-dir"]).returncode == 0
+
+
+def commit_dates(target: Path, task_id: str):
+    """目标仓库里提交消息命中任务 ID 的提交日期（新到旧）；没有返回空列表。"""
+    proc = run_git(
+        [
+            "git",
+            "-C",
+            str(target),
+            "log",
+            "--all",
+            "-E",
+            f"--grep={id_ere(task_id)}",
+            "--format=%cs",
+        ]
+    )
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def ledger_has_id(target: Path, task_id: str) -> bool:
+    """目标账本是否含该 ID（工作区与 HEAD 都看）。
+
+    DEV-127 目录式：tasks/<type>/done/<ID>.md 单任务文件 + done/README.md 索引；
+    兼容旧形态 tasks/<type>/done.md（迁移前项目）。
+    """
+    pattern = id_regex(task_id)
+    for done in sorted((target / "agent-workflow/tasks").glob("*/done/*.md")):
+        try:
+            if pattern.search(done.read_text(encoding="utf-8", errors="replace")):
+                return True
+        except OSError:
+            continue
+    # 旧形态：单文件含 ID（含块与归档行）
+    for done in sorted((target / "agent-workflow/tasks").glob("*/done.md")):
+        try:
+            if pattern.search(done.read_text(encoding="utf-8", errors="replace")):
+                return True
+        except OSError:
+            continue
+    listing = run_git(
+        [
+            "git",
+            "-C",
+            str(target),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+            "--",
+            "agent-workflow/tasks",
+        ]
+    )
+    if listing.returncode != 0:
+        return False
+    for rel in listing.stdout.splitlines():
+        if not (rel.endswith("/done.md") or "/done/" in rel):
+            continue
+        shown = run_git(["git", "-C", str(target), "show", f"HEAD:{rel}"])
+        if shown.returncode == 0 and pattern.search(shown.stdout):
+            return True
+    return False
+
+
+def judge_ticket(target, task_id: str):
+    """判定票据：completed / pending / unknown（只读，不写文件）。"""
+    if target is None:
+        return "unknown", "缺少「目标项目」行或路径不是绝对路径"
+    if not target.is_dir():
+        return "unknown", f"目标路径不存在：{target}"
+    if not is_git_repo(target):
+        return "unknown", f"目标不是 git 仓库：{target}"
+    dates = commit_dates(target, task_id)
+    if dates:
+        return "completed", f"commit 命中 {dates[0]}"
+    if ledger_has_id(target, task_id):
+        return "completed", "目标账本 done/ 已归档（提交消息不含 ID）"
+    return "pending", "commit 消息与账本 done/ 都未命中"
+
+
+def scan_tickets(root: Path):
+    """扫描 ./dispatch/tasks/（含子目录，如 upgrade-v<版本>/）的票据并逐个判定；只读，不删除。"""
+    tasks_dir = root / "dispatch/tasks"
+    items = []
+    if not tasks_dir.is_dir():
+        return items
+    for ticket in sorted(tasks_dir.rglob("*.md")):
+        if not ticket.is_file():
+            continue
+        item = {
+            "file": ticket.relative_to(root).as_posix(),
+            "alias": None,
+            "target": None,
+            "taskId": None,
+            "status": "unknown",
+            "reason": "",
+        }
+        try:
+            text = ticket.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            item["reason"] = f"读取失败：{error}"
+            items.append(item)
+            continue
+
+        alias, target = parse_ticket_target(text)
+        task_id = ticket_task_id(ticket.name)
+        item["alias"] = alias
+        item["target"] = str(target) if target else None
+        item["taskId"] = task_id
+
+        reasons = []
+        if alias is None:
+            reasons.append("缺少「目标项目：<别名>（<绝对路径>）」行")
+        if task_id is None:
+            reasons.append("文件名不含任务 ID（[A-Z]+-[0-9]+）")
+        if reasons:
+            item["reason"] = "；".join(reasons)
+            items.append(item)
+            continue
+
+        status, reason = judge_ticket(target, task_id)
+        item["status"] = status
+        item["reason"] = reason
+        items.append(item)
+    return items
+
+
+def git_tracked(root: Path, rel: str) -> bool:
+    proc = run_git(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", rel])
+    return proc.returncode == 0
+
+
+def delete_ticket(root: Path, source: Path) -> str:
+    """删除票据文件（用完即删，不留存根）：git 索引里的用 git rm，其余直接 unlink。
+
+    删除后向上清理空目录（如 dispatch/tasks/upgrade-v<版本>/），不留空壳。
+    """
+    rel_src = source.relative_to(root).as_posix()
+    if git_tracked(root, rel_src):
+        proc = run_git(["git", "-C", str(root), "rm", "-q", "--", rel_src])
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise DispatchError(f"git rm 失败：{rel_src}：{detail}")
+    else:
+        try:
+            source.unlink()
+        except OSError as error:
+            raise DispatchError(f"删除失败：{rel_src}：{error}")
+    _prune_empty_parents(source.parent)
+    return "deleted"
+
+
+def _prune_empty_parents(start: Path) -> None:
+    """自票据所在目录向上删除空目录，直到 dispatch/tasks 为止（tasks 本身保留）。"""
+    cur = start
+    while cur.name != "tasks":
+        try:
+            if cur.is_dir() and not any(cur.iterdir()):
+                cur.rmdir()
+            else:
+                return
+        except OSError:
+            return
+        cur = cur.parent
+
+
+def run_prune(args) -> int:
+    root = Path.cwd().resolve()
+    tasks_dir = root / "dispatch/tasks"
+    items = scan_tickets(root)
+    apply = bool(args.apply)
+    counts = {"completed": 0, "pending": 0, "unknown": 0}
+    deleted = 0
+    errors = 0
+
+    if apply:
+        for item in items:
+            if item["status"] != "completed":
+                continue
+            try:
+                delete_ticket(root, root / item["file"])
+            except DispatchError as error:
+                item["error"] = str(error)
+                errors += 1
+                emit(f"FAIL  {error}", args.json)
+                continue
+            deleted += 1
+            item["deleted"] = True
+
+    for item in items:
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": errors == 0,
+                    "mode": "prune",
+                    "dryRun": not apply,
+                    "root": str(root),
+                    "tasks": str(tasks_dir),
+                    "items": items,
+                    "summary": dict(
+                        counts,
+                        total=len(items),
+                        deleted=deleted,
+                        errors=errors,
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        mode = "apply（会删除文件）" if apply else "dry-run（只读；加 --apply 才删除文件）"
+        print(f"prune：{mode}")
+        print(f"票据目录：{tasks_dir}")
+        if not items:
+            print("没有票据：dispatch/tasks 为空或不存在。")
+        for item in items:
+            print()
+            print(f"{item['status']:<9} {item['file']}")
+            print(f"  目标项目：{item['alias'] or '-'} → {item['target'] or '-'}")
+            print(f"  任务ID：{item['taskId'] or '-'}")
+            print(f"  判定：{item['status']}（{item['reason']}）")
+            if item.get("deleted"):
+                print("  删除：已完成")
+            elif item["status"] != "completed":
+                print("  保留：未完成（pending/unknown 不删，核验后重跑 --prune --apply）")
+        print()
+        print(
+            "合计：completed {c} / pending {p} / unknown {u}（共 {n}）".format(
+                c=counts["completed"], p=counts["pending"], u=counts["unknown"], n=len(items)
+            )
+        )
+        if apply:
+            print(f"已删除 {deleted} 个票据；失败 {errors} 个。")
+        else:
+            print("dry-run：未删除任何文件；确认后加 --apply 执行。")
+    return 2 if errors else 0
+
+
+# ---------------------------------------------------------------- 本地归档台账与并发互斥（DEV-214）
+#
+# 四件套：① 归档台账（archived-sessions.json）排除已归档会话；② --new 超上限需
+# --allow-over-3 确认并留痕；③ 同项目新建决策文件锁串行化、锁后重读池再决策；
+# ④ --cleanup 列出每项目超 3 的空闲 [awf] 会话并归档写入台账。
+# 台账与锁文件都在派发方 cwd 的 dispatch/ 下（.gitignore 已忽略 dispatch/，不入库）。
+
+
+def archived_ledger_path() -> Path:
+    """本地归档台账路径：<cwd>/dispatch/archived-sessions.json。"""
+    return Path.cwd() / "dispatch" / ARCHIVED_LEDGER_NAME
+
+
+def load_archived_session_ids() -> set:
+    """读归档台账，返回已归档会话 id 集合；台账缺失/损坏返回空集（保守：不误伤）。"""
+    path = archived_ledger_path()
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    archived = data.get("archived") if isinstance(data, dict) else None
+    if not isinstance(archived, list):
+        return set()
+    return {str(item.get("sessionId")) for item in archived if isinstance(item, dict)}
+
+
+def record_archived_sessions(entries: list) -> None:
+    """把归档记录（{sessionId, project, title}）追加进台账（按 sessionId 去重）。
+    --cleanup --apply 归档成功后调用；归档过的会话从此不参加复用池/数量统计。"""
+    path = archived_ledger_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = []
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            existing = data.get("archived", []) if isinstance(data, dict) else []
+        except (OSError, ValueError):
+            existing = []
+    known = {str(item.get("sessionId")) for item in existing if isinstance(item, dict)}
+    for entry in entries or []:
+        sid = str(entry.get("sessionId"))
+        if not sid or sid in known:
+            continue
+        item = {"sessionId": sid, "project": entry.get("project") or "",
+                "title": entry.get("title") or "",
+                "archivedAt": datetime.datetime.now().isoformat(timespec="seconds")}
+        existing.append(item)
+        known.add(sid)
+    path.write_text(
+        json.dumps({"archived": existing}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def run_forget_archived(args) -> int:
+    """--forget-archived：重置本地归档台账（删除存档文件）。"""
+    path = archived_ledger_path()
+    if path.is_file():
+        path.unlink()
+        msg = f"已重置归档台账：{path}（删除；其中会话不再被排除，恢复进入复用池/统计）"
+        reset = True
+    else:
+        msg = f"归档台账不存在：{path}（无需重置）"
+        reset = False
+    if args.json:
+        print(json.dumps({"ok": True, "mode": "forget-archived",
+                          "path": str(path), "reset": reset}, ensure_ascii=False))
+    else:
+        print(msg)
+    return 0
+
+
+def project_lock_path(target: Path) -> Path:
+    """同项目新建决策锁文件：<cwd>/dispatch/.lock-<project>。"""
+    base = Path.cwd() / "dispatch"
+    token = re.sub(r"[^A-Za-z0-9_.-]", "_", (target.name or "project"))
+    return base / (LOCK_FILE_PREFIX + token)
+
+
+@contextlib.contextmanager
+def project_new_lock(target: Path):
+    """同一项目新建决策的文件锁串行化：持锁期间同项目其他派发进程/线程阻塞；
+    调用方**在锁内重读池再决策**，避免并发新建出第 N+1 个会话。flock 随进程
+    退出/关闭自动释放（持锁方崩溃不产生永久锁）；非 Unix 平台退化为空操作。"""
+    if fcntl is None:
+        yield
+        return
+    lock_path = project_lock_path(target)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            # 有并发方正在决策：阻塞等它完成（其释放/退出后自动拿到）
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
+def project_awf_pool(rows, target: Path, archived_ids=None) -> list:
+    """项目 [awf] 会话池：同 cwd + `[awf]` 前缀 + 未归档（排除台账记录的 id）。
+    统计每项目 [awf] 会话数（上限判定/监听池/--cleanup）统一走这里。"""
+    if archived_ids is None:
+        archived_ids = load_archived_session_ids()
+    real = os.path.realpath(str(target))
+    pool = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("sessionId")) in archived_ids:
+            continue
+        if row.get("blank") is not False:
+            continue
+        cwd = row.get("cwd") or ""
+        if not cwd or os.path.realpath(cwd) != real:
+            continue
+        if not (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX):
+            continue
+        pool.append(row)
+    return pool
+
+
+def over_limit_guard(pool: list, allow_over_3: bool, json_mode: bool = False) -> str:
+    """--new 上限校验（DEV-214）：目标项目 [awf] 池 ≥ MAX 且**全忙**时，--new 继续
+    新建需 --allow-over-3 显式确认，不再静默绕过上限；确认后返回留痕说明（写入派发日志）。
+    不满足条件返回空串。"""
+    if len(pool) < MAX_SENDER_SESSIONS:
+        return ""
+    if any(row.get("running") is False for row in pool):
+        # 池满但有空闲：--new 用于隔离/调试的语义仍成立，不拦（仅全忙才算满池等待场景）
+        return ""
+    if not allow_over_3:
+        raise DispatchError(
+            f"--new 超项目上限：目标项目已有 {len(pool)} 个 [awf] 会话且全部运行中，"
+            f"已到每项目 {MAX_SENDER_SESSIONS} 个并发上限；继续新建会突破该上限。"
+            "如确认需要隔离会话，请显式加 --allow-over-3（本次超限新建会写入派发日志留痕）"
+        )
+    emit(
+        f"超上限新建：目标项目 [awf] 会话已达 {len(pool)} 个且全忙，"
+        f"--allow-over-3 已确认，仍创建新会话（日志留痕）",
+        json_mode,
+    )
+    return "超上限新建（--allow-over-3 确认）"
+
+
+def collect_cleanup_candidates(rows, archived_ids=None) -> list:
+    """按项目聚合 [awf] 会话，找出**每项目超 {MAX} 的空闲 [awf] 会话**（--cleanup 候选）。
+    规则：每项目保留最近更新的 {MAX} 个 [awf] 会话；其余会话中空闲（running=False）为归档
+    候选、运行中为跳过（不归档运行中会话）。返回 [{{"project","path","keep","candidates","skipped"}}]。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    if archived_ids is None:
+        archived_ids = load_archived_session_ids()
+    by_project = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("sessionId")) in archived_ids:
+            continue
+        if row.get("blank") is not False:
+            continue
+        cwd = (row.get("cwd") or "").strip()
+        if not cwd:
+            continue
+        if not (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX):
+            continue
+        key = os.path.realpath(cwd)
+        info = by_project.setdefault(
+            key, {"project": os.path.basename(key.rstrip("/\\")) or key,
+                  "path": key, "sessions": []})
+        info["sessions"].append(row)
+    groups = []
+    for info in by_project.values():
+        pool = info["sessions"]
+        if len(pool) <= MAX_SENDER_SESSIONS:
+            continue
+        ranked = sorted(pool, key=lambda r: r.get("updatedAt") or 0, reverse=True)
+        info["keep"] = ranked[:MAX_SENDER_SESSIONS]
+        over = ranked[MAX_SENDER_SESSIONS:]
+        info["candidates"] = [r for r in over if r.get("running") is False]
+        info["skipped"] = [r for r in over if r.get("running") is not False]
+        if info["candidates"] or info["skipped"]:
+            groups.append(info)
+    return groups
+
+
+def cleanup_sessions(api, rows, apply=False, json_mode=False) -> dict:
+    """--cleanup 主体：列出/归档每项目超 {MAX} 的空闲 [awf] 会话。
+    每个候选经 workspace/archiveSession 归档（apply=True）并写入本地归档台账
+    archived-sessions.json；运行中的超限会话跳过。返回结果字典（供 --json 与测试断言）。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    groups = collect_cleanup_candidates(rows)
+    result = {"ok": True, "mode": "cleanup", "dryRun": not apply,
+              "projects": [], "archived": [], "skipped": [], "errors": []}
+    for info in groups:
+        proj = {
+            "project": info["project"],
+            "path": info["path"],
+            "total": len(info["sessions"]),
+            "keep": [r.get("sessionId") for r in info["keep"]],
+            "candidates": [r.get("sessionId") for r in info["candidates"]],
+            "skipped": [r.get("sessionId") for r in info["skipped"]],
+        }
+        result["projects"].append(proj)
+        for row in info["candidates"]:
+            sid = row.get("sessionId")
+            if apply:
+                try:
+                    if hasattr(api, "archive_session"):
+                        api.archive_session(sid)
+                    else:
+                        api.rpc("workspace/archiveSession", {"request": {"sessionId": sid}})
+                except DispatchError as error:
+                    result["errors"].append({"sessionId": sid, "error": str(error)})
+                    emit(f"FAIL  归档失败 {sid}：{error}", json_mode)
+                    continue
+                result["archived"].append({
+                    "sessionId": sid, "project": info["project"], "title": session_title(row)})
+                emit(f"已归档会话：{sid}（{info['project']}）", json_mode)
+        for row in info["skipped"]:
+            result["skipped"].append({
+                "sessionId": row.get("sessionId"), "project": info["project"],
+                "title": session_title(row)})
+    if apply and result["archived"]:
+        record_archived_sessions(result["archived"])
+    result["ok"] = not result["errors"]
+    return result
+
+
+def run_cleanup(args) -> int:
+    """--cleanup 命令入口：扫描全部工作区会话，列出/归档每项目超 {MAX} 的空闲 [awf] 会话。""".format(MAX=MAX_SENDER_SESSIONS)
+    api = DshApi(args.web_url)
+    rows = api.sessions()
+    apply = bool(args.apply)
+    result = cleanup_sessions(api, rows, apply=apply, json_mode=args.json)
+    if args.json:
+        result["ledger"] = str(archived_ledger_path())
+        print(json.dumps(result, ensure_ascii=False))
+        return 2 if result["errors"] else 0
+    mode = "apply（会归档会话并写入台账）" if apply else "dry-run（只读；加 --apply 才归档）"
+    print(f"cleanup：{mode}")
+    if not result["projects"]:
+        print("没有需要清理的项目：[awf] 会话均未超过每项目 3 个。")
+        return 0
+    for proj in result["projects"]:
+        print()
+        print(f"{proj['project']}（{proj['path']}）：共 {proj['total']} 个 [awf] 会话")
+        print(f"  保留（最近更新 {len(proj['keep'])} 个）：" + "、".join(proj["keep"]))
+        if proj["candidates"]:
+            print(
+                f"  超限空闲 {len(proj['candidates'])} 个"
+                + ("" if apply else "（加 --apply 归档）")
+                + "：" + "、".join(proj["candidates"]))
+        if proj["skipped"]:
+            print(f"  超限运行中（跳过，不归档）：" + "、".join(proj["skipped"]))
+    if result["archived"]:
+        print(f"\n已归档 {len(result['archived'])} 个会话并写入台账：{archived_ledger_path()}")
+    if result["errors"]:
+        print(f"\n归档失败 {len(result['errors'])} 个（见上）。")
+        return 2
+    if not apply:
+        print("\ndry-run：未归档任何会话；确认后加 --apply 执行。")
+    else:
+        print(f"\n台账：{archived_ledger_path()}")
+    return 0
+
+
+# ---------------------------------------------------------------- 派发模式
+
+
+def preflight(target: Path, args, need_channel: bool):
+    check_workflow(target)
+    emit("G1 工作流：ok", args.json)
+    check_role(target, getattr(args, "task_text", "") or "", args)   # DEV-122：--check-role 软校验
+    result = {
+        "target": str(target),
+        "gate": "ok",
+        "git": check_git(target, args.allow_dirty, getattr(args, "allow_dirty_scope", "")),
+        "active": check_active(target, args.allow_active),
+        "workspace": None,
+        "api": None,
+        "sessions": None,
+    }
+    emit(f"G3 可写：ok（{result['git']}；{result['active']}）", args.json)
+
+    if not need_channel:
+        emit("G2/G4：跳过（当前回退模式不要求工作区会话）", args.json)
+        return result
+
+    try:
+        api = DshApi(args.web_url)
+        # G4 认证/连通性探针；同时缓存这次 session/list，复用查找直接用它，
+        # 不再在 dispatch_session 里重复拉一次。
+        rows = api.sessions()
+    except DispatchError as error:
+        if args.add_workspace:
+            raise
+        raise DispatchError(str(error) + "；或在 GUI 添加工作区后用 --add-workspace")
+
+    workspace = find_workspace(target)
+    if workspace is None and args.add_workspace:
+        if args.dry_run:
+            emit("G2 工作区：缺失（dry-run 不登记；实际运行会 --add-workspace）", args.json)
+        else:
+            workspace = api.workspace_create(target)
+            print(f"已登记工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）")
+    if workspace is None:
+        raise DispatchError(
+            f"G2 工作区失败：{target} 未登记为 DSH 工作区；"
+            "在 GUI「添加工作区」后重试，或加 --add-workspace（dry-run 不登记，因此同样失败）"
+        )
+
+    result["workspace"] = workspace
+    result["api"] = api
+    result["sessions"] = rows
+    emit(f"G2 工作区：ok（{workspace.get('title')} / {workspace.get('workspaceId')}）", args.json)
+    emit(f"G4 通道：ok（{api.base}）", args.json)
+    return result
+
+
+def wait_session_ready(api, rows, session_id, target, args):
+    """复用路径公共等待：先确认会话存在；运行中的会话进入等待队列——项目 [awf] 池满
+    （≥{MAX}）时启动独立监听子进程监听整个池（任一会话空闲即返回复用），测试桩/非
+    DshApi 走内联轮询。返回可发送的会话行；会话消失（SESSION_GONE）与超时分别抛错。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    row = find_session_in(rows, session_id) or find_session(api, session_id)
+    if row is None:
+        raise DispatchError(
+            f"复用会话在等待前消失了：{session_id}；会话不可恢复，请重新派发（或用 --new 新建）"
+        )
+    if row.get("running") is not False:
+        emit(
+            f"目标会话 {session_id} 正在运行，进入等待队列（最多 {args.queue_timeout}s；"
+            "--queue-timeout 可调）",
+            args.json,
+        )
+        # 项目池达到 3 个且全忙：启动独立监听子进程监听整个 [awf] 池，
+        # 任一会话空闲即返回给主派发流程复用；测试桩/非 DshApi 仍走内联等待。
+        project_pool = project_awf_pool(rows, target)
+        if isinstance(api, DshApi) and len(project_pool) >= MAX_SENDER_SESSIONS:
+            emit("启动会话监听子进程：等待项目 [awf] 会话池任一空闲后继续发送", args.json)
+            outcome = spawn_idle_listener(
+                api, [r["sessionId"] for r in project_pool], args.queue_timeout, args.json)
+        else:
+            outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json, target=target)
+        if isinstance(outcome, dict) and outcome.get("sessionId"):
+            session_id = outcome["sessionId"]
+            row = outcome
+        if outcome is SESSION_GONE:
+            raise DispatchError(
+                f"等待期间会话消失或被归档：{session_id}；"
+                "原会话不可恢复，请重新派发（GUI 确认后用 --new 新建会话）"
+            )
+        if outcome is None:
+            raise DispatchError(
+                f"目标会话 {session_id} 队列等待超时（>{args.queue_timeout}s）："
+                "会话仍在运行；稍后重试、加大 --queue-timeout，"
+                "或加 --new 新建会话（原会话保留）"
+            )
+        row = outcome
+        emit(f"会话已空闲：{session_id}", args.json)
+    return row
+
+
+def decide_new_session(api, fresh_rows, target, workspace_id, args, module, session_name,
+                       title, sender, legacy_probe) -> dict:
+    """新建决策（DEV-214，在项目文件锁内调用；fresh_rows = 锁后重读的会话列表）。
+
+    锁内**重读池再决策**：
+    - 复用模式：若重读后已有可复用候选（并发调用方刚建出/本机新出现空闲）→ 改复用、
+      不再重复新建；候选运行中返回 running=True，由调用方**锁外**等其空闲（锁内不排队）；
+    - --new 模式：项目 [awf] 池 ≥{MAX} 且全忙 → 需 --allow-over-3 显式确认（否则
+      DispatchError），确认后返回留痕 note（写入派发日志），不再静默绕过上限；
+    - 自动新建保留同名保护（--force 放行）。
+    返回 {{"sessionId","reused","source","renamed","note","running","rows"}}。
+    """.format(MAX=MAX_SENDER_SESSIONS)
+    note = ""
+    if args.reuse:
+        cand = select_reuse_session(fresh_rows, target, module,
+                                    legacy_probe=legacy_probe, sender=sender)
+        if cand is not None:
+            sid = cand["sessionId"]
+            running = cand.get("running") is not False
+            renamed = False
+            if not running and reuse_rename_needed(cand, session_name):
+                try:
+                    api.rename(sid, session_name)
+                    renamed = True
+                except DispatchError:
+                    renamed = False
+            return {"sessionId": sid, "reused": True, "source": "复用（并发重读）",
+                    "renamed": renamed, "note": note, "running": running, "rows": fresh_rows}
+        duplicate = [
+            row for row in fresh_rows
+            if os.path.realpath(row.get("cwd") or "") == os.path.realpath(str(target))
+            and session_title(row) in (title, session_name)
+        ]
+        if duplicate and not args.force:
+            raise DispatchError(
+                "检测到同名会话，可能已派发过："
+                + "、".join(row["sessionId"] for row in duplicate[:3])
+                + "；确认要再派发请加 --force"
+            )
+    else:
+        # --new 上限校验（DEV-214）：池≥3 且全忙需 --allow-over-3 显式确认；留痕写日志
+        note = over_limit_guard(project_awf_pool(fresh_rows, target),
+                                args.allow_over_3, args.json)
+    created = api.create_session(workspace_id)
+    session_id = created["sessionId"]
+    api.rename(session_id, session_name)
+    return {"sessionId": session_id, "reused": False, "source": "新建",
+            "renamed": True, "note": note, "running": False, "rows": fresh_rows}
+
+
+def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str, args):
+    state = preflight(target, args, need_channel=True)
+    api = state["api"]
+    workspace = state["workspace"]
+
+    # 会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者 + 动态任务摘要；
+    # 模块只影响展示/票据分类（--module 已解析）；--title 完全定制时优先。
+    module = resolve_module(text, args.module)
+    sender = resolve_sender(text, getattr(args, "sender", ""))
+    session_name = args.title or awf_session_title(sender, task_display(task, text))
+    # G4 探针已在 preflight 拉过 session/list，这里直接复用，避免重复调用。
+    rows = state.get("sessions") or []
+    row = None
+    session_id = None
+    source = None
+    reused = False
+    renamed = False
+    session_note = ""
+
+    emit(f"模块：{module}（会话标题 {session_name}）", args.json)
+
+    if args.session:
+        row = find_session_in(rows, args.session)
+        if row is None:
+            raise DispatchError(
+                f"--session 指定的会话不存在：{args.session}；"
+                "在 GUI 确认会话 ID，或去掉 --session 让派发器自动选择/新建"
+            )
+        if os.path.realpath(row.get("cwd") or "") != os.path.realpath(str(target)):
+            raise DispatchError(
+                f"--session 指定的会话属于其他目录：{row.get('cwd') or '未知'}"
+                f"（目标 {target}）；去掉 --session 自动选择，或用 --new"
+            )
+        # M2（DISPATCH-138）：--session 归属校验——cwd 匹配还不够，该会话若承载
+        # 其他派发者的任务 / 非 [awf] 派发会话，本次任务可能发进错误上下文（串台）。
+        st = session_title(row) or ""
+        sender_now = resolve_sender(text, getattr(args, "sender", ""))
+        if st.startswith(AWF_TITLE_PREFIX):
+            other = awf_title_sender(st)
+            if other and other != sender_now:
+                raise DispatchError(
+                    f"--session 指定的会话承载其他派发者「{other}」的任务（{st}），"
+                    "可能串台；确认无误请用 --new 新建会话，或先在该会话续跑原任务"
+                )
+            if not other:
+                emit(
+                    f"风险提示：--session 会话为旧格式 [awf] 会话（{st}），"
+                    "无法确认派发者归属，确认未串台后继续",
+                    args.json,
+                )
+        else:
+            emit(
+                f"风险提示：--session 会话标题非 [awf] 派发会话（{st or '无标题'}），"
+                "若非本派发器创建的会话，任务可能串台；确认后继续",
+                args.json,
+            )
+        session_id = args.session
+        reused = True
+        source = "复用（--session 指定）"
+    elif args.reuse:
+        def legacy_probe(row: dict) -> bool:
+            # RT-1：显式 --allow-legacy-reuse 直接放行；否则只有会话消息含
+            # 派发任务包标记（旧版派发器在里面派发过）才允许迁移复用。
+            return bool(args.allow_legacy_reuse) or session_has_dispatch_marker(api, row)
+
+        row = select_reuse_session(rows, target, module, legacy_probe=legacy_probe,
+                                    sender=resolve_sender(text, getattr(args, "sender", "")))
+        if row is not None:
+            session_id = row["sessionId"]
+            reused = True
+            source = "复用"
+
+    if session_id is None:
+        # 新建路径：走到这里说明「无可复用闲置会话」（select 返回 None = 池空或池未满<3）。
+        # 池满（3 个 [awf] 会话且全忙）时 select 已返回忙碌候选，由下方 else 分支进入
+        # wait_for_idle 排队等待——达到每项目上限不再是「拒绝不发」，而是等待空闲后再发；
+        # 等待超时（--queue-timeout）才报错，--force 为强制新建逃生口。无全局总数上限。
+        # DEV-214 并发互斥：同项目新建决策用文件锁（dispatch/.lock-<project>）串行化，
+        # 拿到锁后重读池再决策——并发方刚建出的可复用会话直接改复用，不重复新建；
+        # 显式 --new 做上限校验（池≥3 且全忙需 --allow-over-3），不再静默绕过上限。
+        def _legacy_probe(row: dict) -> bool:
+            # RT-1：显式 --allow-legacy-reuse 直接放行；否则只有会话消息含
+            # 派发任务包标记（旧版派发器在里面派发过）才允许迁移复用。
+            return bool(args.allow_legacy_reuse) or session_has_dispatch_marker(api, row)
+
+        sender_now = resolve_sender(text, getattr(args, "sender", ""))
+        if isinstance(api, DshApi):
+            with project_new_lock(target):
+                decided = decide_new_session(
+                    api, api.sessions(), target, workspace["workspaceId"], args,
+                    module, session_name, title, sender_now, _legacy_probe)
+        else:
+            decided = decide_new_session(
+                api, rows, target, workspace["workspaceId"], args,
+                module, session_name, title, sender_now, _legacy_probe)
+        session_id = decided["sessionId"]
+        reused = decided["reused"]
+        source = decided["source"]
+        renamed = decided["renamed"]
+        if decided["note"]:
+            session_note = decided["note"]
+        if reused and decided.get("running"):
+            # 并发方刚建出的会话已运行：锁已释放，这里等它空闲后再发送（不重复新建）。
+            row = wait_session_ready(api, decided.get("rows") or rows, session_id, target, args)
+            # DEV-215：wait_session_ready 内部可能改选监听返回的空闲会话（满池场景），
+            # 必须以返回值为准——否则发送/改名/日志仍留在原候选（等待目标≠发送目标）。
+            session_id = row["sessionId"]
+            if reuse_rename_needed(row, session_name):
+                try:
+                    api.rename(session_id, session_name)
+                    renamed = True
+                except DispatchError as error:
+                    emit(f"提示：复用会话改名失败（继续发送任务）：{error}", args.json)
+    else:
+        # 复用路径：先确认会话存在；运行中的会话等它空闲，绝不静默改成新建。
+        # 预检刚拉过列表，先用快照；快照里没有才重新查（正常不会发生）。
+        row = wait_session_ready(api, rows, session_id, target, args)
+        # DEV-215：同上——满池等待可能改选监听返回的空闲会话，以返回值为准。
+        session_id = row["sessionId"]
+        hint = pressure_hint(row)
+        if hint:
+            session_note = hint
+            emit(f"提示：{hint}", args.json)
+        # 旧格式/其它标题顺手改成 `[awf] <目标项目>`（--session 也归一）；改名失败不阻塞派发。
+        if reuse_rename_needed(row, session_name):
+            try:
+                api.rename(session_id, session_name)
+                renamed = True
+            except DispatchError as error:
+                emit(f"提示：复用会话改名失败（继续发送任务）：{error}", args.json)
+
+    task_id = ticket_task_id(task.name)
+    if not task_id:
+        match = TICKET_ID_RE.search(text or "")
+        task_id = match.group(0) if match else ""
+
+    # 落地基线在 prompt 发送前一刻读取（RT-3）：队列等待（最长 --queue-timeout 秒）期间其它
+    # 会话或用户的 commit 不再落入「初始 HEAD → 当前 HEAD」变化区间，误判窗口消除；
+    # 读取失败时区分「目标非 git」与「仓库不可读」。
+    initial_head = None
+    if args.wait:
+        initial_head = git_head_sha(target)
+        if initial_head is None:
+            if (target / ".git").exists() or is_git_repo(target):
+                raise DispatchError(
+                    f"无法读取目标仓库初始 HEAD（{target}），落地判定不可靠；"
+                    "确认仓库可读（git -C <target> rev-parse HEAD）后重试，"
+                    "或去掉 --wait 仅发送任务"
+                )
+            emit("提示：目标不是 git 仓库，--wait 落地判定仅看 done.md 归档", args.json)
+
+    # 握手（DEV-136）：先在目标工作区确认会话（复用/新建/改名），把「连接成功」
+    # 明确回执出来，再派发任务——像 TCP 握手一样先建立连接、再传数据。
+    if reused:
+        emit(f"连接成功：会话 {session_id}（{session_name or shown_title}；复用）", args.json)
+    else:
+        emit(f"连接成功：会话 {session_id}（{session_name}；新建）", args.json)
+    emit(f"工作区：{workspace.get('title')}（{workspace.get('workspaceId')}）", args.json)
+
+    prompt_ms = int(time.time() * 1000)
+    # DISPATCH-146：派发方会话 = 派发方运行本命令时所在会话（env DSH_SESSION_ID），
+    # 注入目标提示（目标回执经 --report 投递回该会话），同时写入 dispatch/log.md 供审计。
+    dispatcher = dispatcher_session_env()
+    # DEV-215：并发记账提示——同项目活跃 [awf] 池 >1（含本会话）时，要求目标按票据任务编号
+    # 记账/commit，避免多个并行 worker 自排相同 ID 造成账本覆盖（满池实测 002/003 撞 DEV-091）。
+    send_text = text
+    try:
+        concurrent = project_awf_pool(rows or api.sessions(), target)
+    except Exception:
+        concurrent = None  # 异常时跳过提示，不阻塞派发
+    if concurrent is not None and len(concurrent) > 1:
+        tid = ticket_task_id(task.name) or ""
+        send_text = (
+            "⚠ 并发记账提示（DEV-215）：本任务正与同项目其他 [awf] 会话并行执行"
+            + (f"，账本登记/commit 请使用本票据任务编号「{tid}」" if tid else "")
+            + "，勿与其他并行任务共用自排 ID（避免账本互相覆盖）。\n\n" + text
+        )
+    try:
+        api.prompt(
+            session_id,
+            build_prompt(target, title, kind, send_text, team=args.team,
+                         dispatcher_session=dispatcher),
+            str(uuid.uuid4()),
+        )
+    except DispatchError as error:
+        if reused:
+            raise DispatchError(
+                f"复用会话 {session_id} 发送任务失败：{error}；"
+                "建议加 --new 强制新建会话后重试（复用会话本身保留）"
+            )
+        raise
+
+    emit("任务已派发（send ok）", args.json)
+    # 改名成功时以新标题为准（row 是改名前的快照，不能再用它覆盖）。
+    shown_title = session_name if (renamed or row is None) else (session_title(row) or session_name)
+
+    if not args.wait:
+        emit("任务已发送，未等待回合（默认异步；加 --wait 等待回合结束）", args.json)
+        entry = log_entry(
+            target.name, target, title, session_id, shown_title, workspace,
+            "已发送，未等待回合", "", task,
+            next_step=(
+                f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{shown_title}」"
+                f"（会话 {session_id}）继续提细节。"
+            ),
+            reused=source,
+            session_note=session_note,
+            module=module,
+            report_to=dispatcher,
+        )
+        log_path = append_log(entry)
+        payload = {
+            "ok": True,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "module": module,
+            "sessionTitle": shown_title,
+            "reused": reused,
+            "source": source,
+            "workspace": workspace,
+            "status": "accepted",
+            "waited": False,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"已记录：{log_path}")
+            print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{shown_title}」继续提细节。")
+        return 0
+
+    emit("任务已受理；等待目标 agent 完成…", args.json)
+    wait_started = time.time()
+    row, turn_seconds = wait_for_turn(api, session_id, prompt_ms, args.timeout, args.json,
+                               target=target, head_before=initial_head)
+    final_title = session_name if renamed else (session_title(row or {}) or shown_title)
+    head = git_head(target)
+
+    if row is None:
+        status = f"超时（>{args.timeout}s，回合未结束；任务已送达，会话仍在运行）"
+        emit(
+            "提示：--wait 超时不代表派发失败——任务已成功送达目标会话，"
+            "回合继续执行中；要等完整结果可稍后重发 --wait（同会话会排队/复用），"
+            "或直接在 GUI 打开该会话查看进度。",
+            args.json,
+        )
+        entry = log_entry(target.name, target, title, session_id, final_title,
+                          workspace, status, "", task,
+                          reused=source, session_note=session_note, module=module, report_to=dispatcher)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "module": module,
+            "sessionTitle": final_title,
+            "reused": reused,
+            "source": source,
+            "workspace": workspace,
+            "status": "timeout",
+            "waited": True,
+            "head": head,
+            "turnSeconds": turn_seconds,
+            "zombie": False,
+            "landed": None,
+            "final": None,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(f"目标 HEAD：{head}")
+            print(f"\n已记录：{log_path}")
+        return EXIT_TIMEOUT
+
+    # 无进展快失败：回合很快结束、又没有任何输出/工具调用 → 僵尸会话，不再空等落地。
+    activity = turn_activity(api, row, prompt_ms)
+    zombie = (
+        activity["available"]
+        and activity["turn_ended"]
+        and turn_seconds is not None
+        and turn_seconds < ZOMBIE_TURN_SECONDS
+        and not activity["has_output"]
+        and not activity["has_tool"]
+    )
+    final_text = activity["text"]
+    if zombie:
+        status = "会话疑似僵尸（回合即时结束且零输出）"
+        message = "会话疑似僵尸（回合即时结束且零输出），请用 --new 重派或在 GUI 重开会话"
+        entry = log_entry(target.name, target, title, session_id, final_title,
+                          workspace, status, "", task,
+                          reused=source, session_note=session_note, module=module, report_to=dispatcher)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "module": module,
+            "sessionTitle": final_title,
+            "reused": reused,
+            "source": source,
+            "workspace": workspace,
+            "status": "zombie",
+            "waited": True,
+            "head": head,
+            "turnSeconds": turn_seconds,
+            "zombie": True,
+            "landed": None,
+            "final": None,
+            "message": message,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(f"会话：{session_id}")
+            print(message, file=sys.stderr)
+            print(f"\n已记录：{log_path}")
+        return EXIT_ZOMBIE
+
+    # 回合结束 ≠ 完成：再等目标把改动落地（本地 commit）或归档账本（done.md 含任务 ID）。
+    remaining = max(0.0, args.timeout - (time.time() - wait_started))
+    landed = wait_for_landing(target, task_id, initial_head, remaining)
+    head = git_head(target)
+    if not landed:
+        status = "回合已结束但任务未落地（无 commit/未归档）"
+        message = (
+            "回合已结束但任务未落地（无 commit/未归档）：可能还在等内部复核，"
+            "可重新派发（--force 同名）或 --session 续跑"
+        )
+        entry = log_entry(target.name, target, title, session_id, final_title,
+                          workspace, status, final_text or "", task,
+                          reused=source, session_note=session_note, module=module, report_to=dispatcher)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "session",
+            "sessionId": session_id,
+            "title": title,
+            "module": module,
+            "sessionTitle": final_title,
+            "reused": reused,
+            "source": source,
+            "workspace": workspace,
+            "status": "not_landed",
+            "waited": True,
+            "head": head,
+            "turnSeconds": turn_seconds,
+            "zombie": False,
+            "landed": False,
+            "final": final_text,
+            "message": message,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(message, file=sys.stderr)
+            print(f"目标 HEAD：{head}")
+            if final_text:
+                print(f"\n--- 目标 agent 回执（节选）---\n{final_text.strip()[:900]}")
+            print(f"\n已记录：{log_path}")
+        return EXIT_TIMEOUT
+
+    status = "完成（已落地：commit）" if landed == "commit" else "完成（已落地：归档）"
+    entry = log_entry(target.name, target, title, session_id, final_title,
+                      workspace, status, final_text or "", task,
+                      reused=source, session_note=session_note, module=module, report_to=dispatcher)
+    log_path = append_log(entry)
+
+    payload = {
+        "ok": True,
+        "mode": "session",
+        "sessionId": session_id,
+        "title": title,
+        "module": module,
+        "sessionTitle": final_title,
+        "reused": reused,
+        "source": source,
+        "workspace": workspace,
+        "status": "completed",
+        "waited": True,
+        "head": head,
+        "turnSeconds": turn_seconds,
+        "zombie": False,
+        "landed": landed,
+        "final": final_text,
+        "log": str(log_path),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(f"状态：{status}")
+        print(f"目标 HEAD：{head}")
+        if final_text:
+            excerpt = final_text.strip()
+            if len(excerpt) > 900:
+                excerpt = excerpt[:900] + "\n…（完整回执见会话）"
+            print("\n--- 目标 agent 回执（节选）---")
+            print(excerpt)
+        print(f"\n已记录：{log_path}")
+        print(f"在 GUI 的 `{workspace.get('title')}` 工作区打开「{final_title}」继续提细节。")
+    return EXIT_OK
+
+
+def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
+    preflight(target, args, need_channel=False)
+    dsh = os.environ.get("DSH_BIN") or DEFAULT_DSH
+    if not Path(dsh).exists():
+        found = shutil.which("dsh")
+        if not found:
+            raise DispatchError("找不到 dsh 可执行文件；设置 DSH_BIN 或安装 DSH CLI")
+        dsh = found
+
+    emit("模式：headless（会话不会出现在 GUI 工作区，用户无法直接续聊）", args.json)
+
+    outdir = Path.cwd() / "dispatch/headless"
+    outdir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_path = outdir / f"{stamp}-{target.name}-{uuid.uuid4().hex[:6]}.log"
+
+    def start_headless() -> subprocess.Popen:
+        # stdin 复用任务文件、输出写日志文件；start_new_session 让子进程脱离当前会话。
+        with task.open("rb") as stdin_handle, out_path.open("ab") as out_handle:
+            return subprocess.Popen(
+                [dsh, "--profile", "headless", "-"],
+                cwd=str(target),
+                stdin=stdin_handle,
+                stdout=out_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+    if not args.wait:
+        proc = start_headless()
+        status = "已发送，未等待回合"
+        entry = log_entry(
+            target.name, target, title, "-", title, {"title": "headless"},
+            status, "", task,
+            next_step=(
+                f"headless 进程 PID {proc.pid}，输出实时写入 {out_path}；"
+                "该模式没有 GUI 会话，结束后查看输出文件。"
+            ),
+        )
+        log_path = append_log(entry)
+        payload = {
+            "ok": True,
+            "mode": "headless",
+            "status": "accepted",
+            "waited": False,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：已发送，未等待回合（PID {proc.pid}）")
+            print(f"输出：{out_path}")
+            print(f"已记录：{log_path}")
+        return 0
+
+    # --wait：同步等待 + 落地校验（RT-2：与 --wait 会话模式契约一致）。
+    # 任务 ID 与会话模式对齐：文件名优先，正文回退（票据正文里的任务 ID 也能归因落地）。
+    task_id = ticket_task_id(task.name)
+    if not task_id:
+        match = TICKET_ID_RE.search(text or "")
+        task_id = match.group(0) if match else ""
+    # 初始 HEAD 在进程启动前读取（RT-3 同契约）：等待期间无关 commit 不算落地。
+    initial_head = git_head_sha(target)
+    if initial_head is None:
+        if (target / ".git").exists() or is_git_repo(target):
+            raise DispatchError(
+                f"无法读取目标仓库初始 HEAD（{target}），落地判定不可靠；"
+                "确认仓库可读（git -C <target> rev-parse HEAD）后重试，"
+                "或去掉 --wait 仅发送任务"
+            )
+        emit("提示：目标不是 git 仓库，--wait headless 落地判定仅看 done.md 归档", args.json)
+
+    proc = start_headless()
+    wait_started = time.time()
+    try:
+        returncode = proc.wait(timeout=args.timeout)
+    except subprocess.TimeoutExpired:
+        status = f"超时（>{args.timeout}s，进程仍在后台运行）"
+        entry = log_entry(
+            target.name, target, title, "-", title, {"title": "headless"},
+            status, "", task,
+            next_step=(
+                f"headless 进程 PID {proc.pid} 仍在后台运行，输出实时写入 {out_path}；"
+                f"需要终止请执行 kill {proc.pid}。"
+            ),
+        )
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "headless",
+            "status": "timeout",
+            "waited": True,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(f"进程仍在后台运行（PID {proc.pid}），输出实时写入 {out_path}；需要终止：kill {proc.pid}")
+            print(f"已记录：{log_path}")
+        return EXIT_TIMEOUT
+
+    final_text = (
+        out_path.read_text(encoding="utf-8", errors="replace").strip()
+        if out_path.is_file()
+        else ""
+    )
+    if returncode != 0:
+        # RT-2：非零退出是「执行失败」，用独立退出码 5，不再伪装成 3（超时/未落地）。
+        status = f"失败（exit {returncode}）"
+        entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
+                          status, final_text, task)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "headless",
+            "status": status,
+            "waited": True,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "head": git_head(target),
+            "landed": None,
+            "exitCode": returncode,
+            "final": final_text,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(final_text)
+            print(f"输出：{out_path}")
+            print(f"已记录：{log_path}")
+        return EXIT_HEADLESS_FAIL
+
+    # 进程正常退出 ≠ 任务完成：仍要等目标落地（commit 含任务 ID / done.md 归档）。
+    remaining = max(0.0, args.timeout - (time.time() - wait_started))
+    landed = wait_for_landing(target, task_id, initial_head, remaining)
+    head = git_head(target)
+    if not landed:
+        status = "进程已正常退出但任务未落地（无 commit/未归档）"
+        message = (
+            "headless 进程已正常退出但任务未落地（无 commit/未归档）："
+            "可能还在等内部复核；可重新派发或查看输出文件确认进度"
+        )
+        entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
+                          status, final_text or "", task)
+        log_path = append_log(entry)
+        payload = {
+            "ok": False,
+            "mode": "headless",
+            "status": "not_landed",
+            "waited": True,
+            "pid": proc.pid,
+            "output": str(out_path),
+            "head": head,
+            "landed": False,
+            "final": final_text,
+            "message": message,
+            "log": str(log_path),
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            print(f"状态：{status}")
+            print(message, file=sys.stderr)
+            print(f"目标 HEAD：{head}")
+            print(f"输出：{out_path}")
+            print(f"已记录：{log_path}")
+        return EXIT_TIMEOUT
+
+    status = "完成（已落地：commit）" if landed == "commit" else "完成（已落地：归档）"
+    entry = log_entry(target.name, target, title, "-", title, {"title": "headless"},
+                      status, final_text or "", task)
+    log_path = append_log(entry)
+    payload = {
+        "ok": True,
+        "mode": "headless",
+        "status": "completed",
+        "waited": True,
+        "pid": proc.pid,
+        "output": str(out_path),
+        "head": head,
+        "landed": landed,
+        "final": final_text,
+        "log": str(log_path),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        print(f"状态：{status}")
+        print(f"目标 HEAD：{head}")
+        if final_text:
+            excerpt = final_text.strip()
+            if len(excerpt) > 900:
+                excerpt = excerpt[:900] + "\n…（完整回执见输出文件）"
+            print("\n--- headless 输出（节选）---")
+            print(excerpt)
+        print(f"输出：{out_path}")
+        print(f"已记录：{log_path}")
+    return EXIT_OK
+
+
+def dispatch_handoff(target: Path, task: Path, text: str, title: str, args):
+    preflight(target, args, need_channel=False)
+    outdir = Path.cwd() / "dispatch/handoff"
+    outdir.mkdir(parents=True, exist_ok=True)
+    dest = outdir / f"{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{target.name}.md"
+    dest.write_text(
+        f"# 跨项目交接：{title}\n\n"
+        f"- 目标：{target}\n"
+        f"- 任务文件：{task}\n\n"
+        "在 GUI 左侧切到目标工作区，新建会话后把下面的任务包粘贴进去：\n\n"
+        "----- 任务包开始 -----\n"
+        f"{text.rstrip()}\n"
+        "----- 任务包结束 -----\n",
+        encoding="utf-8",
+    )
+    emit(f"已生成交接单：{dest}", args.json)
+    emit("没有创建会话；请在目标工作区手动执行。", args.json)
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="awf-dispatch",
+        description=(
+            "跨项目派发：先检查目标工作流与工作区，再按「项目 + 模块」复用目标工作区的"
+            "常驻会话（没有可用会话时新建）执行。默认只发送任务、立即返回会话 ID"
+            "（不等待回合）；加 --wait 才等待回合结束。"
+        ),
+        epilog=(
+            "示例：\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md            # 默认异步：复用/新建后只发送\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait     # 等待回合结束\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --new      # 强制新建会话\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流  # 指定模块会话\n"
+            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx  # 指定会话\n"
+            "  awf-dispatch demo02 task.md --dry-run\n"
+            "  awf-dispatch demo02 task.md --headless\n"
+            "  awf-dispatch demo02 task.md --handoff\n"
+            "  awf-dispatch demo02 task.md --team\n"
+            "  awf-dispatch --prune                                  # dry-run：打印清理计划\n"
+            "  awf-dispatch --prune --apply                          # 真正删除已完成票据（用完即删）\n"
+            "  awf-dispatch --prune --json                           # 结构化输出\n"
+            "  awf-dispatch --cleanup                                # dry-run：列出每项目超 3 的空闲 [awf] 会话\n"
+            "  awf-dispatch --cleanup --apply                        # 归档超限空闲会话并写入台账（workspace/archiveSession）\n"
+            "  awf-dispatch --forget-archived                        # 重置本地归档台账（dispatch/archived-sessions.json）\n"
+            "\n--prune：扫描 ./dispatch/tasks/（含子目录，如 upgrade-v<版本>/）下的票据，从正文「- 目标项目：<别名>（<路径>）」\n"
+            "        取别名与路径、从文件名取任务 ID；git log --all 命中 ID，或目标账本 done.md 已含 ID → completed。\n"
+            "        默认 dry-run 只打印计划，--apply 才删除（git 索引里的票据用 git rm，其余直接删除），\n"
+            "        删除后向上清空目录留下空壳（dispatch/tasks 本身保留）。无票据或全部 pending 时退出码 0。\n"
+            "        --prune 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。\n"
+            "\n--cleanup（DEV-214 归档台账）：扫描全部工作区会话，按项目聚合 [awf] 前缀会话——每项目保留\n"
+            "        最近更新的 3 个，其余**空闲**会话列为归档候选（运行中跳过不归档）；默认 dry-run 只列出，\n"
+            "        --apply 才逐个经 workspace/archiveSession 归档，并把 {sessionId, project, title, archivedAt}\n"
+            "        写入本地归档台账 dispatch/archived-sessions.json（不入库）。\n"
+            "        **归档台账在组装复用池/统计每项目 [awf] 会话数时排除**——已归档会话不再参加复用与上限统计；\n"
+            "        误重置用 --forget-archived（删除台账，其中会话恢复进入复用池）。--cleanup 不接受 target/task。\n"
+            "\n激活式路由（票据来源，DEV-115 定义 / DEV-128 放开转派）：读取任务文件头部的「来源：用户 | 工作流」；\n"
+            "        缺省视为用户来源（旧票据兼容）；「来源：工作流」的票据是已派发任务，\n"
+            "        DEV-128 起允许按需继续向下一层转派（深度不限），派发时仅提示核对转派理由\n"
+            "        并更新票据「路由裁决」，不再 FAIL 拦截。\n"
+            "\n会话复用（默认）：派发前先 session/list，按「项目 + 模块」复用目标工作区会话：\n"
+            "        复用键 = 同 cwd + 标题等于「[awf] <目标项目>」；\n"
+            "        模块来源：--module > 票据「模块：」行 > 默认「通用」；\n"
+            "        匹配不到时不借用同项目其它模块的会话，直接新建本模块会话（避免上下文串味）；\n"
+            "        旧格式迁移（默认关闭）：项目里恰好只有一个旧格式（无 [awf] 标记）空闲会话时，\n"
+            "        仅当会话消息含派发任务包标记、或显式 --allow-legacy-reuse 才复用它并改名；\n"
+            "        用户自建的 <项目> · xxx 普通会话不会被复用/改名/注入；\n"
+            "        不看上下文压力（上下文是开发资产，收缩交给 harness 压缩机制）；\n"
+            "        复用时不新建会话，标题更新为「[awf] <目标项目>」后直接 prompt。\n"
+            "        选中的会话 running=true 时进入等待队列（--queue-timeout，默认 180s），超时报队列超时并建议 --new，\n"
+            "        不会静默改成新建；上下文压力 ≥ 0.9 只在输出/日志里提示可考虑 --new，不自动切换。\n"
+            "        没有可用会话时才新建并同样命名，作为该项目该模块后续派发的常驻会话。\n"
+            "        --new 强制新建（隔离/调试）；--session <id> 直接向指定会话发送；--reuse 可显式书写（默认值）。\n"
+            "        **新建并发互斥（DEV-214）**：同一项目的新建决策用文件锁（dispatch/.lock-<project>）串行化，\n"
+            "        拿到锁后重读池再决策——并发调用方看到刚建出的可复用会话时改为复用，不重复新建。\n"
+            "        **--new 上限校验（DEV-214）**：目标项目 [awf] 池 ≥3 且全忙时，--new 继续新建需显式加\n"
+            "        --allow-over-3 确认（本次超限新建写入派发日志留痕），不再静默绕过每项目 3 个上限。\n"
+            "\n默认异步：复用/创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
+            "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
+            "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
+            "\n--wait 可靠性：\n"
+            "        初始 HEAD 在 prompt 发送前一刻采集（idle-wait 期间的无关 commit 不落入判定区间）；\n"
+            "        回合结束后还要等落地：目标 HEAD 变化且最新 commit 含任务 ID（commit），\n"
+            "        或账本 done.md 出现任务 ID（归档）才算完成；无关 commit 不判落地。\n"
+            "        超时未落地返回 3，并提示可重新派发（--force 同名）或 --session 续跑。\n"
+            "        回合 <5s 且零 assistant 输出、零工具调用 → 疑似僵尸会话（常见于复用旧会话），\n"
+            "        立即返回 4，提示用 --new 重派或在 GUI 重开会话；不会空转到 --timeout。\n"
+            "\n--headless：默认同样不等待（后台启动、立即返回输出文件路径）；\n"
+            "        加 --wait 才同步等待进程结束，并同样校验落地（初始 HEAD 在启动前采集，\n"
+            "        退出 0 后仍等 commit 含任务 ID / done.md 归档）；进程非零退出返回 5（独立于 3 的超时）。\n"
+            "        --handoff 只生成交接单，本身不执行回合。\n"
+            "\n--team：在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议：\n"
+            "        先拆 2–3 个可并行子任务、声明依赖、队长汇总；插件不可用时目标 agent\n"
+            "        忽略该节，按普通会话完成。缺省不追加，任务包与旧版一致。\n"
+            "\n--report（DISPATCH-146 回执投递通道）：目标会话在任一必报点/中途状态回执时，把回执文本\n"
+            "        投递到派发方会话收件箱——`awf-dispatch --report --to <派发方会话ID> \"<回执文本>\"`\n"
+            "        （--from 默认取当前会话 env DSH_SESSION_ID，--ticket 可带派发单号；--dry-run 只渲染不发送）；\n"
+            "        经 RPC 推送进派发方会话 inbox 并触发其回合处理，派发方无需轮询即可收到；\n"
+            "        RPC 不可达（GUI 关闭 / 无凭证）或未指定 --to 时降级写收件箱文件\n"
+            "        dispatch/reports/inbox/<来源会话ID>.md（派发方可查）。不派发任务、不加账本、不改目标仓库。\n"
+            "\n--screen-state（DISPATCH-143）：只查询本机显示器状态并退出（on/off/locked/unknown），\n"
+            "        不派发；off/locked＝远程办公状态（remote），需用户确认的决策由派发端经 IM 即时通知用户。\n"
+            "\n退出码：0 成功（--wait 时回合已结束且已落地；未等待时表示已发送；--report 表示已投递/已落收件箱）；\n"
+            "        2 前置门或派发失败；3 --wait 超时（回合未结束、或已结束但未落地）；\n"
+            "        4 疑似僵尸会话（回合即时结束且零输出）；5 headless 子进程非零退出；\n"
+            "        1 未预期异常。\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("target", nargs="?", help="项目别名 / 项目 ID / 目录（--prune 时不需要）")
+    parser.add_argument("task", nargs="?", help="任务文件（Markdown；--prune 时不需要）")
+    parser.add_argument("--web-url", default="", help=f"DSH Web URL（默认 $DSH_WEB_URL 或 {DEFAULT_WEB_URL}）")
+    parser.add_argument("--listen-sessions", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--dry-run", action="store_true", help="只做前置检查，不创建会话")
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="清理已完成票据：扫描 ./dispatch/tasks/（含子目录）并打印计划（默认 dry-run）",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="配合 --prune / --cleanup：真正执行删除/归档（默认只打印计划）",
+    )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="（DEV-214）列出每项目超过 3 个的空闲 [awf] 会话（默认 dry-run；"
+        "--apply 经 workspace/archiveSession 归档并写入本地归档台账 dispatch/archived-sessions.json）",
+    )
+    parser.add_argument(
+        "--forget-archived",
+        action="store_true",
+        help="（DEV-214）重置本地归档台账（删除 dispatch/archived-sessions.json）；"
+        "其中记录的会话恢复进入复用池与每项目数量统计",
+    )
+    parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
+    parser.add_argument("--handoff", action="store_true", help="只生成交接单，不执行")
+    parser.add_argument(
+        "--team",
+        action="store_true",
+        help="在会话模式的任务包末尾追加「可选：用 AgentTeams 执行」建议",
+    )
+    parser.add_argument("--add-workspace", action="store_true", help="目标未登记工作区时自动登记")
+    reuse_group = parser.add_mutually_exclusive_group()
+    reuse_group.add_argument(
+        "--reuse",
+        dest="reuse",
+        action="store_true",
+        default=DEFAULT_REUSE,
+        help="默认行为：按「项目 + 模块」复用目标工作区已有的常驻会话",
+    )
+    reuse_group.add_argument(
+        "--new",
+        dest="reuse",
+        action="store_false",
+        help="强制新建会话（隔离/调试），不复用",
+    )
+    parser.add_argument(
+        "--module",
+        default="",
+        help="模块名（默认取票据「模块：」行，都没有用「通用」）；标题统一为 [awf] [派发者] [任务名]",
+    )
+    parser.add_argument(
+        "--sender",
+        default="",
+        help="派发者名（默认取票据「派发者：」行，都没有用 lead）；标题格式 [awf] [派发者] [任务名]",
+    )
+    parser.add_argument(
+        "--session",
+        default="",
+        help="直接向指定会话 ID 发送任务（续跑历史会话或人工指定），不会新建",
+    )
+    parser.add_argument(
+        "--idle-wait",
+        type=int,
+        default=DEFAULT_IDLE_WAIT,
+        help="兼容保留（DEV-126 起会话繁忙的队列等待由 --queue-timeout 控制，默认 180；本参数不再生效）",
+    )
+    parser.add_argument(
+        "--queue-timeout",
+        type=int,
+        default=DEFAULT_QUEUE_TIMEOUT,
+        help="会话繁忙时的队列等待上限秒数（默认 180；超时前回执中途状态，建议 --new 或稍后重试）",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help="回合等待 + 落地等待的总秒数（仅 --wait 生效，默认 600）",
+    )
+    wait_group = parser.add_mutually_exclusive_group()
+    wait_group.add_argument(
+        "--wait",
+        dest="wait",
+        action="store_true",
+        default=DEFAULT_WAIT,
+        help="等待回合结束并打印回执；默认不等待（发送后立即返回会话 ID）",
+    )
+    wait_group.add_argument(
+        "--no-wait",
+        dest="wait",
+        action="store_false",
+        help="兼容别名：等价于默认行为（只发送，不等待回合）",
+    )
+    parser.add_argument("--force", action="store_true", help="允许同名会话重复派发")
+    parser.add_argument(
+        "--allow-over-3",
+        action="store_true",
+        help="（DEV-214）配合 --new：目标项目 [awf] 池已满 3 个且全忙时，显式确认仍新建"
+        "（突破每项目并发上限；本次超限新建写入派发日志留痕）；不加则拒发（退出码 2）",
+    )
+    parser.add_argument(
+        "--allow-legacy-reuse",
+        action="store_true",
+        help="允许复用项目里唯一的旧格式（无 [awf] 标记）空闲会话并改名为规范标题；"
+        "默认只在会话消息含派发任务包标记时才迁移，用户自建的 <项目> · xxx 会话不会被复用",
+    )
+    parser.add_argument("--allow-dirty", action="store_true",
+                    help="允许目标有已跟踪改动；--allow-dirty=tasks 只豁免账本自我生成物（status/README/log）")
+    parser.add_argument("--allow-active", action="store_true", help="允许目标已有 active 任务")
+    parser.add_argument(
+        "--check-role",
+        action="store_true",
+        help="软校验目标 role（worker 名牌）与任务描述是否有关键词交集："
+        "匹配通过 / 不匹配输出警告但继续 / 目标无 role 提示但不阻塞（均不改变退出码）",
+    )
+    parser.add_argument(
+        "--allow-role-mismatch",
+        action="store_true",
+        help="开启 --check-role 时静默 role 不匹配警告（仍不硬拒）",
+    )
+    parser.add_argument("--title", default="", help="完全定制会话标题（默认 [awf] [派发者] [任务名]）")
+    parser.add_argument("--json", action="store_true", help="最终输出 JSON")
+    parser.add_argument(
+        "--screen-state",
+        action="store_true",
+        help="只查询本机（macOS）显示器状态并退出，不派发：on 亮屏 / off 熄屏 / "
+             "locked 锁屏 / unknown 未知（DISPATCH-143：off/locked＝远程办公状态（remote），"
+             "决策经 IM 即时通知；失败保守 unknown）",
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="回执投递模式（DISPATCH-146）：把回执文本经通道投递到派发方会话收件箱"
+             "（RPC 推送，派发方无需轮询即可收到），RPC 不可达 / 未指定 --to 时降级写"
+             "收件箱文件 dispatch/reports/inbox/；不派发任务",
+    )
+    parser.add_argument("--text", default="",
+                        help="--report 模式的回执文本（缺省取第一个位置参数，或经 stdin 读取）")
+    parser.add_argument("--to", default="",
+                        help="--report 模式：派发方会话 ID（投递目标；缺省则降级写收件箱文件）")
+    parser.add_argument("--from", dest="from_id", default="",
+                        help="--report 模式：来源会话 ID（默认取 env DSH_SESSION_ID）")
+    parser.add_argument("--ticket", default="",
+                        help="--report 模式：关联派发单/任务编号（写入回执消息便于派发方归因）")
+    # DISPATCH-139 P1：--allow-dirty[=tasks] 范围豁免——把 `--allow-dirty=<scope>` 归一为
+    # 裸 `--allow-dirty`（store_true），scope 单独记录；裸 --allow-dirty 向后兼容全豁免。
+    allow_dirty_scope = ""
+    allow_dirty_scope_given = False
+    normalized_argv = []
+    for arg in (argv if argv is not None else sys.argv[1:]):
+        if arg.startswith("--allow-dirty="):
+            allow_dirty_scope = arg.split("=", 1)[1]
+            allow_dirty_scope_given = True
+            normalized_argv.append("--allow-dirty")
+        else:
+            normalized_argv.append(arg)
+    if allow_dirty_scope_given and allow_dirty_scope != "tasks":
+        parser.error(
+            "--allow-dirty 范围仅支持 tasks（如 --allow-dirty=tasks）；裸 --allow-dirty 为全豁免"
+        )
+    argv = normalized_argv
+    args = parser.parse_args(argv)
+    args.allow_dirty_scope = allow_dirty_scope
+
+    # DISPATCH-143（reviewer-d143 minor-1）：--screen-state 与其它模式显式互斥，
+    # 明确退化组合语义，不做静默忽略。
+    if args.screen_state and (args.prune or args.cleanup or args.forget_archived
+                              or args.session or args.headless or args.handoff
+                              or args.target or args.task):
+        parser.error(
+            "--screen-state 只查询本机显示器状态后退出，不能与 --prune/--cleanup/"
+            "--forget-archived/--apply/--session/--headless/--handoff 或 target/task 位置参数同用"
+        )
+    if args.apply and not (args.prune or args.cleanup):
+        parser.error("--apply 只能配合 --prune（删票据）或 --cleanup（归档会话）使用")
+    # DISPATCH-146：--report 与其它模式互斥（回执投递独立于派发）。第一个位置
+    # 参数即回执文本（与 `--report "<回执文本>"` 命令形式一致）；第二个位置参数
+    # （task）仍不允许。
+    if getattr(args, "listen_sessions", ""):
+        try:
+            ids = json.loads(args.listen_sessions)
+            api = DshApi(args.web_url)
+            row = wait_for_idle_sessions(api, ids, args.queue_timeout)
+            print(json.dumps({"session": row, "gone": row is SESSION_GONE}, ensure_ascii=False))
+            return 0 if row is not None else 1
+        except Exception as error:
+            print(str(error), file=sys.stderr)
+            return 1
+    if args.report and (args.prune or args.cleanup or args.forget_archived
+                        or args.session or args.headless or args.handoff
+                        or args.wait or args.task):
+        parser.error(
+            "--report 只用于回执投递（DISPATCH-146 回执投递通道），不能与 --prune/--cleanup/"
+            "--forget-archived/--session/--headless/--handoff/--wait 或第二个位置参数（task）同用；"
+            "回执投递示例：awf-dispatch --report --to <派发方会话ID> \"<回执文本>\""
+        )
+    if args.session and not args.reuse:
+        parser.error("--session 与 --new 互斥：指定会话时不会再新建")
+    if args.session and (args.headless or args.handoff):
+        parser.error("--session 只用于会话模式，不能与 --headless / --handoff 同用")
+    if args.idle_wait < 0:
+        parser.error("--idle-wait 不能为负数")
+    if args.prune:
+        if args.target or args.task:
+            parser.error("--prune 不接受 target / task 位置参数；它只扫描 ./dispatch/tasks/")
+        if args.headless or args.handoff:
+            parser.error("--prune 不能与 --headless / --handoff 同时使用")
+        return run_prune(args)
+    if args.cleanup:
+        if args.target or args.task:
+            parser.error("--cleanup 不接受 target / task 位置参数；它只扫描全部工作区会话")
+        if args.headless or args.handoff or args.session:
+            parser.error("--cleanup 不能与 --headless / --handoff / --session 同时使用")
+        if args.reuse is False:
+            parser.error("--cleanup 不能与 --new 同用（清理模式不派发任务）")
+        try:
+            return run_cleanup(args)
+        except DispatchError as error:
+            print(f"FAIL  {error}", file=sys.stderr)
+            return EXIT_FAIL
+    if args.forget_archived:
+        if args.target or args.task or args.prune or args.cleanup or args.session \
+                or args.headless or args.handoff or args.report or args.screen_state:
+            parser.error(
+                "--forget-archived 只重置本地归档台账（dispatch/archived-sessions.json），"
+                "不能与其他模式或 target/task 位置参数同用"
+            )
+        return run_forget_archived(args)
+    if args.screen_state:
+        state = detect_screen_state()
+        if args.json:
+            print(json.dumps({"screen_state": state}))
+        else:
+            print(state)
+        return 0
+    if args.report:
+        try:
+            return run_report(args)
+        except DispatchError as error:
+            print(error, file=sys.stderr)
+            return EXIT_FAIL
+    if not args.target or not args.task:
+        parser.error(
+            "缺少参数：需要 target 与 task（或用 --prune 归档票据 / --cleanup 清理超限"
+            "会话 / --forget-archived 重置归档台账）"
+        )
+
+    try:
+        target = resolve_target(args.target)
+        task, text = read_task(args.task)
+        args.task_text = text   # DEV-122：--check-role 软校验读取任务文本（运行时属性，不改 preflight 签名）
+
+        # 激活式 router（DEV-128 起放开转派）：来源=工作流的票据允许继续向下一层派发
+        # （原 DEV-115 深度=1 硬校验已移除）；派发时提示核对转派理由并记录路由裁决。
+        if ticket_source(text) == "workflow":
+            emit(
+                f"提示：票据来源=工作流（深层转派，DEV-128 已允许）——正在将已派发"
+                f"任务 {task.name} 继续向下一层派发；请核对转派理由并在票据头部更新"
+                "「路由裁决」（目标/理由），保持派发链路清晰（不拦截）",
+                args.json,
+            )
+
+        kind = task_type(text)
+        title = args.title or f"{target.name} · {task_title(task, text)}"
+
+        emit(f"目标：{target}", args.json)
+        emit(f"任务：{title}（{kind}）", args.json)
+
+        if args.dry_run:
+            preflight(target, args, need_channel=not args.headless and not args.handoff)
+            emit("dry-run：前置检查通过，未创建会话。", args.json)
+            return 0
+
+        if args.handoff:
+            return dispatch_handoff(target, task, text, title, args)
+
+        if args.headless:
+            return dispatch_headless(target, task, text, title, args)
+        return dispatch_session(target, task, text, title, kind, args)
+
+    except DispatchError as error:
+        print(f"FAIL  {error}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\n已中断；已创建的会话会继续执行，可在 GUI 查看。", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

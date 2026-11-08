@@ -206,3 +206,48 @@ test('DEV-209 项目卡单一 chip 显示技能版：不显示项目残留版号
   const duplicateSkillChips = findNodes(items, (n) => n && n.props && String(n.props.title || '').includes('技能版本'))
   assert.equal(duplicateSkillChips.length, 0, '不得新增技能版本 chip')
 })
+
+test('DEV-216 renderLedgerBody：当前任务行内联停滞/逾期徽章（单行、静态、无动画）', () => {
+  const mod = loadClient()
+  const ledger = {
+    project: { name: 'demo', path: '/tmp/demo' },
+    current: [
+      { id: 'DEV-1', type: 'dev', status: 'active', prio: 'P1', title: '停滞任务', owner: 'a', updated: '11-01', stale: true, overdue: false },
+      { id: 'DEV-2', type: 'dev', status: 'active', prio: 'P2', title: '逾期任务', owner: 'b', updated: '10-20', stale: true, overdue: true },
+      { id: 'DEV-3', type: 'dev', status: 'active', prio: 'P3', title: '新鲜任务', owner: 'c', updated: '11-08', stale: null, overdue: null },
+    ],
+    todo: [], recent: [],
+  }
+  const items = mod.renderLedgerBody(ledger, { onOpenSource: () => {}, onOpenArchive: () => {} })
+
+  // 结构断言：只有 stale/overdue=true 的行渲染 awf-aging 徽章（null/无信号不渲染）
+  const badges = findNodes(items, (n) => clsHas(n, 'awf-aging'))
+  assert.equal(badges.length, 2, '仅 2 个任务渲染停滞/逾期徽章')
+  const staleNode = badges.find((n) => clsHas(n, 'awf-aging-stale'))
+  const overdueNode = badges.find((n) => clsHas(n, 'awf-aging-overdue'))
+  assert.ok(staleNode && overdueNode, 'stale/overdue 徽章类名契约存在（awf-aging-stale / awf-aging-overdue）')
+  assert.match(textOf(staleNode), /停滞/)
+  assert.match(textOf(overdueNode), /逾期/)
+  assert.equal(overdueNode.props.title.includes('7 天'), true, '逾期徽章 title 带阈值说明')
+  assert.equal(staleNode.props.title.includes('3 天'), true, '停滞徽章 title 带阈值说明')
+
+  // 单行/静态约束：徽章不挂任何动画类（awf-blip/breathe/flow/live/shimmer/spin）
+  for (const b of badges) {
+    assert.ok(!/awf-(blip|breathe|flow|live|shimmer|spin)/.test(b.props.className), '徽章无动画类: ' + b.props.className)
+  }
+  // 徽章位于当前任务行（awf-row）内：三条任务行均存在且可点击（回归不破坏）
+  const rows = findNodes(items, (n) => clsHas(n, 'awf-row-clickable'))
+  assert.ok(rows.length >= 3, '当前任务行保持完整')
+  // 任务 1 行内恰好一个徽章（type/prio pill 之外只加一枚 aging 徽章）
+  const row1 = rows[0]
+  const row1Aging = findNodes(row1, (n) => clsHas(n, 'awf-aging'))
+  assert.equal(row1Aging.length, 1, '单个任务行只渲染一枚 aging 徽章')
+
+  // agingBadge 纯函数导出契约
+  assert.deepEqual(mod.agingBadge({ stale: true, overdue: false }), { kind: 'stale', label: '停滞' })
+  assert.deepEqual(mod.agingBadge({ stale: true, overdue: true }), { kind: 'overdue', label: '逾期' })
+  assert.deepEqual(mod.agingBadge({ stale: false, overdue: false }), null)
+  assert.equal(mod.agingBadge({ stale: null, overdue: null }), null)
+  assert.equal(mod.agingBadge(null), null)
+  assert.equal(mod.agingBadge({}), null)
+})

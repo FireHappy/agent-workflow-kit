@@ -27,12 +27,39 @@ agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，�
 - 客户端：右侧边栏页签，15s 自动刷新 + 手动刷新；只跟随当前会话项目，无项目下拉选择器
 - 默认锚定：页签打开即自动选中当前 DSH 会话所属项目（见「默认锚定」一节），无需手动选择
 
+## 内嵌技能/CLI 副本（装插件即装工作流，DEV-216）
+
+**单源双形态分发**：工作流规则（技能库 + awf CLI）只维护一份源，插件包内嵌第二形态副本——
+**装插件即装工作流**，解析规则不再双份漂移（看板解析 `src/ledger.js` 与 `bin/awf` 的字段表锚定
+规则保持一致，源更新后重跑一次拷贝即同步）：
+
+- 形态一（源）：技能库实体 `~/.dsh/skills/agent-workflow-scaffold`（install.sh 将 kit 同步到全局，
+  含 SKILL.md / bin/awf / skills/* / templates/* / test/*）+ kit 仓库 `bin/awf`（t1 落地的最新 CLI，
+  如 `awf log` / `awf validate` 子命令——副本以它为源，源更新后重跑 `--copy` 即刷新）。
+- 形态二（内嵌副本）：`skill/agent-workflow-scaffold/`（bin/awf 一律从 kit 仓库源覆盖进副本）
+  + `skill/manifest.json`（产物清单：源路径 / 技能与骨架版本 / bin/awf sha256 / 子命令 /
+  **每个文件的 sha256**）。`package.json` 的 `files` 含 `"skill"`，随插件分发。
+
+同步脚本 `scripts/copy-workflow-assets.mjs`（零写入的 `--list` / 幂等的 `--copy` / 漂移校验 `--check`）：
+
+```sh
+node scripts/copy-workflow-assets.mjs --list     # 列计划产物（dry-run，不写文件）
+node scripts/copy-workflow-assets.mjs --copy     # 生成/刷新内嵌副本 + manifest
+node scripts/copy-workflow-assets.mjs --check    # 校验副本与源一致：逐文件内容哈希比对，
+                                                 # 任一文件内容漂移（含非 CLI 文件）→ 退出码 1
+# 可选：--skill-dir <dir> 覆盖技能源；--awf <path> 覆盖 bin/awf 源；--no-cli 不覆盖 CLI
+# 环境变量（脚本化测试/CI）：AWF_SKILL_SOURCE / AWF_AWF_SOURCE / AWF_DEST_ROOT
+```
+
+bin/awf 更新（如新增子命令）后重跑 `--copy` 即刷新内嵌副本；`--check` 供复核人核对副本一致性。
+`scripts/sync-profile.sh` 同步开发改动到已安装副本时会把 `skill/` 一并同步。
+
 ## 安装
 
 ```sh
 # 1. 把插件装进桌面 profile（也可在设置 → 插件管理里安装）
 cd ~/.dsh/profiles/desktop
-pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
+pnpm add file:/绝对路径/agent-workflow-kit/dsh-awf-dashboard
 
 # 2. 把 dsh-awf-dashboard 追加到 package.json 的 dsh.profile.bundles 数组
 #    （若用 dsh plugin CLI：dsh plugin --profile desktop add dsh-awf-dashboard）
@@ -47,7 +74,10 @@ pnpm add file:/绝对路径/agent-workflow-kit/dsh-plugin
 打开页签即自动加载**当前会话项目**的账本（无项目下拉选择器、无顶部工具条，不看其他项目）。DEV-044 起面板统一为**轻量行风格**：当前任务 / 待办 / 最近完成三区都是紧凑行（hairline 分隔、无卡片边框），只读展示账本事实，无任何操作按钮；写操作由 agent 在对话中执行，面板经 SSE/轮询自动反映账本变化。
 
 - 项目卡：名称（右侧沿用原有**单一版本 chip**，显示技能版本 `v{skillVersion}`；绿色/黄色状态与点击升级仅由 `FRAMEWORK_VERSION` 对比决定，不新增技能版本 chip、不显示骨架版本号或项目残留发布版号）+ 路径（右侧**复制按钮** icon，点击复制路径）；无账本新鲜度/status.md 提示
-- 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）
+- 当前任务（行）：ID + 类型/优先级徽章 · 标题 · 元信息行（👤 Owner / ↻ 更新时间）；
+  **停滞/逾期徽章（DEV-216）**：行内联小徽章标注只读派生字段——`stale`（最近更新距今 ≥3 天）显示
+  「停滞」、`overdue`（认领/最近更新距今 ≥7 天）显示「逾期」（逾期优先），无时间戳不显示；纯静态
+  单行（固定 16px 行高、无动画），不改变既有任务行布局
 - 待办（行）：类型 chip + ID + 描述 + 优先级，dev/debug/docs 三态切换；每个类型 tab 显示该类型未开始任务数量徽章（如「开发 2」「调试 0」，数据取自 `ledger.todoRows` 过滤计数），标题「未开始任务 · 类型」不再重复数量（tab 徽章一处即可）；数量为 0 时区块仍渲染（空态文案「该类型暂无未开始任务」），解析层兼容 4/5 列任务表格
 - 最近完成（行）：✓ 日期 ID 描述，点击查看归档
 - **未初始化引导**：所选项目尚未初始化 agent-workflow 时，页签显示引导卡（图标 + 文案 + 「初始化工作流（主会话）」按钮 + **「在 .gitignore 中忽略工作流」toggle**）。点击调用 `/awf/init/agent`：**注入当前会话**由 agent 读取项目上下文生成完整骨架（与升级/整理流程一致，不再用受管理子代理）；勾选 gitignore 时指令附加「把 agent-workflow/、AGENTS.md、CLAUDE.md 写入 .gitignore」步骤；成功后自动重新加载账本显示正常看板；`already-initialized` 等错误有友好提示
@@ -93,9 +123,14 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
   `collectTodoRows`（todo 行兜底解析）、`buildDeleteView` / `deleteReasonText`（删除回退视图）、
   `runDeleteFlow`（确认后才 execute 的流程）、`runTodoAction` / `runTaskAction`（todo/任务 CRUD 请求封装）、
   `apiErrorText`（错误码 → 友好文案）、`postJson` / `getJson`（fetchImpl 可注入，mock 测试）、
-  `WORKFLOW_STEPS` / `inferWorkflowStage` / `stageSummary`（流程步骤定义、阶段推断与内联摘要，纯函数）
-- 测试：`node --test test/ledger.test.js test/client-chunk.test.js`（无需 GUI）
+  `WORKFLOW_STEPS` / `inferWorkflowStage` / `stageSummary`（流程步骤定义、阶段推断与内联摘要，纯函数）、
+  `agingBadge`（DEV-216：由只读字段 stale/overdue 派生内联徽章，纯函数）
+- 派生只读字段（`src/ledger.js` `deriveTaskAging`，DEV-216）：任务块 `stale`（最近更新距今 ≥3 天）、
+  `overdue`（认领/最近更新距今 ≥7 天）；取不到时间戳（字段缺失或日期非法）→ `null`，不编造；
+  字段抽取 comment-aware（`<!-- ... -->` 注释区间跳过，注释内旧示例不污染派生指标）
+- 测试：`node --test test/ledger.test.js test/client-chunk.test.js test/copy-assets.test.js`（无需 GUI）
 - 开发中改动同步到已安装副本：`./scripts/sync-profile.sh`；刷新/重启宿主后生效
+- 内嵌技能/awf CLI 副本：`node scripts/copy-workflow-assets.mjs --copy`（见「内嵌技能/CLI 副本」一节）
 
 ## 约束
 
@@ -104,6 +139,31 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 - 所有路由都与平台一致走宿主 Connection 认证围栏（同 /api 网关准入），未授权请求返回 403
 
 ## 变更记录
+
+- **1.6.0（DEV-216）**：内嵌技能/awf CLI 副本（单源双形态，装插件即装工作流）+ 当前任务停滞/逾期派生指标
+  - 单源双形态分发：新增 `scripts/copy-workflow-assets.mjs`（`--list` 零写入列产物 / `--copy` 幂等生成 /
+    `--check` 漂移校验，退出码 1 即不一致），把技能库实体 `~/.dsh/skills/agent-workflow-scaffold`
+    （含 SKILL.md / skills/* / templates/* / test/*）打进 `skill/agent-workflow-scaffold/`，并把 kit 仓库
+    `bin/awf`（t1 落地的最新 CLI）覆盖进副本的 `bin/awf`——解析规则不再双份漂移，bin/awf 更新后重跑
+    `--copy` 即刷新；产物清单写 `skill/manifest.json`（源路径 / 技能与骨架版本 / bin/awf sha256 / 子命令 /
+    每文件 sha256）。`package.json` `files` 加入 `"skill"`、README 新增「内嵌技能/CLI 副本」一节；
+    `scripts/sync-profile.sh` 同步 `skill/` 到已安装副本。
+  - 停滞/逾期派生指标：`src/ledger.js` 新增 `deriveTaskAging` 纯函数——`stale`=「最近更新」（Last Updated
+    兼容）距参照日 ≥3 天、`overdue`=「认领日期」（认领时间/Claimed）存在时以其计、否则以「最近更新」计，
+    距参照日 ≥7 天；取不到时间戳（字段缺失或伪日期）→ `null`，不编造；ledgerOf 为每个当前任务块挂
+    `stale`/`overdue` 只读字段。`lib/client.js` `TaskCard` 徽章行内联小徽章（`agingBadge` 纯函数：逾期优先
+    于停滞；`awf-aging awf-aging-stale|awf-aging-overdue` 类名契约；纯静态单行、固定 16px 行高、无动画、
+    不改变任务行布局）。
+  - 修复轮（t7 复核项）：`deriveTaskAging` 字段抽取改为 **comment-aware**——块内 `<!-- ... -->` 区间跳过
+    （含未闭合 `<!--` 延伸语义，与 parseBlocks/parseCheckItems 一致），注释内旧示例/认领日期不再污染
+    派生指标；`blockFieldsCommentAware` 仅为本函数私有，`parseBlockFieldMap`/`updateTaskFields` 既有语义
+    不动（有回归测试锁定）。`manifest.files` 为每个文件记录 **sha256**，`--check` 逐文件内容哈希比对
+    （任一非 CLI 文件内容漂移 → 退出码 1；CLI 副本仍单独以 kit 源比对）；新增 `test/copy-assets.test.js`
+    内容漂移断言（改 SKILL.md → --check 退出 1 并报 DRIFT 路径，重跑 --copy 恢复退出 0）。
+  - 新增测试：`deriveTaskAging` 纯函数单测（3/7 天边界、认领基准、无时间戳/伪日期 → null、Last Updated
+    英文键、正文引用锚定排除、注释区间排除）+ `ledgerOf` 端到端派生断言 + `renderLedgerBody` 渲染结构断言
+    （徽章数量/类名/文案/无动画类/单行内一枚）+ `copy-assets.test.js` 内容漂移检测；`cd dsh-plugin && node --test` 全绿。
+  - 版本 1.5.0 → 1.6.0；`node scripts/copy-workflow-assets.mjs --copy` 生成内嵌副本后装插件即含工作流。
 
 - **0.3.5（DEV-179）**：当前任务行内联显示流程阶段 + 流程渲染重做（参考 AgentTeams 布局）；**0.3.6（DEV-182）**：移除流程阶段行——阶段由 status 静态映射、非真实流程数据，看板不再呈现（等真实流程数据接入后再恢复）
   - 背景：用户反馈 ①「当前任务要点击进度详情才能看到当前到哪个流程了」——阶段信息不在行内；②「流程画得太难看，参考 agent-team 的布局优化」——旧大步骤条（横向节点轨道 + 呼吸圆点/流动连线）观感差。

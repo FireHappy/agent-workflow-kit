@@ -3295,5 +3295,204 @@ else
   ok "DISPATCH-141 旧表述已清除（用户回复位置=派发端）"
 fi
 
+# 31. DEV-216 / D-216-t1：awf log 执行记录（只增不改）+ awf validate 只读体检
+# 独立初始化一个干净项目，避免复用 $PROJ 中历史用例遗留的账本。
+LOG_PROJ="$TMP/log-proj"
+"$KIT_DIR/bin/awf" init "$LOG_PROJ" --name "体检项目" --no-register >/dev/null
+LOG_TASK="$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-310.md"
+cat > "$LOG_TASK" <<'D31'
+## [DEV-310] 执行记录与体检冒烟
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | active |
+| Owner | smoke |
+| 最近更新 | 2026-11-08 |
+
+### 目标
+验证 awf log 追加与 awf validate 只读体检。
+
+### 验收标准
+- [ ] awf log 追加两行且旧内容不丢
+- [ ] 无 Execution Log 节时自动补节
+
+### 下一步
+跑 smoke。
+D31
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+
+# 31.1 --help 列出用法与节名
+if ( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log --help 2>&1 ) | grep -q '### Execution Log'; then
+  ok "D-216-t1 awf log --help 列出 Execution Log 用法"
+else
+  bad "D-216-t1 awf log --help 缺 Execution Log 用法"
+fi
+
+# 31.2 无节自动补 + 追加一条（格式：- 时间 · 类型 · @谁 · 说明）
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-310 --note "第一条记录" --type implement --owner smoke-test >/dev/null )
+assert_grep '^### Execution Log$' "$LOG_TASK" "D-216-t1 awf log 无节自动补 Execution Log 节"
+assert_grep '^### 下一步$' "$LOG_TASK" "D-216-t1 awf log 保留原有小节（只增不改）"
+if grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} · implement · @smoke-test · 第一条记录$' "$LOG_TASK"; then
+  ok "D-216-t1 awf log 行格式=时间·类型·@谁·说明"
+else
+  bad "D-216-t1 awf log 行格式不符：$(grep '^- ' "$LOG_TASK" | head -2)"
+fi
+
+# 31.3 第二条追加：不覆盖第一条，顺序追加
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-310 --note "第二条记录" >/dev/null )
+if [ "$(grep -c '^- [0-9]' "$LOG_TASK")" = "2" ] && grep -q '第一条记录' "$LOG_TASK"; then
+  ok "D-216-t1 awf log 追加第二条且不覆盖旧记录"
+else
+  bad "D-216-t1 awf log 覆盖了旧记录或条数异常：$(grep '^- [0-9]' "$LOG_TASK")"
+fi
+first_ln="$(grep -n '第一条记录' "$LOG_TASK" | cut -d: -f1)"
+second_ln="$(grep -n '第二条记录' "$LOG_TASK" | cut -d: -f1)"
+if [ -n "$first_ln" ] && [ -n "$second_ln" ] && [ "$first_ln" -lt "$second_ln" ]; then
+  ok "D-216-t1 awf log 记录按追加顺序排列"
+else
+  bad "D-216-t1 awf log 记录顺序异常（first=$first_ln second=$second_ln）"
+fi
+
+# 31.4 不存在任务 → 明确错误 + 非零
+if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-999 --note x 2>&1 )"; then
+  bad "D-216-t1 awf log 对不存在任务未报错"
+else
+  case "$out" in
+    *未找到任务*) ok "D-216-t1 awf log 不存在任务给明确错误并非零退出" ;;
+    *) bad "D-216-t1 awf log 不存在任务错误不明确：$out" ;;
+  esac
+fi
+
+# 31.5 已归档任务 → 明确错误 + 非零（拒绝追加）
+DONE_TASK="$LOG_PROJ/agent-workflow/tasks/dev/done/DEV-311.md"
+cat > "$DONE_TASK" <<'D31D'
+## [DEV-311] 已归档任务
+
+| 字段 | 内容 |
+|------|------|
+| 优先级 | P2 |
+| 状态 | done |
+| Owner | smoke |
+| 完成日期 | 2026-11-08 |
+
+### 目标
+验证归档拒绝。
+
+### 验收标准
+- [x] 归档
+
+### 下一步
+无。
+D31D
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-311 --note x 2>&1 )"; then
+  bad "D-216-t1 awf log 对已归档任务未报错"
+else
+  case "$out" in
+    *已归档*) ok "D-216-t1 awf log 已归档任务给明确错误并非零退出" ;;
+    *) bad "D-216-t1 awf log 已归档任务错误不明确：$out" ;;
+  esac
+fi
+
+# 31.6 validate：账本正常 → 退出 0
+if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+  ok "D-216-t1 awf validate 账本正常退出 0"
+else
+  bad "D-216-t1 awf validate 账本正常却失败：$(printf '%s\n' "$out" | head -3)"
+fi
+
+# 只读体检：validate 前后账本内容 hash 不变
+ledger_hash() {
+  ( cd "$1" && find agent-workflow/tasks -type f -name '*.md' | LC_ALL=C sort \
+      | while IFS= read -r hf; do shasum "$hf"; done | shasum | cut -d' ' -f1 )
+}
+before_hash="$(ledger_hash "$LOG_PROJ")"
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate >/dev/null 2>&1 ) || true
+after_hash="$(ledger_hash "$LOG_PROJ")"
+if [ "$before_hash" = "$after_hash" ]; then
+  ok "D-216-t1 awf validate 只读（账本 hash 不变）"
+else
+  bad "D-216-t1 awf validate 修改了账本文件"
+fi
+
+# 31.7 状态值非法 → 非零并列出问题
+sed -i '' 's/| 状态 | active |/| 状态 | doing |/' "$LOG_TASK" 2>/dev/null \
+  || sed -i 's/| 状态 | active |/| 状态 | doing |/' "$LOG_TASK"
+if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+  bad "D-216-t1 awf validate 未发现非法状态"
+else
+  case "$out" in
+    *状态非法*) ok "D-216-t1 awf validate 非法状态非零退出并列出问题" ;;
+    *) bad "D-216-t1 awf validate 非法状态问题未列出：$(printf '%s\n' "$out" | head -2)" ;;
+  esac
+fi
+sed -i '' 's/| 状态 | doing |/| 状态 | active |/' "$LOG_TASK" 2>/dev/null \
+  || sed -i 's/| 状态 | doing |/| 状态 | active |/' "$LOG_TASK"
+
+# 31.8 归档缺完成日期 → 非零并列出问题（恢复时插回字段表，不能追加到文末）
+grep -v '^| 完成日期 |' "$DONE_TASK" > "$DONE_TASK.tmp" && mv "$DONE_TASK.tmp" "$DONE_TASK"
+if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+  bad "D-216-t1 awf validate 未发现缺完成日期"
+else
+  case "$out" in
+    *缺完成日期*) ok "D-216-t1 awf validate 缺完成日期非零退出并列出问题" ;;
+    *) bad "D-216-t1 awf validate 缺完成日期问题未列出：$(printf '%s\n' "$out" | head -2)" ;;
+  esac
+fi
+awk '1; /^\| Owner \| smoke \|$/ { print "| 完成日期 | 2026-11-08 |" }' "$DONE_TASK" > "$DONE_TASK.tmp" \
+  && mv "$DONE_TASK.tmp" "$DONE_TASK"
+
+# 31.9 README 索引与文件不一致 → 非零并列出问题（不代修）
+cp "$LOG_TASK" "$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-312.md"
+if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+  bad "D-216-t1 awf validate 未发现 README 索引不一致"
+else
+  case "$out" in
+    *README\ 索引缺任务\ DEV-312*) ok "D-216-t1 awf validate README 索引不一致非零退出并列出问题" ;;
+    *) bad "D-216-t1 awf validate README 索引问题未列出：$(printf '%s\n' "$out" | head -3)" ;;
+  esac
+fi
+before_hash="$(ledger_hash "$LOG_PROJ")"
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate >/dev/null 2>&1 ) || true
+after_hash="$(ledger_hash "$LOG_PROJ")"
+if [ "$before_hash" = "$after_hash" ]; then
+  ok "D-216-t1 awf validate 有问题时也不修改文件"
+else
+  bad "D-216-t1 awf validate 有问题时修改了文件"
+fi
+rm -f "$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-312.md"
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+  ok "D-216-t1 修复后 awf validate 恢复退出 0"
+else
+  bad "D-216-t1 修复后 awf validate 仍失败：$(printf '%s\n' "$out" | head -3)"
+fi
+
+# 31.10 骨架生成含 Execution Log 节：release-prep 任务 + 旧 todo 迁移任务
+assert_grep '^### Execution Log$' "$REL/agent-workflow/tasks/dev/done/DEV-008.md" \
+  "D-216-t1 release-prep 生成的任务骨架含 Execution Log 节"
+assert_grep '^### Execution Log$' "$KIT_DIR/templates/README.md" \
+  "D-216-t1 任务块模板含 Execution Log 节"
+cat > "$LOG_PROJ/agent-workflow/tasks/dev/todo.md" <<'D31B'
+# 待开发
+
+| 任务ID | 优先级 | 描述 | 登记日期 |
+|--------|--------|------|----------|
+| DEV-320 | P2 | 迁移骨架冒烟 | 2026-11-08 |
+D31B
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+if [ -f "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md" ] \
+  && grep -q '^### Execution Log$' "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md"; then
+  ok "D-216-t1 旧 todo 迁移生成的骨架含 Execution Log 节"
+else
+  bad "D-216-t1 旧 todo 迁移骨架缺 Execution Log 节"
+fi
+rm -f "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md"
+
+# 清理本次用例任务并刷新索引
+rm -f "$LOG_TASK" "$DONE_TASK"
+( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -204,6 +204,20 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * DEV-216：停滞/逾期徽章派生（纯函数，可单测）——当前任务行的内联小徽章。
+     * 数据来自服务端派生只读字段 t.stale / t.overdue（ledger.js deriveTaskAging）；
+     * 逾期（≥7 天）优先于停滞（≥3 天）展示；无信号（null/false/缺字段）→ null（不渲染）。
+     * @param {object|null} t 当前任务对象
+     * @returns {null | {kind: 'stale'|'overdue', label: '停滞'|'逾期'}}
+     */
+    function agingBadge(t) {
+      if (!t || typeof t !== 'object') return null
+      if (t.overdue === true) return { kind: 'overdue', label: '逾期' }
+      if (t.stale === true) return { kind: 'stale', label: '停滞' }
+      return null
+    }
+
     // 交互反馈（DEV-024）：:focus-visible 键盘焦点、:active 按压回弹。
     // 2026-11-02（DEV-026 观察项）：去掉全部 hover 位移/阴影/背景效果——
     // 鼠标移上去卡片上浮/行高亮会让列表布局跳动。保留焦点环（无障碍必需）
@@ -230,6 +244,10 @@ window.__ModuleLoader__.load({
       '.awf-pill .awf-dot{width:5px;height:5px;border-radius:50%;display:inline-block;flex-shrink:0}' +
       // 优先级徽章用等宽数字：P0/P1/P2/P3 物理宽度完全一致（消除「0 比 1 大」的字体宽度差异）
       '.awf-pill[data-prio]{font-variant-numeric:tabular-nums;font-family:var(--dsl-terminal-font,ui-monospace,SFMono-Regular,Menlo,monospace);min-width:26px;text-align:center;justify-content:center}' +
+      // DEV-216 停滞/逾期徽章：与 Pill 同档尺寸/行高（16px 固定），纯静态（无动画、
+      // 无 hover 位移，不改变任务行行高）；语义色走调用方 inline 主题变量。
+      '.awf-aging{display:inline-flex;align-items:center;border-radius:999px;font-size:11px;font-weight:600;' +
+      'line-height:16px;padding:1px 7px;white-space:nowrap;box-sizing:border-box;flex-shrink:0}' +
       // 按钮统一 22px 档位
       '.awf-btn{font-size:11px;line-height:16px;padding:3px 12px;border-radius:999px;cursor:pointer;' +
       'font-weight:600;white-space:nowrap;box-sizing:border-box}' +
@@ -1037,12 +1055,27 @@ window.__ModuleLoader__.load({
       const type = TYPE_STYLE[t.type] || { label: t.type || '任务', color: C.faint }
       const pst = PRIO_STYLE[t.prio] || { color: C.faint }
       const clickable = typeof onOpenSource === 'function'
+      // DEV-216：停滞/逾期内联小徽章（纯静态单行；overdue 优先于 stale）
+      const aging = agingBadge(t)
 
       // 徽章行：类型=中性 chip / 优先级=实底或浅底（Owner 进 meta 行，避免重复展示）
       // DEV-043：无图标角标——整行点击直达源文件查看/编辑界面（悬停反馈即可）
       const badgeRow = h('div', { className: 'awf-badge-row', style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' } },
         h(Pill, { color: type.color, variant: 'chip' }, type.label),
-        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null)
+        t.prio ? h(Pill, { color: pst.color, variant: 'soft', dataPrio: t.prio }, t.prio) : null,
+        aging
+          ? h('span', {
+              className: 'awf-aging awf-aging-' + aging.kind,
+              title: aging.kind === 'overdue'
+                ? '认领/最近更新距今 ≥ 7 天未推进（逾期）'
+                : '最近更新距今 ≥ 3 天未推进（停滞）',
+              style: {
+                color: aging.kind === 'overdue' ? C.error : C.warn,
+                border: '1px solid color-mix(in srgb, ' + (aging.kind === 'overdue' ? C.error : C.warn) + ' 45%, transparent)',
+                background: 'color-mix(in srgb, ' + (aging.kind === 'overdue' ? C.error : C.warn) + ' 8%, transparent)',
+              },
+            }, aging.label)
+          : null)
 
       // 行头：ID（左）+ 徽章行（右），与最近完成行的紧凑间距一致
       const rowHead = h('div', {
@@ -2958,6 +2991,7 @@ window.__ModuleLoader__.load({
     exports.WORKFLOW_STEPS = WORKFLOW_STEPS
     exports.inferWorkflowStage = inferWorkflowStage
     exports.stageSummary = stageSummary
+    exports.agingBadge = agingBadge
     return module.exports
   },
 })
