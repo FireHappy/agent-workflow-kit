@@ -20,7 +20,7 @@
   "files": [
     "lib",
     "src",
-    "skill",
+    "skills",
     "cordis.patch.yml",
     "README.md"
   ],

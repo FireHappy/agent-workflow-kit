@@ -56,11 +56,11 @@ test('DEV-216 copy-workflow-assets：manifest 每文件 sha256 + 非 CLI 文件�
     assert.equal(c.status, 0, '--copy 应成功：' + c.stdout + c.stderr)
 
     // manifest.files 每个文件记录 sha256（64 位 hex）与字节数；最小源 = SKILL.md + CLI 副本（DEV-217 平铺布局）
-    const manifest = JSON.parse(await readFile(join(dest, 'skill', 'manifest.json'), 'utf8'))
+    const manifest = JSON.parse(await readFile(join(dest, 'skills', 'manifest.json'), 'utf8'))
     assert.ok(Array.isArray(manifest.files) && manifest.files.length >= 2, 'files 至少含 SKILL.md 与 bin/awf')
     const paths = manifest.files.map((f) => f.path)
-    assert.ok(paths.includes('skill/agent-workflow-scaffold/SKILL.md'), '应内嵌框架技能 SKILL.md：' + paths)
-    assert.ok(paths.includes('skill/agent-workflow-scaffold/bin/awf'), '应内嵌 CLI 副本 bin/awf：' + paths)
+    assert.ok(paths.includes('skills/agent-workflow-scaffold/SKILL.md'), '应内嵌框架技能 SKILL.md：' + paths)
+    assert.ok(paths.includes('skills/agent-workflow-scaffold/bin/awf'), '应内嵌 CLI 副本 bin/awf：' + paths)
     // 版本契约（DEV-217）：分发版本 = 插件 package.json；骨架版 = 模板内（最小源无模板 → null）
     assert.ok(manifest.source && typeof manifest.source.version === 'string', 'manifest.source.version 应记录插件版本')
     const pluginPkg = JSON.parse(await readFile(join(pluginRoot, 'package.json'), 'utf8'))
@@ -76,7 +76,7 @@ test('DEV-216 copy-workflow-assets：manifest 每文件 sha256 + 非 CLI 文件�
     assert.equal(k0.status, 0, '初始 --check 应通过：' + k0.stdout + k0.stderr)
 
     // 3) 改任一非 CLI 文件（SKILL.md）→ --check 退出码 1 并报 DRIFT + 文件路径
-    await writeFile(join(dest, 'skill', 'agent-workflow-scaffold', 'SKILL.md'), '# 被改的内容\n')
+    await writeFile(join(dest, 'skills', 'agent-workflow-scaffold', 'SKILL.md'), '# 被改的内容\n')
     const k1 = runCli(['--check'], env)
     assert.equal(k1.status, 1, '内容漂移时 --check 应退出 1（实际 ' + k1.status + '）')
     assert.match(k1.stderr, /DRIFT/, '漂移输出应含 DRIFT 标记')

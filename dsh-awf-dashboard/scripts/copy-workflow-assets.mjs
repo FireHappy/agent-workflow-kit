@@ -3,12 +3,12 @@
 //
 // 单源双形态：源只维护一份（kit 仓库），插件包内嵌第二形态副本。
 //   - 形态一（源）：kit 仓库根（白名单：SKILL.md / skills/* / templates/* / test/*）+ bin/awf。
-//   - 形态二（内嵌副本，平铺）：<插件>/skill/
-//       · skill/agent-workflow-scaffold/  ← 框架技能：SKILL.md + bin/awf（以仓库 CLI 覆盖）+ templates/ + test/
-//       · skill/<name>/                   ← 各流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），
+//   - 形态二（内嵌副本，平铺）：<插件>/skills/
+//       · skills/agent-workflow-scaffold/  ← 框架技能：SKILL.md + bin/awf（以仓库 CLI 覆盖）+ templates/ + test/
+//       · skills/<name>/                   ← 各流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），
 //                                            与框架技能同级平铺（DEV-217：不做 agent-workflow-scaffold/skills/ 嵌套）
-//       · skill/manifest.json             ← 产物清单（版本契约 + 每文件 sha256）
-//   发版即随插件分发（package.json files 含 "skill"）；装插件即装工作流。
+//       · skills/manifest.json             ← 产物清单（版本契约 + 每文件 sha256）
+//   发版即随插件分发（package.json files 含 "skills"）；装插件即装工作流。
 //
 // 版本契约（DEV-217，清理版号）：
 //   · 插件/分发版本 = 插件 package.json version（唯一信号，manifest.source.version 记录它）；
@@ -27,7 +27,7 @@
 // AWF_DEST_ROOT（副本目标根，缺省为插件根）。
 //
 // 技能源解析：--skill-dir > AWF_SKILL_SOURCE 环境变量 > kit 仓库根（内含 SKILL.md 即认定）。
-//   源目录按白名单收集：SKILL.md + skills/<name>/（平铺到 skill/<name>/）+ templates/ + test/；
+//   源目录按白名单收集：SKILL.md + skills/<name>/（平铺到 skills/<name>/）+ templates/ + test/；
 //   bin/awf 一律以 --awf / AWF_AWF_SOURCE / kit 仓库 bin/awf 为准（不在拷贝后覆盖）。
 //   仓库根 .agent-teams/、dispatch/ 等运行/文档目录天然不在白名单，不会被误内嵌。
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
@@ -39,8 +39,8 @@ const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const KIT_ROOT = resolve(PLUGIN_ROOT, '..')
 const DEFAULT_AWF_IN_KIT = join(KIT_ROOT, 'bin', 'awf')
 
-// 副本区（平铺）：框架技能目录 + manifest 同放在 skill/ 下
-const SKILL_AREA = 'skill'
+// 副本区（平铺）：框架技能目录 + manifest 同放在 skills/ 下
+const SKILL_AREA = 'skills'
 const FRAMEWORK_DIR = SKILL_AREA + '/agent-workflow-scaffold'
 
 // 拷贝排除项：版本目录 / 构建缓存 / 平台杂物（git 元数据不入包）
@@ -136,7 +136,7 @@ async function resolveAwfSource(o) {
 
 /**
  * 计算「源 → 副本」完整产物清单（--list 预览 / --copy 写入 / --check 对照基准）。
- * 产物路径相对副本区根（skill/）：框架技能固定 agent-workflow-scaffold/，
+ * 产物路径相对副本区根（skills/）：框架技能固定 agent-workflow-scaffold/，
  * 流程技能来自源 skills/<name>/，平铺为 <name>/（DEV-217 不嵌套）。
  */
 async function computePlan({ skillRoot, awfSource, cli }) {
@@ -229,7 +229,7 @@ async function actionCopy(o, destRoot) {
   const awfSource = await resolveAwfSource(o)
   const m = await computePlan({ skillRoot, awfSource, cli: o.cli })
   const area = join(destRoot, SKILL_AREA)
-  // 只清空副本区（skill/ 下的框架技能 + 平铺流程技能 + manifest），绝不触碰插件其他内容
+  // 只清空副本区（skills/ 下的框架技能 + 平铺流程技能 + manifest），绝不触碰插件其他内容
   await rm(area, { recursive: true, force: true })
   await mkdir(join(destRoot, FRAMEWORK_DIR), { recursive: true })
 
@@ -242,7 +242,7 @@ async function actionCopy(o, destRoot) {
       }
     } catch { /* 最小源允许缺失 */ }
   }
-  // 流程技能：逐目录平铺到 skill/<name>/（与框架技能同级）
+  // 流程技能：逐目录平铺到 skills/<name>/（与框架技能同级）
   for (const name of m.skills) {
     await cp(join(skillRoot, 'skills', name), join(destRoot, SKILL_AREA, name), { recursive: true, filter: (s) => !SKIP(basename(s)) })
   }
@@ -254,7 +254,7 @@ async function actionCopy(o, destRoot) {
   await writeFile(manifestFile(destRoot), JSON.stringify(m, null, 2) + '\n', 'utf8')
   await printManifest(m)
   say('已写入内嵌副本：' + relative(destRoot, area) + '/（平铺）+ manifest.json')
-  say('打包即随插件分发（package.json files 含 "skill"）；改源后重跑本脚本刷新。')
+  say('打包即随插件分发（package.json files 含 "skills"）；改源后重跑本脚本刷新。')
 }
 
 /** 校对当前源与内嵌副本（清单 + 逐文件 sha256 + CLI sha + 版本契约）；漂移 → exit 1。 */
@@ -271,7 +271,7 @@ async function actionCheck(o, destRoot) {
   const absOf = (p) => join(destRoot, p)
   const have = async (p) => { try { await stat(absOf(p)); return true } catch { return false } }
 
-  // 1) 文件清单：内嵌副本（walk skill/，排除 manifest.json）vs 当前源
+  // 1) 文件清单：内嵌副本（walk skills/，排除 manifest.json）vs 当前源
   const embeddedNow = (await walkFiles(join(destRoot, SKILL_AREA), join(destRoot, SKILL_AREA)).catch(() => []))
     .map((r) => SKILL_AREA + '/' + r)
     .filter((p) => p !== SKILL_AREA + '/manifest.json')

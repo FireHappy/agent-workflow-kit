@@ -35,12 +35,12 @@ agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，�
 - 形态一（源）：**kit 仓库**（白名单 `SKILL.md` + `skills/*` + `templates/*` + `test/*`）
   + kit 仓库 `bin/awf`（最新 CLI，如 `awf log` / `awf validate`）。
   `.agent-teams/`、`dispatch/` 等运行/文档目录不在白名单，不会被误内嵌。
-- 形态二（内嵌副本，**平铺**）：`skill/`
-  - `skill/agent-workflow-scaffold/` ← 框架技能：`SKILL.md` + `bin/awf`（以仓库 CLI 覆盖）+ `templates/`（含 `FRAMEWORK_VERSION`）+ `test/`；
-  - `skill/<name>/` ← 各流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），
+- 形态二（内嵌副本，**平铺**）：`skills/`
+  - `skills/agent-workflow-scaffold/` ← 框架技能：`SKILL.md` + `bin/awf`（以仓库 CLI 覆盖）+ `templates/`（含 `FRAMEWORK_VERSION`）+ `test/`；
+  - `skills/<name>/` ← 各流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），
     与框架技能**同级平铺**（不再嵌套在 agent-workflow-scaffold/skills/ 下，DEV-217）；
-  - `skill/manifest.json` ← 产物清单：**版本契约** + bin/awf sha256/子命令 + **每个文件的 sha256**。
-  `package.json` 的 `files` 含 `"skill"`，随插件分发。
+  - `skills/manifest.json` ← 产物清单：**版本契约** + bin/awf sha256/子命令 + **每个文件的 sha256**。
+  `package.json` 的 `files` 含 `"skills"`，随插件分发。
 
 **版本契约（DEV-217，清理版号）**：插件/分发版本 = 本插件 `package.json` version（唯一信号，不再读技能
 实体 VERSION）；骨架版本 = `templates/FRAMEWORK_VERSION`（模板内，模板变更才 bump）。manifest 的
@@ -58,7 +58,7 @@ node scripts/copy-workflow-assets.mjs --check    # 校验副本与源一致：�
 ```
 
 bin/awf 更新（如新增子命令）或模板更新后重跑 `--copy` 即刷新内嵌副本；`--check` 供复核人核对副本一致性。
-`scripts/sync-profile.sh` 同步开发改动到已安装副本时会把 `skill/` 一并同步。
+`scripts/sync-profile.sh` 同步开发改动到已安装副本时会把 `skills/` 一并同步。
 
 ## 安装
 
@@ -147,7 +147,7 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 ## 变更记录
 
 - **1.7.0（DEV-217）**：内嵌技能副本**平铺布局** + 源收敛 + 版本契约（清理版号）
-  - 布局：`skill/` 下框架技能 `agent-workflow-scaffold/` 与各流程技能**同级平铺**（取消 `skills/` 嵌套，侧边栏同级展示）；
+  - 布局：`skills/` 下框架技能 `agent-workflow-scaffold/` 与各流程技能**同级平铺**（取消 `skills/` 嵌套，侧边栏同级展示）；
   - 源收敛：copy 脚本默认源 = **kit 仓库白名单**（SKILL.md / skills/* / templates/* / test/* + bin/awf），
     不再依赖本机技能实体状态；`.agent-teams/` 等运行目录不再可能被误内嵌；manifest 不写死本机绝对路径；
   - 版本契约：插件/分发版本 = `package.json`（唯一信号）；骨架版本 = `templates/FRAMEWORK_VERSION`（模板内）；
@@ -157,11 +157,11 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 - **1.6.0（DEV-216）**：内嵌技能/awf CLI 副本（单源双形态，装插件即装工作流）+ 当前任务停滞/逾期派生指标
   - 单源双形态分发：新增 `scripts/copy-workflow-assets.mjs`（`--list` 零写入列产物 / `--copy` 幂等生成 /
     `--check` 漂移校验，退出码 1 即不一致），把技能库实体 `~/.dsh/skills/agent-workflow-scaffold`
-    （含 SKILL.md / skills/* / templates/* / test/*）打进 `skill/agent-workflow-scaffold/`，并把 kit 仓库
+    （含 SKILL.md / skills/* / templates/* / test/*）打进 `skills/agent-workflow-scaffold/`，并把 kit 仓库
     `bin/awf`（t1 落地的最新 CLI）覆盖进副本的 `bin/awf`——解析规则不再双份漂移，bin/awf 更新后重跑
-    `--copy` 即刷新；产物清单写 `skill/manifest.json`（源路径 / 技能与骨架版本 / bin/awf sha256 / 子命令 /
-    每文件 sha256）。`package.json` `files` 加入 `"skill"`、README 新增「内嵌技能/CLI 副本」一节；
-    `scripts/sync-profile.sh` 同步 `skill/` 到已安装副本。
+    `--copy` 即刷新；产物清单写 `skills/manifest.json`（源路径 / 技能与骨架版本 / bin/awf sha256 / 子命令 /
+    每文件 sha256）。`package.json` `files` 加入 `"skills"`、README 新增「内嵌技能/CLI 副本」一节；
+    `scripts/sync-profile.sh` 同步 `skills/` 到已安装副本。
   - 停滞/逾期派生指标：`src/ledger.js` 新增 `deriveTaskAging` 纯函数——`stale`=「最近更新」（Last Updated
     兼容）距参照日 ≥3 天、`overdue`=「认领日期」（认领时间/Claimed）存在时以其计、否则以「最近更新」计，
     距参照日 ≥7 天；取不到时间戳（字段缺失或伪日期）→ `null`，不编造；ledgerOf 为每个当前任务块挂
