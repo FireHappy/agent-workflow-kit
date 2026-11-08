@@ -37,3 +37,12 @@
 - DEV-221（汇总行 chips + 停滞/逾期筛选）与 DEV-222（统计卡 2×2 + 8 周趋势 + 筛选分段，复刻 dsh-task-ledger 观感）均经用户试用判定**无实际价值，已整体回退**；面板保持 v1.7.0 原版（当前任务 / 待办 / 最近完成 三区轻量行，只读）。
 - 相关 commit 已被外部 reset 丢弃（daa7aaf 等），回退后仅保留「历史任务归档」恢复（540f1e7）。
 - **教训**：UI 借鉴要克制——用户对面板的既定偏好是「只读、紧凑、无额外装饰」（DEV-026/044/179 一再确认）；未明确要求时**不要主动加统计卡/趋势图/筛选**等「信息密度」改造，即便参照成熟产品。面板只做账本事实展示。
+
+## 派发复用 v2（DEV-224）+ 全局幂等复核（2026-11-08）
+
+- **复用规则（DEV-224）**：入池 = 目标项目 cwd + 标题 `[awf]` 开头 + 未归档（**去掉 blank 过滤**）；池内 `running=False` 取 updatedAt 最新复用；都忙 → 轮询等待任一空闲（`--queue-timeout`，默认不新建）；池空/`--new` 才新建；**取消每项目 3 个上限**（`--allow-over-3` 兼容 no-op）。
+- **并发治理**：全局登记表 `$DSH_HOME/.awf-dispatch/sessions.json`（`sessions[sid]={state,owner,since,until}`）+ `flock` 文件锁；`pick_claim_session` 锁内"重读池+排除已占用+running 空闲+原子占用"；发送后 `release_session`（10s 冷却，TTL 600s 兜底）。复核 PASS（smoke 242/0、并发模拟 A–E）。
+- **空回合问题（重要）**：复用旧会话时偶发——消息注入成功（inbox spliced）但回合空转（turn/start → inbox → turn/end，无 assistant/工具输出；重发一次仍空），会话配置正常、上下文压力无异常；用 `--new` 新建会话立即正常。疑似宿主冷会话/空回合问题（社区插件 `nlflora/dsh-empty-turn-guard` 同类）。
+  - **建议修复（待实施）**：`awf-dispatch` 发送后短轮询会话事件，检测"turn 结束且零 assistant/工具"→ 自动 `--new` 重发一次并记录「空回合自愈」；避免复用旧会话时静默失败。
+- **全局 v1.7.0 幂等复核**：7 目标全部复用（零新建），6 个已最新；**finderpathbar 发现真实差异**（模板仍旧版 + 空 bin/）→ 同步 v1.7.0 模板 + bootstrap（digest 4b5dd747）+ 删空 bin/，commit 0e4c5e8。教训：升级后要跑一次"幂等复核"，能抓出上次未落地的项目。
+- 其他坑：`.dispatch/` 未被部分项目 `.gitignore` 覆盖（仅提示，勿误判为脏改动）。
