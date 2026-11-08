@@ -716,7 +716,7 @@ class DshApi:
         return value.get("workspace", {})
 
     def archive_session(self, session_id: str) -> None:
-        """经 workspace/archiveSession 归档会话（--cleanup 使用）。"""
+        """经 workspace/archiveSession 归档会话（--cleanup / --retire-session 使用）。"""
         self.rpc("workspace/archiveSession", {"request": {"sessionId": session_id}})
 
 
@@ -2296,6 +2296,140 @@ def run_cleanup(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- 单次派发会话退役（SESSION-20261108）
+#
+# 用户要求「每次 --new 新建 → 任务完成核验后物理删除该会话」。宿主 DSH 0.2.2-rc.1
+# 只提供 workspace/archiveSession（从工作区分组界面隐藏）与 workspace/delete
+# （明确不删目录与会话），没有 session/delete、session/destroy 之类物理删除端点；
+# 会话后端自述「不删除会话文件…seam 无删除接口」。因此 --retire-session 是最接近的
+# 退役动作：归档 + 写本地归档台账（退出复用池 / GUI 分组），不硬删任何文件。
+
+
+def retire_session(api, rows, session_id, apply=False, json_mode=False) -> dict:
+    """--retire-session 主体：归档一个已完成并核验的派发会话，使其退出复用池。
+
+    宿主没有会话物理删除接口，归档 ≠ 物理删除：会话数据仍在磁盘、可经
+    workspace/unarchiveSession 恢复。返回结果字典（供 --json 与测试断言）。
+    """
+    sid = (session_id or "").strip()
+    result = {"ok": True, "mode": "retire-session", "dryRun": not apply,
+              "sessionId": sid, "session": None, "archived": [], "skipped": [],
+              "errors": []}
+    if not sid:
+        result["ok"] = False
+        result["errors"].append({"sessionId": sid, "error": "缺少会话 ID"})
+        return result
+    if sid in load_archived_session_ids():
+        result["skipped"].append({"sessionId": sid, "reason": "已在归档台账"})
+        return result
+    row = next((r for r in rows or []
+                if isinstance(r, dict) and str(r.get("sessionId")) == sid), None)
+    if row is None:
+        result["ok"] = False
+        result["errors"].append(
+            {"sessionId": sid, "error": "session/list 未返回该会话（ID 不存在或不可见）"})
+        return result
+    if row.get("running") is not False:
+        result["ok"] = False
+        result["errors"].append(
+            {"sessionId": sid, "error": "会话仍在运行；等回合结束（回执核验）后再退役"})
+        return result
+    title = session_title(row)
+    if not title.startswith(AWF_TITLE_PREFIX):
+        result["ok"] = False
+        result["errors"].append(
+            {"sessionId": sid, "error": "不是 [awf] 派发会话，拒绝退役（避免误归档用户会话）"})
+        return result
+    entry = {
+        "sessionId": sid,
+        "project": os.path.basename((row.get("cwd") or "").rstrip("/\\")) or "",
+        "title": title,
+    }
+    result["session"] = entry
+    if not apply:
+        return result
+    try:
+        if hasattr(api, "archive_session"):
+            api.archive_session(sid)
+        else:
+            api.rpc("workspace/archiveSession", {"request": {"sessionId": sid}})
+    except DispatchError as error:
+        result["ok"] = False
+        result["errors"].append({"sessionId": sid, "error": str(error)})
+        return result
+    record_archived_sessions([entry])
+    result["archived"].append(entry)
+    return result
+
+
+def run_retire_session(args) -> int:
+    """--retire-session 命令入口：归档指定已完成会话（默认 dry-run）。"""
+    api = DshApi(args.web_url)
+    rows = api.sessions()
+    apply = bool(args.apply)
+    result = retire_session(api, rows, args.retire_session, apply=apply, json_mode=args.json)
+    if args.json:
+        result["ledger"] = str(archived_ledger_path())
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["ok"] else 2
+    sid = result["sessionId"]
+    if result["skipped"]:
+        print(f"会话 {sid} 已在归档台账，跳过（无需重复归档）。")
+        return 0
+    if result["errors"]:
+        for item in result["errors"]:
+            print(f"FAIL  {item['error']}（{sid}）")
+        return 2
+    print(f"retire-session：{'apply（归档并写入台账）' if apply else 'dry-run（只读；加 --apply 才归档）'}")
+    print(f"会话：{sid}（{result['session']['title']}，{result['session']['project']}）")
+    if apply:
+        print(f"已归档会话并写入台账：{archived_ledger_path()}")
+        print("说明：workspace/archiveSession 只是从工作区分组界面隐藏 + 退出复用池；"
+              "宿主没有物理删除接口，会话数据仍在磁盘、可 unarchive 恢复。")
+    else:
+        print("dry-run：未归档任何会话；确认后加 --apply 执行。")
+        print("提示：宿主 DSH 没有会话物理删除接口；归档 = 隐藏 + 出池，数据可恢复（非物理删除）。")
+    return 0
+
+
+def run_permission_state(args) -> int:
+    """--permission-state：只读查询新建会话继承的权限预设，并对比当前会话权限。
+
+    宿主在创建会话时读取 profile 的 permission.defaultPreset，因此所有新建会话
+    （含 awf-dispatch --new）默认继承同一个权限预设；本命令用于派发前自检。
+    """
+    api = DshApi(args.web_url)
+    catalog = api.rpc("permissionPresets/catalog", {})
+    sid = os.environ.get("DSH_SESSION_ID", "")
+    current = None
+    if sid:
+        row = next((r for r in api.sessions()
+                    if isinstance(r, dict) and str(r.get("sessionId")) == sid), None)
+        if row is not None:
+            current = (((row.get("projections") or {}).get("values") or {})
+                       .get("permissions") or {}).get("currentValue")
+    payload = {
+        "defaultPreset": catalog.get("defaultPreset"),
+        "options": catalog.get("options", []),
+        "defaultOptions": catalog.get("defaultOptions", []),
+        "currentSession": {"sessionId": sid or None, "permission": current},
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False))
+        return 0
+    print(f"默认权限预设（新建会话继承）：{payload['defaultPreset']}")
+    print("可选默认：" + "、".join(
+        str(item.get("value", "")) for item in payload["defaultOptions"]))
+    if current:
+        print(f"当前会话权限：{current}（{sid}）")
+    print()
+    print("说明：DSH 在创建会话时读取 profile 的 permission.defaultPreset；"
+          "awf-dispatch --new 与 GUI 新建的会话默认一致。")
+    print('      要修改默认值：GUI 设置 → 权限，或 settings/mutate ns=permission path=["defaultPreset"]。')
+    print("      会话创建接口没有权限参数，无法按单次派发单独指定。")
+    return 0
+
+
 # ---------------------------------------------------------------- 派发模式
 
 
@@ -2349,10 +2483,12 @@ def preflight(target: Path, args, need_channel: bool):
     return result
 
 
-def wait_session_ready(api, rows, session_id, target, args):
+def wait_session_ready(api, rows, session_id, target, args, allow_reselect=True):
     """复用路径公共等待：先确认会话存在；运行中的会话进入等待队列——项目 [awf] 池满
     （≥{MAX}）时启动独立监听子进程监听整个池（任一会话空闲即返回复用），测试桩/非
-    DshApi 走内联轮询。返回可发送的会话行；会话消失（SESSION_GONE）与超时分别抛错。
+    DshApi 走内联轮询。`allow_reselect=False`（--session 硬指定）时**只等指定会话**：
+    不启动池监听、绝不改选发送目标（防止 --session 追问被投到池内其他会话）。
+    返回可发送的会话行；会话消失（SESSION_GONE）与超时分别抛错。
     """.format(MAX=MAX_SENDER_SESSIONS)
     row = find_session_in(rows, session_id) or find_session(api, session_id)
     if row is None:
@@ -2360,21 +2496,29 @@ def wait_session_ready(api, rows, session_id, target, args):
             f"复用会话在等待前消失了：{session_id}；会话不可恢复，请重新派发（或用 --new 新建）"
         )
     if row.get("running") is not False:
-        emit(
-            f"目标会话 {session_id} 正在运行，进入等待队列（最多 {args.queue_timeout}s；"
-            "--queue-timeout 可调）",
-            args.json,
-        )
+        if allow_reselect:
+            emit(
+                f"目标会话 {session_id} 正在运行，进入等待队列（最多 {args.queue_timeout}s；"
+                "--queue-timeout 可调）",
+                args.json,
+            )
+        else:
+            emit(
+                f"--session 指定的会话 {session_id} 正在运行，只等该会话空闲"
+                f"（不改选、不并入项目池监听；最多 {args.queue_timeout}s）",
+                args.json,
+            )
         # DEV-224：无每项目上限；--session / 并发重读的等待期间若项目池 ≥3 且目标会话忙，
         # 仍启动独立监听子进程观察整个 [awf] 池（任一会话空闲即返回复用）；测试桩走内联等待。
+        # SESSION-20261108：--session 硬指定时 allow_reselect=False，只等指定会话。
         project_pool = project_awf_pool(rows, target)
-        if isinstance(api, DshApi) and len(project_pool) >= MAX_SENDER_SESSIONS:
+        if allow_reselect and isinstance(api, DshApi) and len(project_pool) >= MAX_SENDER_SESSIONS:
             emit("启动会话监听子进程：等待项目 [awf] 会话池任一空闲后继续发送", args.json)
             outcome = spawn_idle_listener(
                 api, [r["sessionId"] for r in project_pool], args.queue_timeout, args.json)
         else:
             outcome = wait_for_idle(api, session_id, args.queue_timeout, args.json, target=target)
-        if isinstance(outcome, dict) and outcome.get("sessionId"):
+        if isinstance(outcome, dict) and allow_reselect and outcome.get("sessionId"):
             session_id = outcome["sessionId"]
             row = outcome
         if outcome is SESSION_GONE:
@@ -2573,7 +2717,15 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         # DEV-224：pick_claim 选中的空闲会话已确认并占用，跳过等待；--session 指定 /
         # 并发重读返回的忙碌候选仍需排队等待。
         if not ready_confirmed:
-            row = wait_session_ready(api, rows, session_id, target, args)
+            # SESSION-20261108：--session 硬指定时只等指定会话，禁止满池监听改选
+            # （否则追问会被误投到池内任一空闲会话）。显式指定语义必须严格。
+            row = wait_session_ready(
+                api, rows, session_id, target, args,
+                allow_reselect=not bool(args.session))
+            if args.session and row.get("sessionId") != session_id:
+                raise DispatchError(
+                    f"--session 指定会话等待期间发生改选（{session_id} → {row.get('sessionId')}）；"
+                    "已中止发送，避免误投")
         # DEV-215：同上——满池等待可能改选监听返回的空闲会话，以返回值为准。
         session_id = row["sessionId"]
         hint = pressure_hint(row)
@@ -3122,6 +3274,9 @@ def main(argv=None) -> int:
             "  awf-dispatch --cleanup                                # dry-run：列出每项目超 3 的空闲 [awf] 会话\n"
             "  awf-dispatch --cleanup --apply                        # 归档超限空闲会话并写入台账（workspace/archiveSession）\n"
             "  awf-dispatch --forget-archived                        # 重置本地归档台账（.dispatch/archived-sessions.json）\n"
+            "  awf-dispatch --retire-session <会话ID>                  # dry-run：打印单次派发会话的退役计划\n"
+            "  awf-dispatch --retire-session <会话ID> --apply          # 归档退役（宿主无物理删除；归档≠硬删）\n"
+            "  awf-dispatch --permission-state                       # 查看新建会话继承的权限预设\n"
             "\n--prune：扫描 ./.dispatch/tasks/（含子目录，如 upgrade-v<版本>/）下的票据，从正文「- 目标项目：<别名>（<路径>）」\n"
             "        取别名与路径、从文件名取任务 ID；git log --all 命中 ID，或目标账本 done.md 已含 ID → completed。\n"
             "        默认 dry-run 只打印计划，--apply 才删除（git 索引里的票据用 git rm，其余直接删除），\n"
@@ -3133,6 +3288,14 @@ def main(argv=None) -> int:
             "        写入本地归档台账 .dispatch/archived-sessions.json（不入库）。\n"
             "        **归档台账在组装复用池/统计每项目 [awf] 会话数时排除**——已归档会话不再参加复用与上限统计；\n"
             "        误重置用 --forget-archived（删除台账，其中会话恢复进入复用池）。--cleanup 不接受 target/task。\n"
+            "\n--retire-session（SESSION-20261108 单次派发收尾）：把一次 --new 派发、已完成核验的会话\n"
+            "        归档退役：默认 dry-run 只打印；--apply 经 workspace/archiveSession 归档并写入\n"
+            "        本地归档台账 .dispatch/archived-sessions.json（该会话不再进复用池/GUI 分组）。\n"
+            "        **宿主 DSH 0.2.2-rc.1 没有会话物理删除接口**（session/* 无 delete/destroy，\n"
+            "        workspace/delete 明确不删目录与会话，会话后端自述「不删除会话文件」）——所以\n"
+            "        这是最接近「用完即删」的动作：归档≠物理删除，数据仍在磁盘、可 unarchive 恢复。\n"
+            "\n--permission-state：只读查询新建会话继承的权限预设（profile permission.defaultPreset）\n"
+            "        与当前会话权限，确认 --new 派发的「权限牌」一致；不派发、不改设置。\n"
             "\n激活式路由（票据来源，DEV-115 定义 / DEV-128 放开转派）：读取任务文件头部的「来源：用户 | 工作流」；\n"
             "        缺省视为用户来源（旧票据兼容）；「来源：工作流」的票据是已派发任务，\n"
             "        DEV-128 起允许按需继续向下一层转派（深度不限），派发时仅提示核对转派理由\n"
@@ -3199,7 +3362,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="配合 --prune / --cleanup：真正执行删除/归档（默认只打印计划）",
+        help="配合 --prune / --cleanup / --retire-session：真正执行删除/归档（默认只打印计划）",
     )
     parser.add_argument(
         "--cleanup",
@@ -3212,6 +3375,20 @@ def main(argv=None) -> int:
         action="store_true",
         help="（DEV-214）重置本地归档台账（删除 .dispatch/archived-sessions.json）；"
         "其中记录的会话恢复进入复用池与每项目数量统计",
+    )
+    parser.add_argument(
+        "--retire-session",
+        default="",
+        metavar="SESSION_ID",
+        help="（SESSION-20261108）单次派发的收尾：把已完成核验的派发会话归档退役"
+        "（默认 dry-run；--apply 经 workspace/archiveSession 归档并写本地台账）。"
+        "宿主 DSH 没有会话物理删除接口——归档 = 隐藏 + 退出复用池，数据仍在磁盘、可恢复",
+    )
+    parser.add_argument(
+        "--permission-state",
+        action="store_true",
+        help="只读查询新建会话继承的权限预设（profile permission.defaultPreset）"
+        "与当前会话权限，确认 --new 派发的权限牌一致；不派发任务",
     )
     parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
     parser.add_argument("--handoff", action="store_true", help="只生成交接单，不执行")
@@ -3248,7 +3425,8 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--session",
         default="",
-        help="直接向指定会话 ID 发送任务（续跑历史会话或人工指定），不会新建",
+        help="直接向指定会话 ID 发送任务（续跑历史会话或人工指定），不会新建；"
+        "目标忙时只等该会话空闲，绝不改选池内其它会话（SESSION-20261108 修复）",
     )
     parser.add_argument(
         "--idle-wait",
@@ -3356,17 +3534,34 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     args.allow_dirty_scope = allow_dirty_scope
 
+    # SESSION-20261108（复核低1）：settle 模式两两互斥——此前 --prune/--cleanup/
+    # --forget-archived/--retire-session/--permission-state/--report/--screen-state
+    # 混用时按 main() 分发顺序静默执行第一个；--prune --apply 夹带另参可能误删票据。
+    settle_modes = [name for name, enabled in (
+        ("--prune", args.prune),
+        ("--cleanup", args.cleanup),
+        ("--forget-archived", args.forget_archived),
+        ("--retire-session", bool(args.retire_session)),
+        ("--permission-state", args.permission_state),
+        ("--report", args.report),
+        ("--screen-state", args.screen_state),
+    ) if enabled]
+    if len(settle_modes) > 1:
+        parser.error("模式互斥：{} 只能选一个".format(" / ".join(settle_modes)))
+
     # DISPATCH-143（reviewer-d143 minor-1）：--screen-state 与其它模式显式互斥，
     # 明确退化组合语义，不做静默忽略。
     if args.screen_state and (args.prune or args.cleanup or args.forget_archived
+                              or args.retire_session or args.permission_state
                               or args.session or args.headless or args.handoff
                               or args.target or args.task):
         parser.error(
             "--screen-state 只查询本机显示器状态后退出，不能与 --prune/--cleanup/"
-            "--forget-archived/--apply/--session/--headless/--handoff 或 target/task 位置参数同用"
+            "--forget-archived/--retire-session/--permission-state/--apply/--session/"
+            "--headless/--handoff 或 target/task 位置参数同用"
         )
-    if args.apply and not (args.prune or args.cleanup):
-        parser.error("--apply 只能配合 --prune（删票据）或 --cleanup（归档会话）使用")
+    if args.apply and not (args.prune or args.cleanup or args.retire_session):
+        parser.error("--apply 只能配合 --prune（删票据）、--cleanup 或 --retire-session（归档会话）使用")
     # DISPATCH-146：--report 与其它模式互斥（回执投递独立于派发）。第一个位置
     # 参数即回执文本（与 `--report "<回执文本>"` 命令形式一致）；第二个位置参数
     # （task）仍不允许。
@@ -3381,11 +3576,13 @@ def main(argv=None) -> int:
             print(str(error), file=sys.stderr)
             return 1
     if args.report and (args.prune or args.cleanup or args.forget_archived
+                        or args.retire_session or args.permission_state
                         or args.session or args.headless or args.handoff
                         or args.wait or args.task):
         parser.error(
             "--report 只用于回执投递（DISPATCH-146 回执投递通道），不能与 --prune/--cleanup/"
-            "--forget-archived/--session/--headless/--handoff/--wait 或第二个位置参数（task）同用；"
+            "--forget-archived/--retire-session/--permission-state/--session/--headless/"
+            "--handoff/--wait 或第二个位置参数（task）同用；"
             "回执投递示例：awf-dispatch --report --to <派发方会话ID> \"<回执文本>\""
         )
     if args.session and not args.reuse:
@@ -3409,6 +3606,31 @@ def main(argv=None) -> int:
             parser.error("--cleanup 不能与 --new 同用（清理模式不派发任务）")
         try:
             return run_cleanup(args)
+        except DispatchError as error:
+            print(f"FAIL  {error}", file=sys.stderr)
+            return EXIT_FAIL
+    if args.retire_session:
+        if args.target or args.task:
+            parser.error("--retire-session 不接受 target / task 位置参数；它只归档指定会话")
+        if args.headless or args.handoff or args.session:
+            parser.error("--retire-session 不能与 --headless / --handoff / --session 同时使用")
+        if args.reuse is False:
+            parser.error("--retire-session 不能与 --new 同用（退役模式不派发任务）")
+        try:
+            return run_retire_session(args)
+        except DispatchError as error:
+            print(f"FAIL  {error}", file=sys.stderr)
+            return EXIT_FAIL
+    if args.permission_state:
+        if (args.target or args.task or args.prune or args.cleanup or args.forget_archived
+                or args.retire_session or args.session or args.headless or args.handoff
+                or args.report or args.apply):
+            parser.error(
+                "--permission-state 只读查询权限预设后退出，不能与其他模式、--apply "
+                "或 target/task 位置参数同用"
+            )
+        try:
+            return run_permission_state(args)
         except DispatchError as error:
             print(f"FAIL  {error}", file=sys.stderr)
             return EXIT_FAIL
@@ -3436,7 +3658,7 @@ def main(argv=None) -> int:
     if not args.target or (not args.task and not args.task_text):
         parser.error(
             "缺少参数：需要 target 与 task，或用 --task-text 直接给任务文本（免票据）；"
-            "--prune / --cleanup / --forget-archived 不需要"
+            "--prune / --cleanup / --retire-session / --permission-state / --forget-archived 不需要"
         )
 
     inline_task = None

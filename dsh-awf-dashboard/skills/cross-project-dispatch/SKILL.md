@@ -77,6 +77,7 @@ router 只写：**用户意图 / 硬约束 / 验收标准 / 路由裁决**。
   - 显式加 `--allow-legacy-reuse`
 - 用户自建的普通会话既无标记也无放行，不会被复用 / 改名 / 注入任务
 - 选中的会话正在运行 / 池内全部忙 → 轮询等待任一空闲；`--queue-timeout`（默认 180s）超时才回执等待失败，不静默新建
+- **`--session` 硬指定（SESSION-20261108 修复）**：目标忙时只等该会话空闲，**不启动整池监听、绝不改选**发送目标——此前满池时会把追问误投到池内其他空闲会话（实测 `session-23c9a97c` 串台）；显式指定语义必须严格
 - 上下文压力 ≥ 0.9 只提示「可考虑 `--new`」
 - 只有并行独立需求、上下文污染、排障或模块隔离时才加 `--new`（DEV-224 起不再有 3 个上限校验，`--allow-over-3` 仅为兼容参数）
 - **新建并发互斥**：同一项目的新建决策用文件锁 `.dispatch/.lock-<project>` 串行化，拿到锁后重读池再决策——并发方刚建出的可复用会话直接改复用，不重复新建（锁文件与台账都是派发方本地产物，不入库）
@@ -93,7 +94,7 @@ router 只写：**用户意图 / 硬约束 / 验收标准 / 路由裁决**。
 | `--allow-over-3` | **兼容参数（DEV-224 起 no-op）**：3 个上限已取消，`--new` 直接新建 |
 | `--allow-legacy-reuse` | 放行旧格式空闲会话迁移复用并改名 |
 | `--module <名称>` | 模块名（标题 `[awf] <项目> · <模块>`） |
-| `--session <id>` | 直接向指定会话发送（续跑 / 人工指定），不新建 |
+| `--session <id>` | 直接向指定会话发送（续跑 / 人工指定），不新建；目标忙时只等该会话，绝不改选池内其它会话 |
 | `--queue-timeout N` | 池内会话全部忙时等待任一空闲的上限（默认 180s） |
 | `--dry-run` | 只做前置检查，不创建会话 |
 | `--headless` | 回退 headless（默认后台启动，`--wait` 才同步） |
@@ -107,8 +108,10 @@ router 只写：**用户意图 / 硬约束 / 验收标准 / 路由裁决**。
 | `--allow-role-mismatch` | 配合 `--check-role`：静默 role 不匹配警告 |
 | `--prune` | 清理已完成票据（用完即删；默认 dry-run 只打印计划） |
 | `--cleanup` | 存量收敛工具：列出每项目超 3 的空闲 `[awf]` 会话（默认 dry-run 只列表；不再是运行时限流） |
+| `--retire-session <id>` | 单次派发收尾：归档退役指定会话（默认 dry-run；`--apply` 经 `workspace/archiveSession` 归档并写台账）。宿主无物理删除接口，归档 ≠ 物理删除 |
+| `--permission-state` | 只读查询新建会话继承的权限预设（`permission.defaultPreset`）与当前会话权限，确认 `--new` 派发的权限牌一致 |
 | `--forget-archived` | 重置本地归档台账（删除 `.dispatch/archived-sessions.json`；其中会话恢复进入复用池与数量统计） |
-| `--apply` | 配合 `--prune`（删除票据）或 `--cleanup`（归档会话）：真正执行（默认只打印计划） |
+| `--apply` | 配合 `--prune`（删除票据）、`--cleanup` 或 `--retire-session`（归档会话）：真正执行（默认只打印计划） |
 | `--json` | 机器可读输出（含 `reused` 与 `sessionId`） |
 | `--report` | 回执投递模式：把回执文本经通道投递到派发方会话收件箱（见「回执投递通道」） |
 | `--to <id>` | 配合 `--report`：派发方会话 ID（投递目标；缺省降级写收件箱文件） |
@@ -374,6 +377,31 @@ DEV-224 起**无每项目数量上限**：入池=项目下未归档 `[awf]` 会�
 **DEV-215 补充**（满池实测暴露的两处修正）：
 - **满池等待以返回会话为准**：`wait_session_ready` 在监听子进程返回任一空闲会话后，发送 / 改名 / 日志一律使用该返回会话（此前作用于局部变量，等待目标 ≠ 发送目标，监听白等）
 - **并发记账提示**：同项目活跃 `[awf]` 会话 >1 时，任务包自动注入提示，要求目标按票据任务编号登记账本 / commit——避免多个并行 worker 自排相同 ID 造成账本互相覆盖（UXR-POOL 002/003 曾撞 DEV-091）
+
+## 单次派发会话退役（SESSION-20261108 · 物理删除能力排查）
+
+用户要求「每次 `--new` 新建 → 任务完成核验后**物理删除会话**」，替代复杂复用池。经宿主能力排查（DSH 0.2.2-rc.1：安装包 API 清单 + ACP 实现 + 前端菜单 + 实测），结论：**没有可用的会话物理删除能力**。
+
+> 补证注记（DELETE-SESSION-20261108-1）：asar 中的 `session/delete` / `deleteSession` / `zDeleteSessionRequest` 全部属于第三方 `@agentclientprotocol/sdk`（ACP 协议层），不是 DSH Web RPC；DSH 自己的 ACP server（`dsh-acp`）未实现、也未声明该能力。
+
+- **A. 语义与调用路径**：`session/delete` 是 ACP（Agent Client Protocol）的 **agent 侧**请求，由 ACP client（脚本 / 测试驱动）调用 agent，参数 `{sessionId}`（`zDeleteSessionRequest`），返回空对象；仅在 agent 于 `initialize` 声明 `sessionCapabilities.delete` 时可用。它是 JSON-RPC 会话协议（stdio/WS），**不是 MCP**（MCP 管工具），也不是 DSH dashboard 的 `/api/*` RPC。
+- **B. 宿主是否实现**：**否**。`dsh-acp` 的 `initialize` 只声明 `sessionCapabilities: {close, list, resume}`，连接只注册 `session.new/list/resume/close/setConfigOption/prompt/cancel`，**没有 `deleteSession` handler**；其 README 明写 “Persistence supports listing, resuming, and closing sessions…, but deletion, forks, transcript replay, and additional directories are unsupported.”
+- **C. 排除理由（不止查 destroy/purge）**：
+  1. `session/delete` 字符串全在 `@agentclientprotocol/sdk`（schema / zod / AGENT_METHODS / client `deleteSession()` / 协议测试），DSH 包不引用该 client 方法；DSH Web 端点清单（`typert.host.js`）无任何 delete 端点，实测 `/api/session/delete` 404。
+  2. DSH 作为 ACP agent 不实现 / 不声明 delete，客户端方法无处可调。
+  3. `dsh-session-query-sqlite` 的 `_deleteSession` 只删 SQLite FTS 搜索索引行（`persisted_docs` / `temp.live_docs`），不是会话数据，也不对外暴露。
+  4. `dsh-experimental-inspector` 的 `deleteSession` 是 Chrome DevTools 的 device-bound session（无关）。
+  5. `it.each([... "session/delete" ...])` 是 SDK 协议测试（校验无 session header 时拒绝），不是 DSH 行为。
+  6. `workspace/archiveSession` = 仅隐藏；`workspace/delete` = 删除工作区登记但**保留文件与会话**；会话右键菜单无删除；会话后端文档自述「不删除会话文件」。**DSH 侧无任何可达的物理删除路径。**
+- **最接近替代（已落地命令）**：`--retire-session <会话ID> [--apply]`（仅 `[awf]` 派发会话；非派发用户会话拒绝退役）——归档 + 写本地归档台账，会话退出复用池与 GUI 分组。与物理删除的差异：**不回收磁盘、可经 `workspace/unarchiveSession` 恢复、`~/.dsh/sessions/` 仍保留**；脚本**不硬删任何文件**
+- **推荐流程**：`--new` 派发 → 必报点 10 完成回执 → 派发方核验（commit / 账本）→ `--retire-session <ID> --apply` → `--prune` 删票据。宿主将来提供删除 RPC 后可替换为真删除
+
+```sh
+awf-dispatch --retire-session <会话ID>            # dry-run：打印退役计划
+awf-dispatch --retire-session <会话ID> --apply    # 归档 + 写台账（非物理删除）
+```
+
+**权限牌一致性**：DSH 在创建会话时读取 profile 的 `permission.defaultPreset`，所以 GUI 新建与 `awf-dispatch --new` 新建默认继承同一权限预设；`awf-dispatch --permission-state` 可查默认预设与当前会话权限（只读、不派发、不改设置）。会话创建接口没有权限参数，无法按单次派发单独授权。
 
 ## 验收与收尾清单
 
