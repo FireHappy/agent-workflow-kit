@@ -6,7 +6,9 @@
 
 ## 当前进行中
 
-（无）
+| 工作流 | 任务ID | 优先级 | 状态 | Owner | 任务 |
+|--------|--------|--------|------|-------|------|
+| dev | DEV-227 | P1 | active | lead | 派发 uxrsample Android APK 打包（BUILD-20261108） |
 
 ## 待处理
 
@@ -25,5 +27,5 @@
 | dev | DEV-219 | P2 | 版本锚点统一到插件 package.json + 删除 agent-workflow/VERSION | 2026-11-08 |
 | dev | DEV-220 | P1 | release-prep 1.7.0 | 2026-11-08 |
 
-*最后更新：2026-11-08 21:04*
+*最后更新：2026-11-08 21:13*
 <!-- awf:status:end -->
