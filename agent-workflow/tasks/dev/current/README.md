@@ -7,4 +7,4 @@
 | DEV-194 | P1 | active | lead | 派发 v1.4.0 升级至全部登记项目（10 目标） |
 | DEV-196 | P1 | blocked | lead | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） |
 | DEV-201 | P1 | blocked | lead | 派发打包任务至 rokid_system_components（用户直派） |
-| DEV-218 | P2 | active | lead | 重复文件治理：插件内嵌技能副本改为构建产物（不进 git） |
+| DEV-218 | P2 | active | lead | 技能源迁入插件（唯一开发路径）+ 仓库去重 + dispatch 改名 |
