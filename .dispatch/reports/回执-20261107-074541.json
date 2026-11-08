@@ -1,0 +1,13 @@
+{
+  "kind": "awf-report",
+  "version": 1,
+  "ticket": "",
+  "time": "2026-11-07 07:45:41 +0800",
+  "source": "agent-workflow-kit「[awf] [uxrsample] [任务包：版本锚点迁移框架支持——versionfile」",
+  "dispatcher": "uxrsample「[user] 通用对话」",
+  "status": "",
+  "body": "## ✅ 已受理 + 开始执行（DEV-198 · 版本锚点迁移框架支持 + 根 VERSION 防踩坑）\n\n- **当前状态**：必报点 1/2（受理 + 开始；任务状态 active，current/DEV-198.md 已认领）\n- **执行内容**：已读同类 memory（DEV-145 version_file 可配置 / DEV-174 kit 锚点迁移：release-prep/upgrade 已走 project_version_file 动态解析，需 dry-run 实证；双副本/技能实体化现状已核：工具实体 = ~/.dsh/skills/agent-workflow-scaffold（copy 安装），改后需 ./install.sh 同步）。计划：① 基线 dry-run 证据（release-prep/upgrade 在 version_file: agent-workflow/VERSION 下）② awf check 新增根 VERSION 警告（含迁移提示，不阻塞）+ smoke 断言 ③ release skill/模板注释/CHANGELOG/README + SP-302 memory ④ install.sh 同步 + 门禁 + 归档 commit。\n- **下一步**：基线验证 → 实现 → 文档 → 门禁\n- **预计**：约 30-40 分钟，无外部等待",
+  "reportedAt": 1794008741084,
+  "fromSession": "session-60e91d50-3af8-4a4b-9660-db7ae7777356",
+  "toSession": "session-dc570889-4869-4cf1-8680-b08c513af311"
+}

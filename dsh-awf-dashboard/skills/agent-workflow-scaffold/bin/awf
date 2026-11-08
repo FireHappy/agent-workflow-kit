@@ -870,7 +870,7 @@ EOF
     say "  已写入 .gitignore：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
     say ""
   fi
-  say "  已写入 .gitignore：派发流水/回报/运行时状态不入库（dispatch/log.md、reports/、headless/、.agent-teams/）"
+  say "  已写入 .gitignore：派发流水/回报/运行时状态不入库（.dispatch/log.md、reports/、headless/、.agent-teams/）"
   say "下一步：编辑 agent-workflow/project.yaml，然后运行"
   say "  ~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap"
   say ""
@@ -932,9 +932,9 @@ append_dispatch_gitignore() {
   fi
   {
     printf '%s\n' "$DISPATCH_GITIGNORE_MARK"
-    printf '%s\n' '/dispatch/log.md'
-    printf '%s\n' '/dispatch/reports/'
-    printf '%s\n' '/dispatch/headless/'
+    printf '%s\n' '/.dispatch/log.md'
+    printf '%s\n' '/.dispatch/reports/'
+    printf '%s\n' '/.dispatch/headless/'
     printf '%s\n' '/.agent-teams/'
   } >> "$gi"
   say "已写入 $gi：派发流水/回报/运行时状态不入库"
@@ -1743,8 +1743,8 @@ cmd_upgrade() {
   # DEV-205 双版本模型：升级判定 = 骨架版本（agent-workflow/FRAMEWORK_VERSION）差量，
   # 不再是技能版本。技能版本（agent-workflow/VERSION，发版即 bump，插件显示、技能实体
   # 安装消费）不参与升级判定，upgrade 也不再把它写目标 version_file 锚点——技能更新只
-  # 发生在技能实体（install.sh 重装），无需项目升级。骨架源读技能实体（安装后的唯一
-  # 事实源），未安装时回退 kit 仓库 agent-workflow/FRAMEWORK_VERSION。
+  # 发生在技能实体（install.sh 重装），无需项目升级。骨架源读技能实体 templates/FRAMEWORK_VERSION
+  # （DEV-217：骨架版随模板，模板变更才 bump），未安装时回退 kit 仓库 templates/FRAMEWORK_VERSION。
   local KFF cur_kff
   KFF="$HOME/.dsh/skills/agent-workflow-scaffold/templates/FRAMEWORK_VERSION"
   [ -f "$KFF" ] || KFF="$KIT_DIR/templates/FRAMEWORK_VERSION"

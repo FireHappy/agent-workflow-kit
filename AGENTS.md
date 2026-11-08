@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:9f5dc364 -->
+<!-- awf:begin v1 digest:d113badd -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -26,18 +26,18 @@
 
 ## 任务路由
 
-路由决策（激活式路由 / 单会话 / 团队 / 派发四通道选择）在对应技能内（激活式路由见 `skills/cross-project-dispatch/SKILL.md` / 团队见 `skills/team-flow/SKILL.md`），按 `whenToUse` 自动匹配加载后逐条决策，本入口不重复。
+路由决策（激活式路由 / 单会话 / 团队 / 派发四通道选择）在对应技能内（激活式路由见 `dsh-awf-dashboard/skills/cross-project-dispatch/SKILL.md` / 团队见 `dsh-awf-dashboard/skills/team-flow/SKILL.md`），按 `whenToUse` 自动匹配加载后逐条决策，本入口不重复。
 
 ## 校验
 
 - 框架与入口：`./agent-workflow/check_workflow.sh`
-- 编译：`bash -n bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile skills/cross-project-dispatch/scripts/awf-dispatch`
+- 编译：`bash -n dsh-awf-dashboard/skills/agent-workflow-scaffold/bin/awf && bash -n install.sh && bash -n test/smoke.sh && bash -n test/upgrade.sh && python3 -m py_compile dsh-awf-dashboard/skills/cross-project-dispatch/scripts/awf-dispatch`
 - 测试：`bash test/smoke.sh`
 
 ## 并行
 
-- 可并行单元：生成器与模板(bin/ templates/), 工作流规范(agent-workflow/README.md agent-workflow/workflows/), 技能(skills/ install.sh SKILL.md), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
-- 共享写点（任何并行单元都不得同时修改）：agent-workflow/project.yaml, AGENTS.md, agent-workflow/templates/, agent-workflow/bin/awf, skills/cross-project-dispatch/scripts/awf-dispatch, skills/cross-project-dispatch/SKILL.md
+- 可并行单元：插件与技能源(dsh-awf-dashboard/ install.sh), 工作流规范(agent-workflow/README.md agent-workflow/workflows/), 测试与CI(test/ .github/), 文档(docs/ README.md prompt.md)
+- 共享写点（任何并行单元都不得同时修改）：agent-workflow/project.yaml, AGENTS.md, dsh-awf-dashboard/skills/agent-workflow-scaffold/templates/, dsh-awf-dashboard/skills/cross-project-dispatch/scripts/awf-dispatch, dsh-awf-dashboard/skills/cross-project-dispatch/SKILL.md
 - 并行时账本只由主线写；子任务返回结果，由主线合并进 `tasks/<type>/current/<ID>.md`
 - 实现与复核尽量由不同会话/角色承担；复核必须独立重跑验证命令，不能只看实现者自述
 

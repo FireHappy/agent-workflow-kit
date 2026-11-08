@@ -19,8 +19,7 @@ __pycache__/
 .agent-teams/
 
 # agent-workflow（本机派发产物，不入库）
-/dispatch/log.md
-/dispatch/reports/
-/dispatch/headless/
 /.agent-teams/
-/dispatch
+
+# 派发任务记录（本地，默认忽略）
+/..dispatch/

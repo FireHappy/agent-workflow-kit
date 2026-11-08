@@ -11,18 +11,15 @@
 
 ```text
 agent-workflow-kit/
-├── SKILL.md                 # 技能入口（脚手架）
+├── AGENTS.md / CLAUDE.md    # 仓库入口与指针
+├── README.md / CHANGELOG.md # 项目说明 / 变更记录
 ├── prompt.md                # 无 shell 环境的提示词版
-├── bin/awf                  # init / bootstrap / check / status / register / projects / find / release-prep / upgrade
-├── skills/cross-project-dispatch/scripts/awf-dispatch # 派发技能自带工具
-├── templates/               # 生成用的规范与入口模板
-├── test/smoke.sh            # 冒烟测试
-├── test/upgrade.sh          # 升级回归测试（awf upgrade 全流程）
-├── test/registry-concurrency.sh  # 全局索引并发回归测试
+├── dsh-awf-dashboard/       # DSH 插件（看板）+ **技能唯一源**
+│   └── skills/              # 框架技能 agent-workflow-scaffold（SKILL.md / bin/awf / templates/ / test/）+ 8 个流程技能（同级平铺）
+├── test/                    # 冒烟 / 升级回归 / 全局索引并发测试
 ├── docs/design.md           # 设计取舍（含激活式 Router 协议）
-├── skills/                   # 8 个流程技能（各为 DSH 顶层技能）
-├── install.sh               # 安装全部技能到 ~/.dsh/skills（link 或 copy，逐技能顶层安装）
-└── agent-workflow/VERSION   # 技能版本锚点（随技能安装，upgrade 同步到项目）
+├── install.sh               # 从 dsh-awf-dashboard/skills/ 安装全部技能到 ~/.dsh/skills
+└── agent-workflow/          # kit 自身工作流账本与骨架（含 agent-workflow/VERSION 发布锚点）
 ```
 
 ## 安装（新机器）
@@ -40,7 +37,7 @@ install 后 DSH 在下一次请求前把所有技能加入技能目录：`agent-
 
 ```bash
 # 生成框架（空项目或已有仓库）
-~/Documents/GitHub/agent-workflow-kit/bin/awf init . --name "我的项目" --purpose "一句话定位"
+~/Documents/GitHub/agent-workflow-kit/dsh-awf-dashboard/skills/agent-workflow-scaffold/bin/awf init . --name "我的项目" --purpose "一句话定位"
 
 # 改完项目事实后刷新入口
 ~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap
@@ -50,7 +47,7 @@ install 后 DSH 在下一次请求前把所有技能加入技能目录：`agent-
 ~/.dsh/skills/agent-workflow-scaffold/bin/awf status
 
 # 跨项目派发（目标有工作流且已登记工作区；默认只发送不等待，--wait 才等待回合结束）
-~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md
+~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md
 ```
 
 生成结果：
@@ -79,7 +76,7 @@ skills/ 各流程技能，AGENTS.md 路由内联状态机 + 强制加载技能�
 
 ```bash
 # 新建项目：init 时直接忽略
-~/Documents/GitHub/agent-workflow-kit/bin/awf init . --name "我的项目" --gitignore
+~/Documents/GitHub/agent-workflow-kit/dsh-awf-dashboard/skills/agent-workflow-scaffold/bin/awf init . --name "我的项目" --gitignore
 
 # 存量项目补忽略
 ~/.dsh/skills/agent-workflow-scaffold/bin/awf gitignore

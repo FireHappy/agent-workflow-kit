@@ -52,15 +52,17 @@ install_skill() {
   fi
 }
 
-install_skill "agent-workflow-scaffold" "$REPO"
+SKILL_SRC="$REPO/dsh-awf-dashboard/skills"
+install_skill "agent-workflow-scaffold" "$SKILL_SRC/agent-workflow-scaffold"
 
 # DEV-192 技能库顶层化：把 skills/*/ 每个流程技能同时安装为 DSH 顶层技能
 # （~/.dsh/skills/<name>/，DSH 启动注入 frontmatter，凭 whenToUse 自动匹配）——
 # 这样 AGENTS.md 不必列举技能清单，DSH 原生语义匹配即完成路由。
-for sk in "$REPO"/skills/*/; do
+for sk in "$SKILL_SRC"/*/; do
   [ -d "$sk" ] || continue
   sk_name="$(basename "$sk")"
   [ "$sk_name" = "README.md" ] && continue
+  [ "$sk_name" = "agent-workflow-scaffold" ] && continue   # 主技能已单独安装（DEV-218：源在插件 skills/）
   install_skill "$sk_name" "$sk" || exit 1
 done
 

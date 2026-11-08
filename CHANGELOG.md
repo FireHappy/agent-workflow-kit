@@ -4,7 +4,8 @@
 - **满池等待返回值同步 + 并发记账提示（DEV-215）**：`wait_session_ready` 在满池监听返回任一空闲会话后，发送/改名/日志一律以返回会话为准（此前 session_id 只更新在函数局部，等待目标≠发送目标，监听可能白等）；同项目活跃 `[awf]` 会话 >1 时任务包自动注入记账提示（按票据任务编号登记账本/commit），避免并行 worker 自排相同 ID 造成账本覆盖（UXR-POOL 002/003 曾撞 DEV-091）——经 5 连发实测定位
 
 ### Added
-- **满池修复四件套（DEV-214）**：`awf-dispatch` 满池监听等待逻辑补齐四个缺陷——① **本地归档台账**：`--cleanup --apply` 归档的会话 id 写入 `dispatch/archived-sessions.json`（派发方本地、不入库），组装复用池/统计每项目 `[awf]` 会话数时排除台账记录，已归档会话不再占池（不等待/不计数）；新增 `--forget-archived` 重置台账（其中会话恢复进入复用池）；② **`--new` 上限校验**：目标项目 `[awf]` 池满 3 个且全忙时，`--new` 需显式 `--allow-over-3` 确认（本次超限新建写入派发日志留痕），不再静默绕过每项目 3 个并发上限；③ **并发新建互斥**：同一项目新建决策用文件锁 `dispatch/.lock-<project>` 串行化，拿到锁后重读池再决策——并发方刚建出的可复用会话改为复用、不重复新建；④ **`--cleanup`**：列出每项目超 3 的空闲 `[awf]` 会话（保留最近更新 3 个、运行中跳过），`--apply` 逐个经 `workspace/archiveSession` 归档并写入台账——SKILL 参数表与机制说明同步，smoke 补归档排除/上限确认/锁互斥/清理四类断言（217 项全绿）
+- **技能源迁入插件 + 去重（DEV-218）**：`dsh-awf-dashboard/skills/` 升格为全项目技能唯一源（唯一开发路径）；仓库根 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本移除，`install.sh` / `test/` / AGENTS 模板 / `project.yaml` / 文档引用改指插件路径；`copy-workflow-assets.mjs` 与 manifest / 构建产物机制退役（单源，无副本）；`dispatch/` 改名 `.dispatch/`（派发任务记录，默认忽略），派发技能（awf-dispatch）与文档同步；插件 1.7.0→1.7.1。
+- **满池修复四件套（DEV-214）**：`awf-dispatch` 满池监听等待逻辑补齐四个缺陷——① **本地归档台账**：`--cleanup --apply` 归档的会话 id 写入 `.dispatch/archived-sessions.json`（派发方本地、不入库），组装复用池/统计每项目 `[awf]` 会话数时排除台账记录，已归档会话不再占池（不等待/不计数）；新增 `--forget-archived` 重置台账（其中会话恢复进入复用池）；② **`--new` 上限校验**：目标项目 `[awf]` 池满 3 个且全忙时，`--new` 需显式 `--allow-over-3` 确认（本次超限新建写入派发日志留痕），不再静默绕过每项目 3 个并发上限；③ **并发新建互斥**：同一项目新建决策用文件锁 `.dispatch/.lock-<project>` 串行化，拿到锁后重读池再决策——并发方刚建出的可复用会话改为复用、不重复新建；④ **`--cleanup`**：列出每项目超 3 的空闲 `[awf]` 会话（保留最近更新 3 个、运行中跳过），`--apply` 逐个经 `workspace/archiveSession` 归档并写入台账——SKILL 参数表与机制说明同步，smoke 补归档排除/上限确认/锁互斥/清理四类断言（217 项全绿）
 
 ## [1.5.0] - 2026-11-07
 
@@ -23,7 +24,7 @@
 ### Changed
 - **版本锚点迁移框架支持（DEV-198）**：`version_file` 指向 `agent-workflow/VERSION`（非根目录）全链路验证通过（release-prep 读写 / upgrade 锚点写 / bootstrap·check digest 与根 VERSION 无关，dry-run 实证）；`awf check` 新增「项目根存在 VERSION 文件」防踩坑软提示（迁移建议：`git mv VERSION agent-workflow/VERSION` + `version_file` 指过去；不阻塞，纯脚本项目可忽略）——macOS 大小写不敏感 FS 上根 `VERSION` 遮蔽 libc++ `<version>` 头（Unity IL2CPP Bee clang `-I"."` 全量构建报 `expected unqualified-id`，SP-302，uxrsample 2026-11-07 实测）；release 技能/模板注释同步锚点位置规范（Unity/C++ 项目锚点一律放 `agent-workflow/VERSION`），release 技能 Step 5 去 `git add VERSION` 硬编码（改按 version_file 动态取路径）；SP-302 坑沉淀 kit memory
 - **派发术语统一为「回执」（DEV-195）**：worker→派发方方向全部改「回执」（回报→回执，含 回执投递通道/回执正文/回执字段/回执时机/回执格式/回执数据），消息标题【回执请求】保持，「回报」「汇报」在派发链路活文件中退役——注入文本、技能（cross-project-dispatch/dev/review/team-flow/upgrade/README）、docs/design.md、根 SKILL.md、插件面板文案、smoke 断言同步
-- **票据生命周期统一「用完即删」（DEV-195）**：`awf-dispatch --prune --apply` 从「归档到 dispatch/archive/」改为「真正删除已完成票据（不留存根）」，与 upgrade 技能既有条款对齐；扫描改为递归（覆盖 upgrade-v<版本>/ 子目录票据），删除后向上清空空目录；文档/SKILL/帮助文本同步
+- **票据生命周期统一「用完即删」（DEV-195）**：`awf-dispatch --prune --apply` 从「归档到 .dispatch/archive/」改为「真正删除已完成票据（不留存根）」，与 upgrade 技能既有条款对齐；扫描改为递归（覆盖 upgrade-v<版本>/ 子目录票据），删除后向上清空空目录；文档/SKILL/帮助文本同步
 - **注入文本精简（v1.4.1 批次）**：`awf-dispatch` 任务包的回执规则从内联 ~60 行压缩为技能指针（必报点/时机/字段/违约指向 `cross-project-dispatch/SKILL.md`），每次派发的附加约定大幅瘦身
 - **任务编号清理**：技能（release/team-flow/upgrade）与插件注入文本中的任务编号混入移除——正文指引、示例、历史锚点统一去编号（编号仅留注释追溯）；保留「如 DEV-001」任务 ID 格式示例与工作流 README 格式示例
 
@@ -63,7 +64,7 @@
 ### Changed
 - **回报规范完善（DEV-186）**：回报正文排版（DISPATCH-153）完整内联技能；标题措辞「开始执行任务 / 完成任务」；删除冗余技能 cross-project-dispatch（内容被 cross-project 覆盖）
 - **init 初始化与升级一致（DEV-183）**：`/awf/init/agent` 改为注入主会话（不再用受管理子代理）；引导卡加「git 忽略工作流」toggle
-- **gitignore 框架段（DEV-183）**：init 默认写派发产物忽略段（dispatch/log.md、reports/、headless/、.agent-teams/）
+- **gitignore 框架段（DEV-183）**：init 默认写派发产物忽略段（.dispatch/log.md、reports/、headless/、.agent-teams/）
 
 ### Fixed
 - 版本号 vv1 显示修复（客户端不再重复拼 v 前缀）
@@ -323,7 +324,7 @@
 - 会话命名规范：`[awf] <项目名> · <模块名>`（沿用旧标题的会话在复用/新建时迁移改名）
 
 ### Changed
-- `--json` / 日志 / `dispatch/log.md` 记录会话来源（复用/新建）、sessionId、模块名
+- `--json` / 日志 / `.dispatch/log.md` 记录会话来源（复用/新建）、sessionId、模块名
 - 上下文压力不参与会话选择；≥ 0.9 时仅提示可考虑 `--new`（上下文增长交给 harness 压缩）
 
 ### Fixed
@@ -334,7 +335,7 @@
 ## [0.4.0] - 2026-10-31
 
 ### Added
-- `awf-dispatch --prune [--apply] [--json]`：按 commit 消息或目标 `done.md` 判定已完成票据，归档到 `dispatch/archive/<项目>/<YYYY-MM>/`，默认 dry-run
+- `awf-dispatch --prune [--apply] [--json]`：按 commit 消息或目标 `done.md` 判定已完成票据，归档到 `.dispatch/archive/<项目>/<YYYY-MM>/`，默认 dry-run
 - 派发票据生命周期说明（docs/dispatch.md、cross-project.md、跨项目派发技能）
 
 ### Changed
@@ -379,7 +380,7 @@
 - `bootstrap` 在受控区块标记不成对时中止，不再静默删除区块后内容
 - 非法任务 ID 由 `check` 显式判 FAIL（注释内示例不误报）
 - `awf-dispatch --dry-run` 在缺工作区时不再返回假阳性
-- 派发日志节选截断加标记；`dispatch/` 入库、`.agent-teams/` 忽略
+- 派发日志节选截断加标记；`.dispatch/` 入库、`.agent-teams/` 忽略
 
 ### Changed
 - 收尾顺序统一为「归档 → check → awf status → commit」

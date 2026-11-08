@@ -1,0 +1,13 @@
+{
+  "kind": "awf-report",
+  "version": 1,
+  "ticket": "",
+  "time": "2026-11-07 07:51:58 +0800",
+  "source": "agent-workflow-kit「[awf] [uxrsample] [任务包：版本锚点迁移框架支持——versionfile」",
+  "dispatcher": "uxrsample「[user] 通用对话」",
+  "status": "",
+  "body": "## ✅ 完成回执（DEV-198 · 版本锚点迁移框架支持 + 根 VERSION 防踩坑）\n\n- **当前状态**：必报点 10（完成；任务状态 done，已归档）\n- **执行内容**：\n  - 全链路验证：release-prep/upgrade --dry-run 在 version_file: agent-workflow/VERSION 下解析/写入正确（写锚点路径 = agent-workflow/VERSION，实测输出）；bootstrap/check digest 与根 VERSION 无关（只哈希 project.yaml + AGENTS.md.tmpl）；真实写入 smoke 既有断言覆盖（写 agent-workflow/VERSION、根 VERSION 不动）。\n  - awf check 新增根 VERSION 防踩坑软提示（check_growth_hints，不阻塞）：默认根 VERSION / 残留两分支实测输出均含 git mv VERSION agent-workflow/VERSION 迁移建议；SP-302 已记录。\n  - 文档/模板：release 技能 Step 2 锚点铁律 + Step 5 去 git add VERSION 硬编码（按 version_file 动态取路径）；project.yaml.tmpl 双副本注释；README/CHANGELOG；memory SP-302 沉淀。\n- **改动范围**：bin/awf、templates/project.yaml.tmpl（+agent-workflow/templates 双副本）、skills/release/SKILL.md、test/smoke.sh、README/CHANGELOG、memory 1 条、账本；技能实体 ./install.sh 已同步\n- **commit**：3732136（本地，禁 push）\n- **验证结果**：compile OK；smoke 215/215（新增 2 断言）；check_workflow.sh 0 FAIL；技能实体同步核验（全局 bin/awf 含新提示、release SKILL 含 SP-302）\n- **遗留·风险**：本任务为小调整快速车道（自带 smoke 断言 + 自检门禁），复核建议隔时会话重跑 smoke/check 确认；根 VERSION 软提示对纯脚本项目属噪音提示（可忽略，不阻塞）\n- **下一步**：任务完成，会话空闲，可续发（来源会话：session-60e91d50-3af8-4a4b-9660-db7ae7777356）",
+  "reportedAt": 1794009118545,
+  "fromSession": "session-60e91d50-3af8-4a4b-9660-db7ae7777356",
+  "toSession": "session-dc570889-4869-4cf1-8680-b08c513af311"
+}

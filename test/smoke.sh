@@ -7,7 +7,11 @@
 set -eu
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DISPATCH_IMPL="$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch"
+# DEV-218：技能/CLI/模板唯一源 = 插件 dsh-awf-dashboard/skills/（根 skills/bin/templates 已移除）
+SKILLS_DIR="$KIT_DIR/dsh-awf-dashboard/skills"
+SKILLS_BIN="$SKILLS_DIR/agent-workflow-scaffold/bin/awf"
+SKILLS_TPL="$SKILLS_DIR/agent-workflow-scaffold/templates"
+DISPATCH_IMPL="$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch"
 DISPATCH_CLI="$DISPATCH_IMPL"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -30,7 +34,7 @@ ok() { pass=$((pass + 1)); printf 'ok    %s\n' "$*"; }
 bad() {
   # DEV-186 技能形态：仓库级断言（$KIT_DIR/docs/AGENTS.md/README.md 不在技能里）失败 = 不适用，
   # 不计数；功能断言（bin/templates/skills 均在）仍正常判失败。
-  if [ "${SKILL_ONLY:-0}" = "1" ] && { [ ! -f "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" ] || [ ! -f "$KIT_DIR/AGENTS.md" ]; }; then
+  if [ "${SKILL_ONLY:-0}" = "1" ] && { [ ! -f "$SKILLS_DIR/cross-project-dispatch/SKILL.md" ] || [ ! -f "$KIT_DIR/AGENTS.md" ]; }; then
     printf 'skip  %s（技能形态不适用）\n' "$*"
     return 0
   fi
@@ -41,10 +45,10 @@ assert_file() { [ -f "$1" ] && ok "存在 $2" || bad "缺少 $2"; }
 assert_grep() { grep -q "$1" "$2" && ok "$3" || bad "$3"; }
 
 # 1. init
-"$KIT_DIR/bin/awf" init "$PROJ" --name "冒烟项目" --purpose "验证脚手架" >/dev/null
+"$SKILLS_BIN" init "$PROJ" --name "冒烟项目" --purpose "验证脚手架" >/dev/null
 assert_file "$PROJ/AGENTS.md" "AGENTS.md"
 assert_file "$PROJ/agent-workflow/project.yaml" "project.yaml"
-assert_file "$KIT_DIR/bin/awf" "bin/awf"
+assert_file "$SKILLS_BIN" "bin/awf"
 assert_file "$PROJ/agent-workflow/tasks/status.md" "status.md"
 assert_grep 'awf:begin v1 digest:' "$PROJ/AGENTS.md" "入口含 digest"
 assert_grep '（未配置' "$PROJ/AGENTS.md" "空校验命令有回退提示"
@@ -56,25 +60,25 @@ assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
 
 # 1.4 gitignore：init --gitignore 写 .gitignore（根锚定+幂等）；awf gitignore 为存量项目补写
 GI_PROJ="$TMP/gi-proj"
-"$KIT_DIR/bin/awf" init "$GI_PROJ" --name "忽略项目" --no-register --gitignore >/dev/null
+"$SKILLS_BIN" init "$GI_PROJ" --name "忽略项目" --no-register --gitignore >/dev/null
 assert_grep '^/agent-workflow/$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 agent-workflow/（根锚定）"
 assert_grep '^/AGENTS.md$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 AGENTS.md"
 assert_grep '^/CLAUDE.md$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 CLAUDE.md"
 GI_MARK="# agent-workflow（本机私有工作流，不入库）"
 [ "$(grep -cF "$GI_MARK" "$GI_PROJ/.gitignore")" = "1" ] && ok "gitignore 块含唯一标记行" || bad "gitignore 块标记行数量异常"
-( cd "$GI_PROJ" && "$KIT_DIR/bin/awf" gitignore ) >/dev/null
+( cd "$GI_PROJ" && "$SKILLS_BIN" gitignore ) >/dev/null
 [ "$(grep -cF "$GI_MARK" "$GI_PROJ/.gitignore")" = "1" ] && ok "awf gitignore 幂等（不重复追加）" || bad "awf gitignore 重复追加"
 
 NOGI_PROJ="$TMP/nogi-proj"
-"$KIT_DIR/bin/awf" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
+"$SKILLS_BIN" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
 # DEV-183：init 缺省写「本机派发产物」忽略段（dispatch 流水/回执/运行时状态，任何项目都不入库）；
 # 但缺省不写「工作流私有」段（--gitignore 才写 agent-workflow/ 整体）。
-assert_grep '^/dispatch/log.md$' "$NOGI_PROJ/.gitignore" "init 缺省写派发流水忽略"
+assert_grep '^/.dispatch/log.md$' "$NOGI_PROJ/.gitignore" "init 缺省写派发流水忽略"
 DISP_MARK="# agent-workflow（本机派发产物，不入库）"
 [ "$(grep -cF "$DISP_MARK" "$NOGI_PROJ/.gitignore")" = "1" ] && ok "init 缺省写派发产物标记（唯一）" || bad "init 缺省派发产物标记异常"
 [ "$(grep -cF "$GI_MARK" "$NOGI_PROJ/.gitignore")" = "0" ] && ok "init 缺省不写工作流私有段（--gitignore 专属）" || bad "init 缺省不应写工作流私有段"
 printf '/node_modules/' > "$NOGI_PROJ/.gitignore"
-( cd "$NOGI_PROJ" && "$KIT_DIR/bin/awf" gitignore ) >/dev/null
+( cd "$NOGI_PROJ" && "$SKILLS_BIN" gitignore ) >/dev/null
 assert_grep '^/node_modules/$' "$NOGI_PROJ/.gitignore" "既有内容不被粘连（无换行先补行）"
 assert_grep '^/agent-workflow/$' "$NOGI_PROJ/.gitignore" "awf gitignore 为存量项目补写忽略"
 assert_grep '^/CLAUDE.md$' "$NOGI_PROJ/.gitignore" "无换行 .gitignore 追加块完整落行"
@@ -156,7 +160,7 @@ else
   bad "--help 未说明落地检查"
 fi
 # 1.4 release-prep：help / 参数校验 / dry-run / 临时目录装配（不碰真实仓库）
-rp_help="$("$KIT_DIR/bin/awf" release-prep --help 2>&1)"
+rp_help="$("$SKILLS_BIN" release-prep --help 2>&1)"
 if printf '%s\n' "$rp_help" | grep -q 'release-prep <X.Y.Z>'; then
   ok "release-prep --help 打印用法"
 else
@@ -174,7 +178,7 @@ else
 fi
 
 bad_ver_out=""
-if bad_ver_out="$("$KIT_DIR/bin/awf" release-prep 1.2 2>&1)"; then
+if bad_ver_out="$("$SKILLS_BIN" release-prep 1.2 2>&1)"; then
   bad "release-prep 接受了非法版本号 1.2"
 else
   ok "release-prep 拒绝非法版本号"
@@ -184,7 +188,7 @@ if printf '%s\n' "$bad_ver_out" | grep -q 'X.Y.Z'; then
 else
   bad "release-prep 非法版本号未打印用法"
 fi
-if "$KIT_DIR/bin/awf" release-prep >/dev/null 2>&1; then
+if "$SKILLS_BIN" release-prep >/dev/null 2>&1; then
   bad "release-prep 缺少版本号仍成功"
 else
   ok "release-prep 缺少版本号退出非 0"
@@ -218,7 +222,7 @@ make_release_fixture() {
 
 REL_DRY="$TMP/release-dry"
 make_release_fixture "$REL_DRY"
-dry_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL_DRY" 0.4.2 --dry-run 2>&1)"
+dry_out="$("$SKILLS_BIN" release-prep --root "$REL_DRY" 0.4.2 --dry-run 2>&1)"
 if printf '%s\n' "$dry_out" | grep -q 'init . --force --no-register'; then
   ok "release-prep --dry-run 打印 init 动作"
 else
@@ -239,7 +243,7 @@ fi
 
 REL="$TMP/release-real"
 make_release_fixture "$REL"
-if rel_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL" 0.4.2 2>&1)"; then
+if rel_out="$("$SKILLS_BIN" release-prep --root "$REL" 0.4.2 2>&1)"; then
   ok "release-prep 临时目录装配成功"
 else
   bad "release-prep 临时目录装配失败：$rel_out"
@@ -273,7 +277,7 @@ if printf '%s\n' "$rel_out" | grep -q 'git tag -a v0.4.2' \
 else
   bad "release-prep 下一步提示不完整"
 fi
-idem_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL" 0.4.2 2>&1)"
+idem_out="$("$SKILLS_BIN" release-prep --root "$REL" 0.4.2 2>&1)"
 if [ "$(ls "$REL/agent-workflow/tasks/dev/done/"DEV-008.md 2>/dev/null | wc -l | tr -d ' ')" = "1" ] \
   && printf '%s\n' "$idem_out" | grep -q '幂等'; then
   ok "release-prep 重复执行幂等"
@@ -285,13 +289,13 @@ fi
 REL_VF="$TMP/release-vf"
 make_release_fixture "$REL_VF"
 printf 'id: release-vf\nversion_file: agent-workflow/VERSION\n' > "$REL_VF/agent-workflow/project.yaml"
-vf_dry="$("$KIT_DIR/bin/awf" release-prep --root "$REL_VF" 0.6.0 --dry-run 2>&1)"
+vf_dry="$("$SKILLS_BIN" release-prep --root "$REL_VF" 0.6.0 --dry-run 2>&1)"
 if printf '%s\n' "$vf_dry" | grep -q '版本锚点' && printf '%s\n' "$vf_dry" | grep -q 'agent-workflow/VERSION'; then
   ok "release-prep --dry-run 显示 version_file 锚点路径"
 else
   bad "release-prep --dry-run 未显示 version_file 锚点路径：$vf_dry"
 fi
-if "$KIT_DIR/bin/awf" release-prep --root "$REL_VF" 0.6.0 >/dev/null 2>&1 \
+if "$SKILLS_BIN" release-prep --root "$REL_VF" 0.6.0 >/dev/null 2>&1 \
   && [ "$(cat "$REL_VF/agent-workflow/VERSION" 2>/dev/null)" = "0.6.0" ] \
   && [ "$(cat "$REL_VF/VERSION")" = "0.0.1" ]; then
   ok "release-prep 写 version_file 指向的锚点（根 VERSION 不动）"
@@ -300,14 +304,14 @@ else
 fi
 
 # DEV-198：check 对根目录 VERSION 给防踩坑软提示（迁移建议；软提示不阻塞，fails 不增）
-chk_vf_out="$(cd "$REL_VF" && "$KIT_DIR/bin/awf" check 2>&1 || true)"
+chk_vf_out="$(cd "$REL_VF" && "$SKILLS_BIN" check 2>&1 || true)"
 if printf '%s\n' "$chk_vf_out" | grep -q 'git mv VERSION agent-workflow/VERSION' \
   && printf '%s\n' "$chk_vf_out" | grep -q '残留 VERSION'; then
   ok "DEV-198 check 对根 VERSION 给迁移软提示（version_file 已指 agent-workflow/VERSION）"
 else
   bad "DEV-198 check 未给根 VERSION 迁移软提示：$(printf '%s\n' "$chk_vf_out" | grep -i 'VERSION' | head -3)"
 fi
-chk_vf_def_out="$(cd "$REL" && "$KIT_DIR/bin/awf" check 2>&1 || true)"
+chk_vf_def_out="$(cd "$REL" && "$SKILLS_BIN" check 2>&1 || true)"
 if printf '%s\n' "$chk_vf_def_out" | grep -q '默认根 VERSION' \
   && printf '%s\n' "$chk_vf_def_out" | grep -q 'git mv VERSION agent-workflow/VERSION'; then
   ok "DEV-198 check 对默认根 VERSION 项目给迁移软提示（不阻塞）"
@@ -328,9 +332,9 @@ fi
 
 # DEV-205：项目缺 agent-workflow/FRAMEWORK_VERSION → check 软提示「未登记骨架版本」（不阻塞、不增 FAIL）
 HINT_PROJ="$TMP/hint-proj"
-"$KIT_DIR/bin/awf" init "$HINT_PROJ" --name "软提示" --no-register >/dev/null
+"$SKILLS_BIN" init "$HINT_PROJ" --name "软提示" --no-register >/dev/null
 rm -f "$HINT_PROJ/agent-workflow/FRAMEWORK_VERSION"
-if hint_out="$(cd "$HINT_PROJ" && "$KIT_DIR/bin/awf" check 2>&1)"; then
+if hint_out="$(cd "$HINT_PROJ" && "$SKILLS_BIN" check 2>&1)"; then
   if printf '%s\n' "$hint_out" | grep -q '未登记骨架版本'; then
     ok "DEV-205 check 对缺骨架版本项目给软提示（不阻塞）"
   else
@@ -342,7 +346,7 @@ fi
 
 # 没有 Unreleased 且没有目标版本：提示手动，不报错
 printf '# Changelog\n' > "$REL/CHANGELOG.md"
-manual_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL" 0.4.3 2>&1)"
+manual_out="$("$SKILLS_BIN" release-prep --root "$REL" 0.4.3 2>&1)"
 if printf '%s\n' "$manual_out" | grep -q '手动'; then
   ok "release-prep 无 Unreleased 时提示手动"
 else
@@ -1117,8 +1121,8 @@ with tempfile.TemporaryDirectory() as tmp:
     (repo / "agent-workflow" / "README.md").write_text("r\n", encoding="utf-8")
     (repo / "agent-workflow" / "workflows" / "dev.md").write_text("w\n", encoding="utf-8")
     (repo / "agent-workflow" / "tasks" / "status.md").write_text("s\n", encoding="utf-8")
-    (repo / "dispatch").mkdir(parents=True)
-    (repo / "dispatch" / "log.md").write_text("log\n", encoding="utf-8")
+    (repo / ".dispatch").mkdir(parents=True)
+    (repo / ".dispatch" / "log.md").write_text("log\n", encoding="utf-8")
     (repo / "src.py").write_text("code\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
@@ -1127,7 +1131,7 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
     # P1：业务代码 + 生成物都脏 → =tasks 应拒
     (repo / "agent-workflow" / "tasks" / "status.md").write_text("s2\n", encoding="utf-8")
-    (repo / "dispatch" / "log.md").write_text("log2\n", encoding="utf-8")
+    (repo / ".dispatch" / "log.md").write_text("log2\n", encoding="utf-8")
     (repo / "src.py").write_text("code2\n", encoding="utf-8")
     try:
         module.check_git(repo, True, "tasks")
@@ -1358,7 +1362,7 @@ with tempfile.TemporaryDirectory() as tmp:
     git("add", "-A")
     git("commit", "-qm", "chore: 升级工作流框架到 0.3.0")  # 提交消息不含任务 ID
 
-    tasks = tmp / "dispatch/tasks"
+    tasks = tmp / ".dispatch/tasks"
     tasks.mkdir(parents=True)
     (tasks / "demo02-DEV-007-ledger.md").write_text(f"- 目标项目：demo02（{repo}）\n", encoding="utf-8")
     (tasks / "demo02-DEV-099-pending.md").write_text(f"- 目标项目：demo02（{repo}）\n", encoding="utf-8")
@@ -1421,8 +1425,8 @@ with tempfile.TemporaryDirectory() as tmp:
     original_cwd = os.getcwd()
     try:
         os.chdir(tmp)
-        assert module.archived_ledger_path() == pathlib.Path.cwd() / "dispatch/archived-sessions.json", \
-            "台账路径 = <cwd>/dispatch/archived-sessions.json"
+        assert module.archived_ledger_path() == pathlib.Path.cwd() / ".dispatch/archived-sessions.json", \
+            "台账路径 = <cwd>/.dispatch/archived-sessions.json"
         assert module.load_archived_session_ids() == set(), "无台账时为空集"
         module.record_archived_sessions([
             {"sessionId": "s-a", "project": "p1", "title": "t1"},
@@ -1448,9 +1452,9 @@ with tempfile.TemporaryDirectory() as tmp:
              row("s-other", cwd="/tmp/elsewhere")], target,
             archived_ids=set()) == [row("s-live")], "池只收同 cwd + [awf] 前缀"
         # --forget-archived 重置台账
-        assert pathlib.Path("dispatch/archived-sessions.json").is_file()
+        assert pathlib.Path(".dispatch/archived-sessions.json").is_file()
         code = module.run_forget_archived(argparse.Namespace(json=False))
-        assert code == 0 and not pathlib.Path("dispatch/archived-sessions.json").exists()
+        assert code == 0 and not pathlib.Path(".dispatch/archived-sessions.json").exists()
         assert module.load_archived_session_ids() == set(), "重置后归档 id 恢复为空"
         # 重置后 s-a 恢复进入复用池
         sel2 = module.select_reuse_session([row("s-a", updated=5)], target, "工作流", sender="lead")
@@ -1558,7 +1562,7 @@ assert "超上限新建（--allow-over-3 确认）" in logs[0], "超限新建必
 # ---- ③ 并发新建互斥：文件锁串行化 + 锁后重读池再决策 ----
 lock_path = module.project_lock_path(target)
 assert lock_path.name == f".lock-{project}", lock_path
-assert str(lock_path).startswith(str(pathlib.Path.cwd())), "锁文件必须位于本地 dispatch/ 下"
+assert str(lock_path).startswith(str(pathlib.Path.cwd())), "锁文件必须位于本地 .dispatch/ 下"
 # 持锁期间第二个调用方阻塞，释放后拿到
 held_at = []
 result = []
@@ -1661,7 +1665,7 @@ with tempfile.TemporaryDirectory() as tmp:
         # dry-run：只列出，不归档、不写台账
         dry = module.cleanup_sessions(api_c, clean_rows, apply=False, json_mode=False)
         assert dry["dryRun"] is True and dry["archived"] == [] and api_c.archived == [], dry
-        assert not pathlib.Path("dispatch/archived-sessions.json").exists(), "dry-run 不写台账"
+        assert not pathlib.Path(".dispatch/archived-sessions.json").exists(), "dry-run 不写台账"
         # --apply：归档候选并写台账
         applied = module.cleanup_sessions(api_c, clean_rows, apply=True, json_mode=False)
         assert applied["errors"] == [] and applied["ok"] is True, applied
@@ -1695,8 +1699,8 @@ else
 fi
 
 # 1.7 -- DEV-215：满池等待返回值同步 + 并发记账提示
-if grep -q 'session_id = row\["sessionId"\]' "$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch" \
-   && grep -q '并发记账提示（DEV-215）' "$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch"; then
+if grep -q 'session_id = row\["sessionId"\]' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch" \
+   && grep -q '并发记账提示（DEV-215）' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch"; then
   ok "DEV-215 满池等待后以返回会话为准 + 并发记账提示注入"
 else
   bad "DEV-215 等待同步/并发提示缺失"
@@ -1760,7 +1764,7 @@ fi
 printf '# 任务：TEST-001 冒烟派发\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n\n1. 只读验证。\n' > "$TMP/task.md"
 ( cd "$TMP" && "$DISPATCH_CLI" "$PROJ" task.md --handoff >/dev/null ) \
   && ok "handoff 生成交接单" || bad "handoff 失败"
-[ -f "$TMP"/dispatch/handoff/*.md ] && ok "交接单文件存在" || bad "交接单文件缺失"
+[ -f "$TMP"/.dispatch/handoff/*.md ] && ok "交接单文件存在" || bad "交接单文件缺失"
 mkdir -p "$TMP/noworkflow"
 if "$DISPATCH_CLI" "$TMP/noworkflow" "$TMP/task.md" --dry-run >"$TMP/out" 2>&1; then
   bad "无工作流时派发应失败"
@@ -1772,7 +1776,7 @@ fi
 DISPATCH="$DISPATCH_CLI"
 PRUNE="$TMP/prune"
 PRUNE_TARGET="$TMP/prune-target"
-mkdir -p "$PRUNE/dispatch/tasks" "$PRUNE_TARGET/agent-workflow/tasks/dev"
+mkdir -p "$PRUNE/.dispatch/tasks" "$PRUNE_TARGET/agent-workflow/tasks/dev"
 mkdir -p "$PRUNE_TARGET/agent-workflow/tasks/dev/done"
 printf '## [DEV-101] 已完成\n' > "$PRUNE_TARGET/agent-workflow/tasks/dev/done/DEV-101.md"
 git -C "$PRUNE_TARGET" init -q
@@ -1785,19 +1789,19 @@ git -C "$PRUNE" init -q
 git -C "$PRUNE" config user.email smoke@example.com
 git -C "$PRUNE" config user.name smoke
 
-cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" <<EOF
+cat > "$PRUNE/.dispatch/tasks/demo01-DEV-101-tracked.md" <<EOF
 # demo01 · DEV-101
 
 - 目标项目：demo01（${PRUNE_TARGET}）
 EOF
-cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
+cat > "$PRUNE/.dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
 # demo01 · DEV-101 副本
 
 - 目标项目：demo01（${PRUNE_TARGET}）
 EOF
-git -C "$PRUNE" add dispatch/tasks/demo01-DEV-101-tracked.md
+git -C "$PRUNE" add .dispatch/tasks/demo01-DEV-101-tracked.md
 git -C "$PRUNE" commit -qm "chore: 种子票据（只把 tracked 加入索引）"
-cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
+cat > "$PRUNE/.dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
 # demo01 · DEV-101 副本
 
 - 目标项目：demo01（${PRUNE_TARGET}）
@@ -1808,7 +1812,7 @@ if ( cd "$PRUNE" && "$DISPATCH" --prune --json > plan.json ); then
 else
   bad "--prune dry-run 失败"
 fi
-if [ -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && [ ! -e "$PRUNE/dispatch/archive" ]; then
+if [ -f "$PRUNE/.dispatch/tasks/demo01-DEV-101-tracked.md" ] && [ ! -e "$PRUNE/.dispatch/archive" ]; then
   ok "dry-run 不删除文件、不建 archive"
 else
   bad "dry-run 改动了票据文件"
@@ -1838,9 +1842,9 @@ if ( cd "$PRUNE" && "$DISPATCH" --prune --apply --json > apply.json ); then
 else
   bad "--prune --apply 失败"
 fi
-[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && ok "apply 删除已跟踪票据（git rm）" || bad "已跟踪票据未删除"
-[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" ] && ok "apply 删除未跟踪票据" || bad "未跟踪票据未删除"
-[ ! -e "$PRUNE/dispatch/archive" ] && ok "不再产生 dispatch/archive" || bad "仍产生 dispatch/archive"
+[ ! -f "$PRUNE/.dispatch/tasks/demo01-DEV-101-tracked.md" ] && ok "apply 删除已跟踪票据（git rm）" || bad "已跟踪票据未删除"
+[ ! -f "$PRUNE/.dispatch/tasks/demo01-DEV-101-untracked.md" ] && ok "apply 删除未跟踪票据" || bad "未跟踪票据未删除"
+[ ! -e "$PRUNE/.dispatch/archive" ] && ok "不再产生 .dispatch/archive" || bad "仍产生 .dispatch/archive"
 if python3 - "$PRUNE/apply.json" <<'PY'
 import json
 import sys
@@ -1870,7 +1874,7 @@ set -e
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "check 通过" || bad "check 未通过"
 
 # 3. status 生成
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep '## 当前进行中' "$PROJ/agent-workflow/tasks/status.md" "status 含当前进行中"
 
 # 4. 进行中任务缺字段 → check 失败（DEV-127 目录式：current/DEV-001.md）
@@ -1902,7 +1906,7 @@ cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" <<'EOF'
 ### 下一步
 继续。
 EOF
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "补齐后 check 通过" || bad "补齐后 check 未通过"
 
 # 6. 事实文件变更 → 入口过期 → bootstrap 修复
@@ -1913,19 +1917,19 @@ if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
 else
   ok "project.yaml 变更后 check 失败"
 fi
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "bootstrap 后 check 通过" || bad "bootstrap 后 check 未通过"
 assert_grep '变更后的定位' "$PROJ/AGENTS.md" "入口已刷新"
 
 # 7. --force 保留事实文件与任务账本
-"$KIT_DIR/bin/awf" init "$PROJ" --name "改名" --force >/dev/null
+"$SKILLS_BIN" init "$PROJ" --name "改名" --force >/dev/null
 assert_grep 'purpose: 变更后的定位' "$PROJ/agent-workflow/project.yaml" "--force 保留 project.yaml"
 assert_grep 'DEV-001' "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" "--force 保留任务文件"
 assert_grep '变更后的定位' "$PROJ/AGENTS.md" "--force 后入口仍同步"
 
 # 8. 入口外内容不被覆盖
 printf '\n## 团队约定\n- 保留我\n' >> "$PROJ/AGENTS.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
 assert_grep '保留我' "$PROJ/AGENTS.md" "区块外内容保留"
 assert_grep 'awf:begin' "$PROJ/AGENTS.md" "受控区块仍存在"
 
@@ -1933,19 +1937,19 @@ assert_grep 'awf:begin' "$PROJ/AGENTS.md" "受控区块仍存在"
 assert_file "$DSH_AGENTS_HOME/projects.tsv" "projects.tsv"
 assert_grep '冒烟项目' "$DSH_AGENTS_HOME/projects.tsv" "init 自动登记别名"
 assert_grep '冒烟项目' "$DSH_AGENTS_HOME/AGENTS.md" "全局索引含别名"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" projects | grep -q "冒烟项目" ) && ok "projects 列出项目" || bad "projects 未列出项目"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 | grep -q "$PROJ" ) && ok "find 返回路径" || bad "find 未返回路径"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" register >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" projects | grep -q "冒烟项目" ) && ok "projects 列出项目" || bad "projects 未列出项目"
+( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 | grep -q "$PROJ" ) && ok "find 返回路径" || bad "find 未返回路径"
+( cd "$PROJ" && "$SKILLS_BIN" register >/dev/null )
 [ "$(wc -l < "$DSH_AGENTS_HOME/projects.tsv" | tr -d ' ')" = "1" ] && ok "重复登记不产生重复行" || bad "登记出现重复行"
 
 # bootstrap 自愈：把路径改错后刷新
 sed -i '' "s|$PROJ|/wrong/path|" "$DSH_AGENTS_HOME/projects.tsv" 2>/dev/null \
   || sed -i "s|$PROJ|/wrong/path|" "$DSH_AGENTS_HOME/projects.tsv"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
 assert_grep "$PROJ" "$DSH_AGENTS_HOME/projects.tsv" "bootstrap 刷新索引路径"
 
 # --no-register 跳过
-"$KIT_DIR/bin/awf" init "$TMP/proj2" --name "不登记" --no-register >/dev/null
+"$SKILLS_BIN" init "$TMP/proj2" --name "不登记" --no-register >/dev/null
 if grep -q "不登记" "$DSH_AGENTS_HOME/projects.tsv"; then
   bad "--no-register 仍写入索引"
 else
@@ -1956,7 +1960,7 @@ fi
 cp "$PROJ/AGENTS.md" "$PROJ/AGENTS.full"
 grep -v 'awf:end' "$PROJ/AGENTS.full" > "$PROJ/AGENTS.md" || true
 before_size="$(wc -c < "$PROJ/AGENTS.md" | tr -d ' ')"
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null 2>&1 ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null 2>&1 ); then
   bad "缺少 awf:end 时 bootstrap 未失败"
 else
   ok "缺少 awf:end 时 bootstrap 失败"
@@ -2011,7 +2015,7 @@ else
   printf '%s\n' "$out" | grep -q '状态非法' && ok "F1 非法状态值被 check 拒绝" || bad "F1 非法状态值未被点名：$out"
 fi
 rm -f "$PROJ/agent-workflow/tasks/docs/current/DOCS-100.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F1 恢复合法状态后 check 通过" || bad "F1 恢复后 check 未通过"
 
 # 14. F2：status.md 新鲜度（账本改动后未刷新 → 过期失败；DEV-127 目录式）
@@ -2036,7 +2040,7 @@ if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
 else
   printf '%s\n' "$out" | grep -q 'status.md 已过期' && ok "F2 status 过期被 check 发现" || bad "F2 过期信息缺失：$out"
 fi
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F2 刷新 status 后 check 通过" || bad "F2 刷新后 check 未通过"
 
 # 15. F3：任务文件校验（DEV-127 目录式；非法状态/缺字段被点名）
@@ -2060,7 +2064,7 @@ else
   printf '%s\n' "$out" | grep -q '状态非法' && ok "F3 指明状态非法" || bad "F3 未指明状态非法：$out"
 fi
 rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-200.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3 移除非法文件后 check 通过" || bad "F3 修复后 check 未通过"
 mv "$PROJ/agent-workflow/tasks/debug/done/README.md" "$PROJ/agent-workflow/tasks/debug/done/README.md.hid"
 if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
@@ -2090,7 +2094,7 @@ else
 fi
 sed -i '' 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/todo/DEV-102.md" 2>/dev/null \
   || sed -i 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/todo/DEV-102.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 按指引修复后 check 通过" || bad "F3+ 修复后 check 未通过"
 
 # 15.2 F3+：任务文件正文引用迁移字样不污染状态列与字段检测
@@ -2109,33 +2113,33 @@ cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-103.md" <<'EOF'
 ### 下一步
 x
 EOF
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 grep -q '| dev | DEV-103 | P1 | review | t3 | 正文含迁移字样 |' "$PROJ/agent-workflow/tasks/status.md" \
   && ok "F3+ 正文引用迁移字样不污染状态列" \
   || bad "F3+ 状态列被正文污染：$(grep 'DEV-103' "$PROJ/agent-workflow/tasks/status.md")"
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 正文引用迁移字样时 check 通过" || bad "F3+ 正文引用迁移字样时 check 失败"
 rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" "$PROJ/agent-workflow/tasks/dev/current/DEV-103.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 16. F4：team-flow 文档 approval 语义统一为 automatic（无 staged 审批残留）
-if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $KIT_DIR/skills/team-flow/SKILL.md >/dev/null; then
-  bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $KIT_DIR/skills/team-flow/SKILL.md | tr '\n' ';')"
+if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $SKILLS_DIR/team-flow/SKILL.md >/dev/null; then
+  bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $SKILLS_DIR/team-flow/SKILL.md | tr '\n' ';')"
 else
   ok "F4 team-flow 无 staged 审批残留"
 fi
-grep -q 'approval=automatic' $KIT_DIR/skills/team-flow/SKILL.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
+grep -q 'approval=automatic' $SKILLS_DIR/team-flow/SKILL.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
 
 # 17. F5：入口（AGENTS.md.tmpl）精简——只含路由与技能指针，细则全部下沉技能（不内联）
 F5_PAT='必报点总表（DISPATCH-145|回执规则总表（DISPATCH-145|远程办公状态（remote|状态透明化（DISPATCH-144|回执投递通道（DISPATCH-146|空闲/收尾/自检报平安（DISPATCH-147'
-if grep -qE "$F5_PAT" "$KIT_DIR/templates/AGENTS.md.tmpl"; then
-  bad "F5 入口模板仍内联 DISPATCH 细则：$(grep -oE "$F5_PAT" "$KIT_DIR/templates/AGENTS.md.tmpl" | sort -u | tr '\n' ';')"
+if grep -qE "$F5_PAT" "$SKILLS_TPL/AGENTS.md.tmpl"; then
+  bad "F5 入口模板仍内联 DISPATCH 细则：$(grep -oE "$F5_PAT" "$SKILLS_TPL/AGENTS.md.tmpl" | sort -u | tr '\n' ';')"
 else
   ok "F5 入口模板无 DISPATCH 细则内联（精简为指针）"
 fi
 # 指针必须存在：入口指向技能 SKILL.md 与 DISPATCH.md
-if grep -q '技能库' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-  && [ -f "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" ] \
-  && [ -f "$KIT_DIR/skills/team-flow/SKILL.md" ]; then
+if grep -q '技能库' "$SKILLS_TPL/AGENTS.md.tmpl" \
+  && [ -f "$SKILLS_DIR/cross-project-dispatch/SKILL.md" ] \
+  && [ -f "$SKILLS_DIR/team-flow/SKILL.md" ]; then
   ok "F5 入口指向技能库；流程技能文件存在"
 else
   bad "F5 入口未指向技能库或流程技能缺失"
@@ -2143,10 +2147,10 @@ fi
 
 # 18. F6：kit 形态副本漂移被 check 拒绝（根 → agent-workflow/ 双向）
 F6R="$TMP/f6kit"
-"$KIT_DIR/bin/awf" init "$F6R" --name f6 --no-register >/dev/null
+"$SKILLS_BIN" init "$F6R" --name f6 --no-register >/dev/null
 mkdir -p "$F6R/bin"
-cp "$KIT_DIR/bin/awf" "$F6R/bin/awf"
-cp -R "$KIT_DIR/templates/." "$F6R/templates/"
+cp "$SKILLS_BIN" "$F6R/bin/awf"
+cp -R "$SKILLS_TPL/." "$F6R/templates/"
 chmod +x "$F6R/bin/awf"
 if ( cd "$F6R" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
   ok "F6 副本一致时 check 通过"
@@ -2167,15 +2171,15 @@ if out="$(cd "$F6R" && ./agent-workflow/check_workflow.sh 2>&1)"; then
 else
   printf '%s\n' "$out" | grep -q '副本漂移' && ok "F6 根侧模板漂移被 check 拒绝" || bad "F6 根侧漂移信息缺失"
 fi
-cp "$KIT_DIR/templates/AGENTS.md.tmpl" "$F6R/templates/AGENTS.md.tmpl"
+cp "$SKILLS_TPL/AGENTS.md.tmpl" "$F6R/templates/AGENTS.md.tmpl"
 ( cd "$F6R" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F6 恢复同步后 check 通过" || bad "F6 恢复同步后 check 未通过"
 
 # 19. F6：release-prep 先检测漂移再覆盖（有漂移拒绝，禁止静默回滚）
 RPD="$TMP/rpdrift"
-"$KIT_DIR/bin/awf" init "$RPD" --name rpdrift --no-register >/dev/null
+"$SKILLS_BIN" init "$RPD" --name rpdrift --no-register >/dev/null
 mkdir -p "$RPD/bin" "$RPD/test"
-cp "$KIT_DIR/bin/awf" "$RPD/bin/awf"
-cp -R "$KIT_DIR/templates/." "$RPD/templates/"
+cp "$SKILLS_BIN" "$RPD/bin/awf"
+cp -R "$SKILLS_TPL/." "$RPD/templates/"
 chmod +x "$RPD/bin/awf"
 printf '0.0.1\n' > "$RPD/VERSION"
 printf '# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n' > "$RPD/CHANGELOG.md"
@@ -2184,7 +2188,7 @@ printf '#!/bin/sh\nexit 0\n' > "$RPD/test/smoke.sh"
 chmod +x "$RPD/agent-workflow/check_workflow.sh" "$RPD/test/smoke.sh"
 printf '\n> 本地发版模板改动\n' >> "$RPD/agent-workflow/templates/AGENTS.md.tmpl"
 set +e
-rp_out="$("$KIT_DIR/bin/awf" release-prep --root "$RPD" 0.5.0 2>&1)"
+rp_out="$("$SKILLS_BIN" release-prep --root "$RPD" 0.5.0 2>&1)"
 rp_code=$?
 set -e
 if [ "$rp_code" != "0" ] && printf '%s\n' "$rp_out" | grep -q '漂移'; then
@@ -2194,7 +2198,7 @@ else
 fi
 [ "$(cat "$RPD/VERSION")" = "0.0.1" ] && ok "F6 拒绝后 VERSION 未被改写" || bad "F6 拒绝后 VERSION 被改写"
 cp "$RPD/templates/AGENTS.md.tmpl" "$RPD/agent-workflow/templates/AGENTS.md.tmpl"
-if ( cd "$RPD" && "$KIT_DIR/bin/awf" release-prep --root "$RPD" 0.5.0 >/dev/null 2>&1 ); then
+if ( cd "$RPD" && "$SKILLS_BIN" release-prep --root "$RPD" 0.5.0 >/dev/null 2>&1 ); then
   ok "F6 消除漂移后 release-prep 成功"
 else
   bad "F6 消除漂移后 release-prep 失败"
@@ -2206,10 +2210,10 @@ if "$DISPATCH_CLI" --help 2>&1 | grep -q -- '--allow-legacy-reuse'; then
 else
   bad "RT-1 --help 未列出 --allow-legacy-reuse"
 fi
-if grep -q -- '--allow-legacy-reuse' $KIT_DIR/skills/cross-project-dispatch/SKILL.md; then
-  ok "RT-1 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 同步 --allow-legacy-reuse"
+if grep -q -- '--allow-legacy-reuse' $SKILLS_DIR/cross-project-dispatch/SKILL.md; then
+  ok "RT-1 $SKILLS_DIR/cross-project-dispatch/SKILL.md 同步 --allow-legacy-reuse"
 else
-  bad "RT-1 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺 --allow-legacy-reuse"
+  bad "RT-1 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺 --allow-legacy-reuse"
 fi
 
 # 20.1 RT-1/2/3 单元回归（mock API / 真实 git 仓库；不接触真实会话）
@@ -2513,16 +2517,16 @@ else
   bad "RT-1/2/3 单元回归失败（见上方 Traceback）"
 fi
 
-# 20.2 RT-2：$KIT_DIR/skills/cross-project-dispatch/SKILL.md 退出码表同步 headless 独立码（5）
-if grep -q '^| 5 |' $KIT_DIR/skills/cross-project-dispatch/SKILL.md && grep -q '非零退出' $KIT_DIR/skills/cross-project-dispatch/SKILL.md; then
-  ok "RT-2 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 退出码表含 5（headless 非零退出）"
+# 20.2 RT-2：$SKILLS_DIR/cross-project-dispatch/SKILL.md 退出码表同步 headless 独立码（5）
+if grep -q '^| 5 |' $SKILLS_DIR/cross-project-dispatch/SKILL.md && grep -q '非零退出' $SKILLS_DIR/cross-project-dispatch/SKILL.md; then
+  ok "RT-2 $SKILLS_DIR/cross-project-dispatch/SKILL.md 退出码表含 5（headless 非零退出）"
 else
-  bad "RT-2 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 退出码表未同步 headless 独立码"
+  bad "RT-2 $SKILLS_DIR/cross-project-dispatch/SKILL.md 退出码表未同步 headless 独立码"
 fi
-if grep -q '含本任务 ID' $KIT_DIR/skills/cross-project-dispatch/SKILL.md; then
-  ok "RT-3 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 落地判定含 commit 归因"
+if grep -q '含本任务 ID' $SKILLS_DIR/cross-project-dispatch/SKILL.md; then
+  ok "RT-3 $SKILLS_DIR/cross-project-dispatch/SKILL.md 落地判定含 commit 归因"
 else
-  bad "RT-3 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 未写明 commit 归因"
+  bad "RT-3 $SKILLS_DIR/cross-project-dispatch/SKILL.md 未写明 commit 归因"
 fi
 
 # 21. DEV-115 激活式路由：票据来源校验（ticket_source 解析 + 禁止转派 + 旧票据兼容）
@@ -2596,8 +2600,8 @@ else
 fi
 
 # 21.2 DEV-115 + DEV-128：协议规则同步（模板路由段 / 流程与派发文档 / 设计文档）
-if grep -q '来源：用户 | 工作流' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '继续转派' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '来源：用户 | 工作流' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '继续转派' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-128 跨项目技能含票据来源字段与继续转派语义"
 else
   bad "DEV-128 跨项目技能缺少票据来源/继续转派"
@@ -2635,7 +2639,7 @@ cat > "$PROJ/agent-workflow/tasks/debug/current/DEBUG-200.md" <<'D117'
 ### 下一步
 验证默认 locale 下解析正确。
 D117
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 dev117_locale_check() {
   # $1 = LC_ALL 值；空串 = 继承调用环境（即"默认 locale"，不强制 LC_ALL=C）
@@ -2660,33 +2664,33 @@ else
 fi
 
 # 22.1 check --with-smoke 开关与默认末尾提示
-if "$KIT_DIR/bin/awf" check --help 2>&1 | grep -q -- '--with-smoke'; then
+if "$SKILLS_BIN" check --help 2>&1 | grep -q -- '--with-smoke'; then
   ok "DEV-117 check --help 列出 --with-smoke"
 else
   bad "DEV-117 check --help 未列出 --with-smoke"
 fi
-if ( cd "$KIT_DIR" && ./bin/awf check ) 2>&1 | grep -q '请运行 bash test/smoke.sh'; then
+if ( cd "$KIT_DIR" && "$SKILLS_BIN" check ) 2>&1 | grep -q '请运行 bash test/smoke.sh'; then
   ok "DEV-117 check 默认输出末尾提示跑 smoke（kit 形态）"
 else
   bad "DEV-117 check 默认未提示跑 smoke"
 fi
 
 # 22.2 install-hooks：模板存在 / 安装 / 检查 / 脏账本拒绝提交 / 卸载
-assert_file "$KIT_DIR/templates/pre-commit" "templates/pre-commit"
+assert_file "$SKILLS_TPL/pre-commit" "templates/pre-commit"
 assert_file "$PROJ/agent-workflow/templates/pre-commit" "init 复制的 pre-commit 模板"
 git init -q "$PROJ" 2>/dev/null || true
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks --check 2>&1 | grep -q 'NONE' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks --check 2>&1 | grep -q 'NONE' ); then
   ok "DEV-117 install-hooks --check 识别未安装状态"
 else
   bad "DEV-117 install-hooks --check 未识别未安装状态"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks >/dev/null 2>&1 ) \
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks >/dev/null 2>&1 ) \
    && [ -x "$PROJ/.git/hooks/pre-commit" ]; then
   ok "DEV-117 install-hooks 安装成功且可执行"
 else
   bad "DEV-117 install-hooks 安装失败"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks --check 2>&1 | grep -q '已安装且与模板一致' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks --check 2>&1 | grep -q '已安装且与模板一致' ); then
   ok "DEV-117 install-hooks --check 确认已安装且与模板一致"
 else
   bad "DEV-117 install-hooks --check 安装状态不符"
@@ -2709,31 +2713,31 @@ else
     bad "DEV-117 钩子拒绝了但缺中文提示（见 $TMP/d117-hook.log）"
   fi
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks --uninstall >/dev/null 2>&1 ) \
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks --uninstall >/dev/null 2>&1 ) \
    && [ ! -f "$PROJ/.git/hooks/pre-commit" ]; then
   ok "DEV-117 install-hooks --uninstall 卸载成功"
 else
   bad "DEV-117 install-hooks --uninstall 卸载失败"
 fi
 rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-201.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 23. DEV-118：worker 名牌（role 自述 + find/projects/register 带出）
 # init 项目 yaml 无 role 键（DEV-119 后模板不再预置空 role: 行）→ find 回退 name，输出三列
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 ) 2>&1 \
+if ( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 ) 2>&1 \
    | grep -Eq '^[^	]+	[^	]+	[^	]+$'; then
   ok "DEV-118 find 输出三列（id/路径/role），role 缺省不报错"
 else
   bad "DEV-118 find 输出未达三列或缺省 role 报错"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 2>&1 | grep -q '冒烟项目' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 2>&1 | grep -q '冒烟项目' ); then
   ok "DEV-118 find 缺省 role 回退到 name（冒烟项目）"
 else
   bad "DEV-118 find 缺省 role 未回退到 name"
 fi
 
 # 23.1 DEV-119/121：模板源无字面空 role 键（防吞值回归）；init 缺省保留空 role 键（方案 B 跳过空值）
-if grep -q '^role: *$' "$KIT_DIR/templates/project.yaml.tmpl"; then
+if grep -q '^role: *$' "$SKILLS_TPL/project.yaml.tmpl"; then
   bad "DEV-119 模板源含字面空 role: 键（会吞用户后填值）"
 else
   ok "DEV-119 模板源无字面空 role: 键（防回归，改为 {{ROLE}} 占位）"
@@ -2745,20 +2749,20 @@ else
 fi
 # 追加第二行 role（模拟用户后填）→ find 立即输出该 role，不再回退 name
 printf '\nrole: 生成脚手架并维护任务账本\n' >> "$PROJ/agent-workflow/project.yaml"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 | grep -q '生成脚手架并维护任务账本' ); then
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
+if ( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 | grep -q '生成脚手架并维护任务账本' ); then
   ok "DEV-119 后填 role（追加行）find 立即带出，不被空行吞掉"
 else
   bad "DEV-119 后填 role 未生效（空行吞值回归）"
 fi
 # projects 表格含角色列并带出 role；register 报已登记名牌
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" projects | grep -q '角色' ) \
-   && ( cd "$PROJ" && "$KIT_DIR/bin/awf" projects | grep -q '生成脚手架并维护任务账本' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" projects | grep -q '角色' ) \
+   && ( cd "$PROJ" && "$SKILLS_BIN" projects | grep -q '生成脚手架并维护任务账本' ); then
   ok "DEV-118 projects 表格含「角色」列并带出 role"
 else
   bad "DEV-118 projects 表格缺角色列/role"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" register 2>&1 | grep -q '已登记 worker 名牌' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" register 2>&1 | grep -q '已登记 worker 名牌' ); then
   ok "DEV-118 register 对已有 role 项目提示已登记名牌"
 else
   bad "DEV-118 register 名牌提示缺失"
@@ -2766,21 +2770,21 @@ fi
 
 # 23.2 DEV-119：仅空 role / 无数值 role → find 仍回退 name（不回归）
 PROJ3="$TMP/proj3"
-"$KIT_DIR/bin/awf" init "$PROJ3" --name "空角色项目" >/dev/null 2>&1 || true
-if ( cd "$PROJ3" && "$KIT_DIR/bin/awf" find 空角色 2>&1 | grep -q '空角色项目' ); then
+"$SKILLS_BIN" init "$PROJ3" --name "空角色项目" >/dev/null 2>&1 || true
+if ( cd "$PROJ3" && "$SKILLS_BIN" find 空角色 2>&1 | grep -q '空角色项目' ); then
   ok "DEV-119 无数值 role 时 find 回退 name（不回归）"
 else
   bad "DEV-119 无数值 role 未回退 name"
 fi
 printf 'role: \n' >> "$PROJ3/agent-workflow/project.yaml"   # 模拟旧模板遗留空键
-if ( cd "$PROJ3" && "$KIT_DIR/bin/awf" find 空角色 2>&1 | grep -q '空角色项目' ); then
+if ( cd "$PROJ3" && "$SKILLS_BIN" find 空角色 2>&1 | grep -q '空角色项目' ); then
   ok "DEV-119 仅空 role 键时 find 仍回退 name（解析跳过空值）"
 else
   bad "DEV-119 仅空 role 键未回退 name"
 fi
 # 双 role 键（旧项目：空行在前、有值在后）→ 取第一个有值项
 printf 'role: 双键兜底取值\n' >> "$PROJ3/agent-workflow/project.yaml"
-if ( cd "$PROJ3" && "$KIT_DIR/bin/awf" find 空角色 | grep -q '双键兜底取值' ); then
+if ( cd "$PROJ3" && "$SKILLS_BIN" find 空角色 | grep -q '双键兜底取值' ); then
   ok "DEV-119 双 role 键 yaml 取到有值项（旧项目兼容）"
 else
   bad "DEV-119 双 role 键未取到有值项"
@@ -2788,13 +2792,13 @@ fi
 
 # 23.3 DEV-121：init --role 初始化即登记能力名牌；缺省给出填写提示（保留空键，find 回退）
 PROJ4="$TMP/proj4"
-"$KIT_DIR/bin/awf" init "$PROJ4" --name "能力项目" --role "擅长冒烟测试" > "$TMP/proj4-init.log" 2>&1
+"$SKILLS_BIN" init "$PROJ4" --name "能力项目" --role "擅长冒烟测试" > "$TMP/proj4-init.log" 2>&1
 if grep -q '^role: 擅长冒烟测试$' "$PROJ4/agent-workflow/project.yaml"; then
   ok "DEV-121 init --role 写入 project.yaml 的 role 字段"
 else
   bad "DEV-121 init --role 未写入 role 字段"
 fi
-if ( cd "$PROJ4" && "$KIT_DIR/bin/awf" find 能力项目 | grep -q '擅长冒烟测试' ); then
+if ( cd "$PROJ4" && "$SKILLS_BIN" find 能力项目 | grep -q '擅长冒烟测试' ); then
   ok "DEV-121 init --role 后 find 立即带出能力自述"
 else
   bad "DEV-121 init --role 后 find 未带出能力自述"
@@ -2810,14 +2814,14 @@ else
   bad "DEV-121 有 role 时仍输出填写提示"
 fi
 PROJ5="$TMP/proj5"
-"$KIT_DIR/bin/awf" init "$PROJ5" --name "缺省能力" > "$TMP/proj5-init.log" 2>&1
+"$SKILLS_BIN" init "$PROJ5" --name "缺省能力" > "$TMP/proj5-init.log" 2>&1
 if grep -q '填写本项目的 worker 能力自述' "$TMP/proj5-init.log"; then
   ok "DEV-121 init 缺省 role 时给出填写提示"
 else
   bad "DEV-121 init 缺省 role 未给填写提示"
 fi
 if grep -q '^role: *$' "$PROJ5/agent-workflow/project.yaml" \
-   && ( cd "$PROJ5" && "$KIT_DIR/bin/awf" find 缺省能力 2>&1 | grep -q '缺省能力' ); then
+   && ( cd "$PROJ5" && "$SKILLS_BIN" find 缺省能力 2>&1 | grep -q '缺省能力' ); then
   ok "DEV-121 init 缺省保留空 role 键且 find fallback name"
 else
   bad "DEV-121 init 缺省空 role 键/fallback 异常"
@@ -2835,7 +2839,7 @@ else
   bad "DEV-122 --help 缺少 --check-role"
 fi
 # 24.2 决策三件套模板与跨项目规范含 role（防文档回归）
-if grep -q 'role' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+if grep -q 'role' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
    && grep -q 'role' "$DISPATCH_IMPL"; then
   ok "DEV-122 决策三件套模板与跨项目规范含 role 匹配语义"
 else
@@ -2889,7 +2893,7 @@ fi
 
 # 25. DEV-123：--check-role 过度匹配修复（泛词停用 + 2/3/4-gram 混合）
 ROLE_KIT="擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版"
-"$KIT_DIR/bin/awf" init "$TMP/proj6" --name "误判回归" --role "$ROLE_KIT" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj6" --name "误判回归" --role "$ROLE_KIT" >/dev/null 2>&1
 printf '# 任务：生成本周周报并总结 git 提交\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：收集本周会话与提交，生成周报。\n' > "$ROLE_TASK_DIR/zhoubao.md"
 if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj6" "$ROLE_TASK_DIR/zhoubao.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-kit.log" 2>&1 ); then
@@ -2902,7 +2906,7 @@ else
   bad "DEV-123 kit 回归场景退出码非 0"
 fi
 ROLE_ZB="擅长收集 DSH 会话历史与 git 提交，归纳生成日报/周报"
-"$KIT_DIR/bin/awf" init "$TMP/proj7" --name "周报匹配" --role "$ROLE_ZB" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj7" --name "周报匹配" --role "$ROLE_ZB" >/dev/null 2>&1
 if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj7" "$ROLE_TASK_DIR/zhoubao.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-zb.log" 2>&1 ); then
   if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-zb.log"; then
@@ -2914,7 +2918,7 @@ else
   bad "DEV-123 周报匹配场景退出码非 0"
 fi
 ROLE_UXR="擅长 Rokid UXR SDK 的 Unity 示例开发与真机联调测试"
-"$KIT_DIR/bin/awf" init "$TMP/proj8" --name "领域词命中" --role "$ROLE_UXR" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj8" --name "领域词命中" --role "$ROLE_UXR" >/dev/null 2>&1
 printf '# 任务：Unity 真机联调\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：在真机联调 Unity 示例。\n' > "$ROLE_TASK_DIR/unity.md"
 if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj8" "$ROLE_TASK_DIR/unity.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-uxr.log" 2>&1 ); then
@@ -2929,23 +2933,23 @@ fi
 
 # 26. DEV-124：经验/工具积累闭环（开工读取 + 收尾沉淀 + tools 标准 + check 软提示）
 # 26.1 开工顺序含「读同类经验」
-if grep -q '过往结论' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   && grep -q 'memory/history' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
+if grep -q '过往结论' "$SKILLS_TPL/AGENTS.md.tmpl" \
+   && grep -q 'memory/history' "$SKILLS_TPL/AGENTS.md.tmpl"; then
   ok "DEV-124 开工顺序含「先读 history 同类经验」"
 else
   bad "DEV-124 开工顺序缺读同类经验步骤"
 fi
 # 26.2 dev/debug 收尾含沉淀到 memory/history 与 tools 收录
-if grep -q 'memory/history' "$KIT_DIR/skills/dev/SKILL.md" \
-   && grep -q 'memory/history' "$KIT_DIR/skills/debug/SKILL.md" \
-   && grep -q 'tools/README.md' "$KIT_DIR/skills/dev/SKILL.md" \
-   && grep -q 'tools/README.md' "$KIT_DIR/skills/debug/SKILL.md"; then
+if grep -q 'memory/history' "$SKILLS_DIR/dev/SKILL.md" \
+   && grep -q 'memory/history' "$SKILLS_DIR/debug/SKILL.md" \
+   && grep -q 'tools/README.md' "$SKILLS_DIR/dev/SKILL.md" \
+   && grep -q 'tools/README.md' "$SKILLS_DIR/debug/SKILL.md"; then
   ok "DEV-124 dev/debug 收尾含沉淀 memory/history + tools 收录（技能手册）"
 else
   bad "DEV-124 dev/debug 收尾缺沉淀步骤"
 fi
 # 26.3 init 项目 memory/README 含「可复用/何时沉淀」定义
-"$KIT_DIR/bin/awf" init "$TMP/proj9" --name "积累闭环" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj9" --name "积累闭环" >/dev/null 2>&1
 if grep -q '可复用' "$TMP/proj9/agent-workflow/memory/README.md" \
    && grep -q '何时沉淀' "$TMP/proj9/agent-workflow/memory/README.md"; then
   ok "DEV-124 memory/README 含可复用定义与沉淀时机"
@@ -2997,15 +3001,15 @@ cat >> "$TMP/proj9/agent-workflow/tasks/dev/done.md" <<'PROJ9EOF'
 造数归档。
 | HIST-103 | P3 | 造数沉淀三 | 2026-11-03 |
 PROJ9EOF
-( cd "$TMP/proj9" && "$KIT_DIR/bin/awf" status >/dev/null 2>&1 \
-  && "$KIT_DIR/bin/awf" check > "$TMP/proj9-check1.log" 2>&1 ); P9RC=$?
+( cd "$TMP/proj9" && "$SKILLS_BIN" status >/dev/null 2>&1 \
+  && "$SKILLS_BIN" check > "$TMP/proj9-check1.log" 2>&1 ); P9RC=$?
 if [ "$P9RC" -eq 0 ] && grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check1.log"; then
   ok "DEV-124 check 软提示：无沉淀+3 归档 → 提示且 rc=0"
 else
   bad "DEV-124 check 软提示未出现（rc=$P9RC）"
 fi
 printf '# 经验沉淀\n\n- 背景：造数验证\n- 结论：软提示工作正常\n' > "$TMP/proj9/agent-workflow/memory/history/软提示验证_2026-11-04.md"
-( cd "$TMP/proj9" && "$KIT_DIR/bin/awf" check > "$TMP/proj9-check2.log" 2>&1 ); P9RC2=$?
+( cd "$TMP/proj9" && "$SKILLS_BIN" check > "$TMP/proj9-check2.log" 2>&1 ); P9RC2=$?
 if [ "$P9RC2" -eq 0 ] && ! grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check2.log"; then
   ok "DEV-124 check 软提示：有沉淀 → 提示消失（rc=0）"
 else
@@ -3049,14 +3053,14 @@ cat > "$PROJ/agent-workflow/tasks/dev/todo/DEV-300.md" <<'D28'
 ### 下一步
 跑 smoke。
 D28
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/todo/README.md" "DEV-127 todo/README 列 DEV-300"
 
 # 认领：文件移入 current/ + 状态改 active
 mv "$PROJ/agent-workflow/tasks/dev/todo/DEV-300.md" "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md"
 sed -i '' 's/| 状态 | todo |/| 状态 | active |/' "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md" 2>/dev/null \
   || sed -i 's/| 状态 | todo |/| 状态 | active |/' "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/current/README.md" "认领后 current/README 列 DEV-300"
 if grep -q 'DEV-300' "$PROJ/agent-workflow/tasks/dev/todo/README.md"; then
   bad "认领后 todo/README 不应再有 DEV-300"
@@ -3069,7 +3073,7 @@ mv "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md" "$PROJ/agent-workflow/tas
 printf '| 完成日期 | %s |\n' "$(date +%Y-%m-%d 2>/dev/null || echo 2026-11-04)" >> "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
 sed -i '' 's/| 状态 | active |/| 状态 | done |/' "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md" 2>/dev/null \
   || sed -i 's/| 状态 | active |/| 状态 | done |/' "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/done/README.md" "归档后 done/README 列 DEV-300"
 if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
   ok "目录式账本生命周期后 check 通过"
@@ -3077,20 +3081,20 @@ else
   bad "目录式生命周期后 check 失败：$(printf '%s\n' "$out" | grep -E 'FAIL|过期' | head -3)"
 fi
 rm -f "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 29. DEV-138：派发三规则（默认异步 / 派发即子代理不建队 / 票据瘦身+分析归 worker）
 # 29.2 模板与工作流规范同步三规则
-if grep -q '派发三规则' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '默认异步' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '不启用智能体团队承载派发' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '票据瘦身' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '返回 router' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '派发三规则' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '默认异步' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '不启用智能体团队承载派发' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '票据瘦身' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '返回 router' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-138 技能索引路由段含派发三规则"
 else
   bad "DEV-138 技能索引路由段缺派发三规则"
 fi
-if [ -d "$KIT_DIR/templates/workflows" ]; then
+if [ -d "$SKILLS_TPL/workflows" ]; then
   bad "DEV-138 技能化后不应有 templates/workflows/ 目录（技能即源）"
 elif [ -d "$KIT_DIR/agent-workflow/workflows" ]; then
   bad "DEV-138 技能化后项目内不应有 workflows/ 目录"
@@ -3103,21 +3107,21 @@ if grep -q '派发协议三规则' "$KIT_DIR/docs/design.md" \
 else
   bad "DEV-138 $KIT_DIR/docs/design.md 缺派发协议三规则"
 fi
-if grep -q '不启用智能体团队承载派发' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '启动一个子代理会话' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '不启用智能体团队承载派发' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '启动一个子代理会话' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-138 cross-project 技能写清派发即子代理（不建队承载）"
 else
   bad "DEV-138 cross-project 技能未写清派发即子代理"
 fi
-if grep -q '不启用智能体团队承载派发' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '不启用智能体团队承载派发' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-138 跨项目技能写清派发不建队承载（无默认建队残留）"
 else
   bad "DEV-138 跨项目技能未写清不建队承载"
 fi
 # 29.3 旧语义清除：不再有「团队派发模式（默认」「--wait 是团队模式默认」「每个目标一个 dispatcher」
 stale_ok=1
-for f in "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" "$KIT_DIR/templates/AGENTS.md.tmpl" \
-         "$KIT_DIR/templates/workflows/cross-project.md" "$KIT_DIR/agent-workflow/workflows/cross-project.md"; do
+for f in "$SKILLS_DIR/cross-project-dispatch/SKILL.md" "$SKILLS_TPL/AGENTS.md.tmpl" \
+         "$SKILLS_TPL/workflows/cross-project.md" "$KIT_DIR/agent-workflow/workflows/cross-project.md"; do
   if grep -q '团队派发模式（默认\|每个目标一个 dispatcher\|--wait 是团队模式' "$f"; then
     stale_ok=0
     bad "DEV-138 旧派发语义残留：$f"
@@ -3127,7 +3131,7 @@ if [ "$stale_ok" -eq 1 ]; then
   ok "DEV-138 派发文档/模板无旧团队派发语义残留"
 fi
 # 30. 回执契约与投递通道（行为验证见 bin/awf-dispatch；技能文档章节完整性见下）
-SKILL_CROSS="$KIT_DIR/skills/cross-project-dispatch/SKILL.md"
+SKILL_CROSS="$SKILLS_DIR/cross-project-dispatch/SKILL.md"
 for section in "必报点总表" "回执投递通道" "回执正文排版" "远程办公状态" "派发方转达用户回执格式" "僵尸会话与落地判定" "退出码与失败处理"; do
   grep -q "$section" "$SKILL_CROSS" && ok "技能章节齐全：$section" || bad "技能缺章节：$section"
 done
@@ -3142,45 +3146,45 @@ fi
 # 3.13+ 行为断言（保留原有独立实现块）
 
 # 30.1 派发生命周期闭环（必有回执是主机制，登记 active 作兜底锚点）
-if grep -q '派发生命周期' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '兜底锚点' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 有派发生命周期闭环（五步 + 兜底锚点）"
+if grep -q '派发生命周期' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '兜底锚点' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 有派发生命周期闭环（五步 + 兜底锚点）"
 else
-  bad "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺派发生命周期闭环"
+  bad "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺派发生命周期闭环"
 fi
-if grep -q '目标 worker' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '派发时间' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '验收标准' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '关联票据' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
+if grep -q '目标 worker' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '派发时间' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '验收标准' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '关联票据' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
 else
-  bad "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 登记样例字段缺失"
+  bad "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 登记样例字段缺失"
 fi
 # 30.2 必有回执是主机制（成功必须回执 / 失败必须回执 / 需用户确认·多轮对话）
 if grep -q '必有回执' "$DISPATCH_IMPL" \
-   && grep -q '必有回执' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 必有回执是主机制（成功/失败都必须回执，需用户确认+多轮对话）"
+   && grep -q '必有回执' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 必有回执是主机制（成功/失败都必须回执，需用户确认+多轮对话）"
 else
-  bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺必有回执语义"
+  bad "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺必有回执语义"
 fi
 # 30.3 无回执仅当会话失联；登记 active 只是兜底
-if grep -q '兜底锚点' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q 'active' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 无回执仅当会话失联（登记 active 是兜底锚点）"
+if grep -q '兜底锚点' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q 'active' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 无回执仅当会话失联（登记 active 是兜底锚点）"
 else
-  bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺兜底语义"
+  bad "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺兜底语义"
 fi
 # 30.4 旧表述（代理 FAIL/无回执常规化 / 记忆锚点）已从三处源文本清除
 if grep -q '代理 FAIL、超时无回执' "$DISPATCH_IMPL" \
    || grep -q '静默中断' "$DISPATCH_IMPL" \
    || grep -q '记忆锚点' "$DISPATCH_IMPL" \
-   || grep -q '记忆锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   || grep -q '记忆锚点' "$SKILLS_TPL/AGENTS.md.tmpl" \
    || grep -q '记忆锚点' "$DISPATCH_IMPL"; then
   bad "DISPATCH-134 旧表述残留（代理 FAIL/记忆锚点/无回执常规化）"
 else
   ok "DISPATCH-134 旧表述已清除（无回执不再是常规路径）"
 fi
-if diff -q "$KIT_DIR/templates/AGENTS.md.tmpl" \
+if diff -q "$SKILLS_TPL/AGENTS.md.tmpl" \
           "$KIT_DIR/agent-workflow/templates/AGENTS.md.tmpl" >/dev/null \
 ; then
   ok "DISPATCH-134 模板双副本一致（AGENTS.md.tmpl；workflows 技能化退役）"
@@ -3287,7 +3291,7 @@ fi
 if grep -q '用户在 GUI 目标会话内' "$DISPATCH_IMPL" \
    || grep -q '用户在目标会话内直接回复' "$DISPATCH_IMPL" \
    || grep -q '用户在目标会话内回复继续' "$DISPATCH_IMPL" \
-   || grep -q '目标会话多轮对话续聊' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   || grep -q '目标会话多轮对话续聊' "$SKILLS_TPL/AGENTS.md.tmpl" \
    || grep -q '目标会话多轮对话续聊' "$DISPATCH_IMPL" \
    || grep -q '目标会话多轮对话续聊' "$KIT_DIR/AGENTS.md"; then
   bad "DISPATCH-141 旧表述残留（用户在目标会话内回复即可继续）"
@@ -3298,7 +3302,7 @@ fi
 # 31. DEV-216 / D-216-t1：awf log 执行记录（只增不改）+ awf validate 只读体检
 # 独立初始化一个干净项目，避免复用 $PROJ 中历史用例遗留的账本。
 LOG_PROJ="$TMP/log-proj"
-"$KIT_DIR/bin/awf" init "$LOG_PROJ" --name "体检项目" --no-register >/dev/null
+"$SKILLS_BIN" init "$LOG_PROJ" --name "体检项目" --no-register >/dev/null
 LOG_TASK="$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-310.md"
 cat > "$LOG_TASK" <<'D31'
 ## [DEV-310] 执行记录与体检冒烟
@@ -3320,17 +3324,17 @@ cat > "$LOG_TASK" <<'D31'
 ### 下一步
 跑 smoke。
 D31
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 31.1 --help 列出用法与节名
-if ( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log --help 2>&1 ) | grep -q '### Execution Log'; then
+if ( cd "$LOG_PROJ" && "$SKILLS_BIN" log --help 2>&1 ) | grep -q '### Execution Log'; then
   ok "D-216-t1 awf log --help 列出 Execution Log 用法"
 else
   bad "D-216-t1 awf log --help 缺 Execution Log 用法"
 fi
 
 # 31.2 无节自动补 + 追加一条（格式：- 时间 · 类型 · @谁 · 说明）
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-310 --note "第一条记录" --type implement --owner smoke-test >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-310 --note "第一条记录" --type implement --owner smoke-test >/dev/null )
 assert_grep '^### Execution Log$' "$LOG_TASK" "D-216-t1 awf log 无节自动补 Execution Log 节"
 assert_grep '^### 下一步$' "$LOG_TASK" "D-216-t1 awf log 保留原有小节（只增不改）"
 if grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} · implement · @smoke-test · 第一条记录$' "$LOG_TASK"; then
@@ -3340,7 +3344,7 @@ else
 fi
 
 # 31.3 第二条追加：不覆盖第一条，顺序追加
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-310 --note "第二条记录" >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-310 --note "第二条记录" >/dev/null )
 if [ "$(grep -c '^- [0-9]' "$LOG_TASK")" = "2" ] && grep -q '第一条记录' "$LOG_TASK"; then
   ok "D-216-t1 awf log 追加第二条且不覆盖旧记录"
 else
@@ -3355,7 +3359,7 @@ else
 fi
 
 # 31.4 不存在任务 → 明确错误 + 非零
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-999 --note x 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-999 --note x 2>&1 )"; then
   bad "D-216-t1 awf log 对不存在任务未报错"
 else
   case "$out" in
@@ -3385,8 +3389,8 @@ cat > "$DONE_TASK" <<'D31D'
 ### 下一步
 无。
 D31D
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-311 --note x 2>&1 )"; then
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-311 --note x 2>&1 )"; then
   bad "D-216-t1 awf log 对已归档任务未报错"
 else
   case "$out" in
@@ -3396,7 +3400,7 @@ else
 fi
 
 # 31.6 validate：账本正常 → 退出 0
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   ok "D-216-t1 awf validate 账本正常退出 0"
 else
   bad "D-216-t1 awf validate 账本正常却失败：$(printf '%s\n' "$out" | head -3)"
@@ -3408,7 +3412,7 @@ ledger_hash() {
       | while IFS= read -r hf; do shasum "$hf"; done | shasum | cut -d' ' -f1 )
 }
 before_hash="$(ledger_hash "$LOG_PROJ")"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate >/dev/null 2>&1 ) || true
+( cd "$LOG_PROJ" && "$SKILLS_BIN" validate >/dev/null 2>&1 ) || true
 after_hash="$(ledger_hash "$LOG_PROJ")"
 if [ "$before_hash" = "$after_hash" ]; then
   ok "D-216-t1 awf validate 只读（账本 hash 不变）"
@@ -3419,7 +3423,7 @@ fi
 # 31.7 状态值非法 → 非零并列出问题
 sed -i '' 's/| 状态 | active |/| 状态 | doing |/' "$LOG_TASK" 2>/dev/null \
   || sed -i 's/| 状态 | active |/| 状态 | doing |/' "$LOG_TASK"
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   bad "D-216-t1 awf validate 未发现非法状态"
 else
   case "$out" in
@@ -3432,7 +3436,7 @@ sed -i '' 's/| 状态 | doing |/| 状态 | active |/' "$LOG_TASK" 2>/dev/null \
 
 # 31.8 归档缺完成日期 → 非零并列出问题（恢复时插回字段表，不能追加到文末）
 grep -v '^| 完成日期 |' "$DONE_TASK" > "$DONE_TASK.tmp" && mv "$DONE_TASK.tmp" "$DONE_TASK"
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   bad "D-216-t1 awf validate 未发现缺完成日期"
 else
   case "$out" in
@@ -3445,7 +3449,7 @@ awk '1; /^\| Owner \| smoke \|$/ { print "| 完成日期 | 2026-11-08 |" }' "$DO
 
 # 31.9 README 索引与文件不一致 → 非零并列出问题（不代修）
 cp "$LOG_TASK" "$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-312.md"
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   bad "D-216-t1 awf validate 未发现 README 索引不一致"
 else
   case "$out" in
@@ -3454,7 +3458,7 @@ else
   esac
 fi
 before_hash="$(ledger_hash "$LOG_PROJ")"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate >/dev/null 2>&1 ) || true
+( cd "$LOG_PROJ" && "$SKILLS_BIN" validate >/dev/null 2>&1 ) || true
 after_hash="$(ledger_hash "$LOG_PROJ")"
 if [ "$before_hash" = "$after_hash" ]; then
   ok "D-216-t1 awf validate 有问题时也不修改文件"
@@ -3462,8 +3466,8 @@ else
   bad "D-216-t1 awf validate 有问题时修改了文件"
 fi
 rm -f "$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-312.md"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   ok "D-216-t1 修复后 awf validate 恢复退出 0"
 else
   bad "D-216-t1 修复后 awf validate 仍失败：$(printf '%s\n' "$out" | head -3)"
@@ -3472,7 +3476,7 @@ fi
 # 31.10 骨架生成含 Execution Log 节：release-prep 任务 + 旧 todo 迁移任务
 assert_grep '^### Execution Log$' "$REL/agent-workflow/tasks/dev/done/DEV-008.md" \
   "D-216-t1 release-prep 生成的任务骨架含 Execution Log 节"
-assert_grep '^### Execution Log$' "$KIT_DIR/templates/README.md" \
+assert_grep '^### Execution Log$' "$SKILLS_TPL/README.md" \
   "D-216-t1 任务块模板含 Execution Log 节"
 cat > "$LOG_PROJ/agent-workflow/tasks/dev/todo.md" <<'D31B'
 # 待开发
@@ -3481,7 +3485,7 @@ cat > "$LOG_PROJ/agent-workflow/tasks/dev/todo.md" <<'D31B'
 |--------|--------|------|----------|
 | DEV-320 | P2 | 迁移骨架冒烟 | 2026-11-08 |
 D31B
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
 if [ -f "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md" ] \
   && grep -q '^### Execution Log$' "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md"; then
   ok "D-216-t1 旧 todo 迁移生成的骨架含 Execution Log 节"
@@ -3492,7 +3496,7 @@ rm -f "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md"
 
 # 清理本次用例任务并刷新索引
 rm -f "$LOG_TASK" "$DONE_TASK"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

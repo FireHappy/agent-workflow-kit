@@ -1,0 +1,13 @@
+{
+  "kind": "awf-report",
+  "version": 1,
+  "ticket": "DEV-199",
+  "time": "2026-11-07 07:52:03 +0800",
+  "source": "agent-workflow-kit「[awf] [uxrsample] [任务包：冒烟测试分层提速——L0/L1/L2，小改」",
+  "dispatcher": "uxrsample「[user] 通用对话」",
+  "status": "",
+  "body": "【必报点1：受理】已受理 DEV-199（smoke L0/L1/L2 分层提速），会话 session-23c9a97c-610b-4816-bd77-efc17d8b6c19。任务理解：把 test/smoke.sh 改成 --level L0|L1|L2 分层选择器——L0 秒级静态门禁、L1 分钟级核心链路（init→check→status→bootstrap+派发 dry-run+release-prep 装配）、L2 全量 213 回归；不改断言语义、不删覆盖；文档+CHANGELOG+本地 commit 禁 push。计划：①基线跑当前全量（后台 ~30min，拿真实 213/耗时）②分层机制+分组标记实现 ③L0/L1/L2 实测计时 ④docs/CHANGELOG/账本 ⑤check_workflow+awf status+本地 commit ⑥隔时复核。",
+  "reportedAt": 1794009123699,
+  "fromSession": "session-23c9a97c-610b-4816-bd77-efc17d8b6c19",
+  "toSession": "session-dc570889-4869-4cf1-8680-b08c513af311"
+}

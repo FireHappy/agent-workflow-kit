@@ -13,7 +13,7 @@ whenToUse: 用户要求为新项目搭建 agent 协作流程、初始化任务�
 
 生成器与产物分离，所以同一套框架可以在不同 harness 之间复用，入口文件不会成为第二份规范。
 
-> 跨项目派发手册在技能 `skills/cross-project-dispatch/SKILL.md`（原独立技能已合并）；细则参见其同目录 `DISPATCH.md`。
+> 跨项目派发手册在技能 `cross-project-dispatch`（`SKILL.md`；插件 skills/ 下与框架技能同级平铺）；细则参见其同目录 `DISPATCH.md`。
 
 ## 前置检查
 
@@ -59,7 +59,7 @@ CLAUDE.md                       Claude Code 指针（已存在则不动）
 agent-workflow/
 ├── project.yaml                项目事实（唯一输入）
 ├── README.md                   规范正文
-├── skills/                     dev / debug / docs / review / release / cross-project（流程技能）
+├── (无 skills/ —— 流程技能在技能库/插件，不进项目)   dev / debug / docs / review / release / cross-project
 ├── tasks/                      status + dev|debug|docs 的 todo/current/done
 ├── memory/                     cache / history
 ├── tools/                      操作手册
@@ -75,7 +75,7 @@ agent-workflow/
 - [ ] `tasks/status.md` 由 `awf status` 生成，含生成说明
 - [ ] `project.yaml` 的 `compile` / `test` 为空时，入口显示“未配置”而不是假命令
 - [ ] 未修改用户已有的 `AGENTS.md` 区块外内容
-- [ ] AGENTS.md 入口含“跨项目派发”路由 → 技能 `skills/cross-project-dispatch/SKILL.md`
+- [ ] AGENTS.md 入口含“跨项目派发”路由 → 技能 `cross-project-dispatch/SKILL.md`
 - [ ] 入口含“任务路由”：有团队能力时优先派发，无则单会话
 - [ ] 需要跨项目发现时，`awf projects` 能列出新项目，`awf find <别名>` 能返回路径
 
@@ -85,12 +85,12 @@ agent-workflow/
 
 | 流程 | 技能 | 状态机 |
 |------|------|--------|
-| dev | `skills/dev/SKILL.md` | 认领→方案→实现→验证→Review→归档 |
-| debug | `skills/debug/SKILL.md` | 认领→诊断→收集证据→验证假设→修复→归档 |
-| docs | `skills/docs/SKILL.md` | 认领→大纲与核实→撰写→审阅→归档 |
-| review | `skills/review/SKILL.md` | 复核→通过/需修改→修复→复审→归档 |
-| release | `skills/release/SKILL.md` | 探测→bump→CHANGELOG→tag→收尾 |
-| cross-project | `skills/cross-project-dispatch/SKILL.md` | G1-G4 门→派发→回执→核验→归档 |
+| dev | `dev/SKILL.md` | 认领→方案→实现→验证→Review→归档 |
+| debug | `debug/SKILL.md` | 认领→诊断→收集证据→验证假设→修复→归档 |
+| docs | `docs/SKILL.md` | 认领→大纲与核实→撰写→审阅→归档 |
+| review | `review/SKILL.md` | 复核→通过/需修改→修复→复审→归档 |
+| release | `release/SKILL.md` | 探测→bump→CHANGELOG→tag→收尾 |
+| cross-project | `cross-project-dispatch/SKILL.md` | G1-G4 门→派发→回执→核验→归档 |
 | team-flow | `skills/team-flow/SKILL.md` | 先登记→建队→三轨→质量合同→队长收尾 |
 | upgrade | `skills/upgrade/SKILL.md` | 定位→预览→执行→修复→提交（保留账本历史） |
 
@@ -99,9 +99,9 @@ agent-workflow/
 
 ## 跨项目派发
 
-跨项目派发的**完整手册在技能 `skills/cross-project-dispatch/SKILL.md`**（四道门 → 派发 → 回执 → 核验 → 归档），
-回执/生命周期细则（必报点总表、回执与排版样例）在同一技能 `skills/cross-project-dispatch/SKILL.md` 的「必报点总表」「回执投递通道」「回执正文排版」章节。
-本入口不重复细则（见「禁止事项」）。执行跨项目派发时按 AGENTS.md 路由加载 `skills/cross-project-dispatch/SKILL.md`。
+跨项目派发的**完整手册在技能 `cross-project-dispatch/SKILL.md`**（四道门 → 派发 → 回执 → 核验 → 归档），
+回执/生命周期细则（必报点总表、回执与排版样例）在同一技能 `cross-project-dispatch/SKILL.md` 的「必报点总表」「回执投递通道」「回执正文排版」章节。
+本入口不重复细则（见「禁止事项」）。执行跨项目派发时按 AGENTS.md 路由加载 `cross-project-dispatch/SKILL.md`。
 
 ## 安全
 

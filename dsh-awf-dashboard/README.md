@@ -27,38 +27,16 @@ agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，�
 - 客户端：右侧边栏页签，15s 自动刷新 + 手动刷新；只跟随当前会话项目，无项目下拉选择器
 - 默认锚定：页签打开即自动选中当前 DSH 会话所属项目（见「默认锚定」一节），无需手动选择
 
-## 内嵌技能/CLI 副本（装插件即装工作流，DEV-216 / DEV-217 平铺 + 版本契约）
+## 技能源（插件内置，唯一开发路径，DEV-218）
 
-**单源双形态分发**：工作流规则只维护一份源（kit 仓库），插件包内嵌第二形态副本——
-**装插件即装工作流**，解析规则不再双份漂移；源更新后重跑一次拷贝即同步。
+`dsh-awf-dashboard/skills/` 是**全项目技能唯一源**（不再有 copy 脚本 / 副本 / manifest）：
 
-- 形态一（源）：**kit 仓库**（白名单 `SKILL.md` + `skills/*` + `templates/*` + `test/*`）
-  + kit 仓库 `bin/awf`（最新 CLI，如 `awf log` / `awf validate`）。
-  `.agent-teams/`、`dispatch/` 等运行/文档目录不在白名单，不会被误内嵌。
-- 形态二（内嵌副本，**平铺**）：`skills/`
-  - `skills/agent-workflow-scaffold/` ← 框架技能：`SKILL.md` + `bin/awf`（以仓库 CLI 覆盖）+ `templates/`（含 `FRAMEWORK_VERSION`）+ `test/`；
-  - `skills/<name>/` ← 各流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），
-    与框架技能**同级平铺**（不再嵌套在 agent-workflow-scaffold/skills/ 下，DEV-217）；
-  - `skills/manifest.json` ← 产物清单：**版本契约** + bin/awf sha256/子命令 + **每个文件的 sha256**。
-  `package.json` 的 `files` 含 `"skills"`，随插件分发。
+- `skills/agent-workflow-scaffold/` ← 框架：`SKILL.md` + `bin/awf`（CLI）+ `templates/`（含 `FRAMEWORK_VERSION`）+ `test/`
+- `skills/<name>/` ← 流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），与框架技能同级平铺
+- `package.json` 的 `files` 含 `"skills"`，随插件分发；**装插件即装工作流**。
+- 仓库根不再保留 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本；`install.sh` 从 `dsh-awf-dashboard/skills/` 安装到 `~/.dsh/skills/`。
 
-**版本契约（DEV-217，清理版号）**：插件/分发版本 = 本插件 `package.json` version（唯一信号，不再读技能
-实体 VERSION）；骨架版本 = `templates/FRAMEWORK_VERSION`（模板内，模板变更才 bump）。manifest 的
-`source.version` / `source.frameworkVersion` 与 `--check` 绑定：改模板必 bump、流程技能更新不触发项目升级。
-
-同步脚本 `scripts/copy-workflow-assets.mjs`（零写入的 `--list` / 幂等的 `--copy` / 漂移校验 `--check`）：
-
-```sh
-node scripts/copy-workflow-assets.mjs --list     # 列计划产物（dry-run，不写文件）
-node scripts/copy-workflow-assets.mjs --copy     # 生成/刷新内嵌副本 + manifest
-node scripts/copy-workflow-assets.mjs --check    # 校验副本与源一致：逐文件内容哈希比对 + 版本契约
-                                                 # 任一漂移 → 退出码 1
-# 可选：--skill-dir <dir> 覆盖技能源根；--awf <path> 覆盖 bin/awf 源；--no-cli 不覆盖 CLI
-# 环境变量（脚本化测试/CI）：AWF_SKILL_SOURCE / AWF_AWF_SOURCE / AWF_DEST_ROOT
-```
-
-bin/awf 更新（如新增子命令）或模板更新后重跑 `--copy` 即刷新内嵌副本；`--check` 供复核人核对副本一致性。
-`scripts/sync-profile.sh` 同步开发改动到已安装副本时会把 `skills/` 一并同步。
+**版本契约（DEV-217）**：插件/分发版本 = 本插件 `package.json` version（唯一信号，不再读技能实体 VERSION）；骨架版本 = `templates/FRAMEWORK_VERSION`（模板变更才 bump，流程技能更新不触发项目升级）。
 
 ## 安装
 
@@ -145,6 +123,8 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 - 所有路由都与平台一致走宿主 Connection 认证围栏（同 /api 网关准入），未授权请求返回 403
 
 ## 变更记录
+
+- **1.7.1（DEV-218）**：`dsh-awf-dashboard/skills/` 升格为**技能唯一源**（唯一开发路径）——仓库根 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本全部移除；copy 脚本/测试/manifest 退役；`install.sh`、`test/`、AGENTS 模板、project.yaml 引用改指插件路径；`dispatch/` 改名 `.dispatch/`（派发任务记录，默认忽略）并同步派发技能逻辑。
 
 - **1.7.0（DEV-217）**：内嵌技能副本**平铺布局** + 源收敛 + 版本契约（清理版号）
   - 布局：`skills/` 下框架技能 `agent-workflow-scaffold/` 与各流程技能**同级平铺**（取消 `skills/` 嵌套，侧边栏同级展示）；

@@ -1,0 +1,13 @@
+{
+  "kind": "awf-report",
+  "version": 1,
+  "ticket": "DEV-199",
+  "time": "2026-11-07 07:55:54 +0800",
+  "source": "agent-workflow-kit「[awf] [uxrsample] [任务包：冒烟测试分层提速——L0/L1/L2，小改」",
+  "dispatcher": "uxrsample「[user] 通用对话」",
+  "status": "",
+  "body": "【必报点2：开始执行+基线结果】已认领 DEV-199 入账（current/DEV-199.md，active）。基线：当前工作树全量 smoke 后台实测——通过 215 项 / 失败 0 项 / 耗时 27.0s（real）。两处口径差异需派发方知悉：①派发包写的『213 用例』是 DEV-198 向 smoke.sh 新增 2 条断言之前的旧口径，现状实测 215（保留 DEV-198 断言不动，L2 以 215 对齐现状）；②『约 30 分钟』在本机实测不成立（全量 27s），文档将写实测值并注明 30min 为历史/慢机口径。下一步：实现 smoke.sh 分层机制（--level L0|L1|L2|auto + 静态门禁 + 14 组 level 标记，仅选择不改语义），随后 L0/L1/L2 实测计时、README/CHANGELOG、门禁、本地 commit。",
+  "reportedAt": 1794009354912,
+  "fromSession": "session-23c9a97c-610b-4816-bd77-efc17d8b6c19",
+  "toSession": "session-dc570889-4869-4cf1-8680-b08c513af311"
+}

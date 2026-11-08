@@ -69,7 +69,7 @@ NOGI_PROJ="$TMP/nogi-proj"
 "$KIT_DIR/bin/awf" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
 # DEV-183：init 缺省写「本机派发产物」忽略段（dispatch 流水/回执/运行时状态，任何项目都不入库）；
 # 但缺省不写「工作流私有」段（--gitignore 才写 agent-workflow/ 整体）。
-assert_grep '^/dispatch/log.md$' "$NOGI_PROJ/.gitignore" "init 缺省写派发流水忽略"
+assert_grep '^/.dispatch/log.md$' "$NOGI_PROJ/.gitignore" "init 缺省写派发流水忽略"
 DISP_MARK="# agent-workflow（本机派发产物，不入库）"
 [ "$(grep -cF "$DISP_MARK" "$NOGI_PROJ/.gitignore")" = "1" ] && ok "init 缺省写派发产物标记（唯一）" || bad "init 缺省派发产物标记异常"
 [ "$(grep -cF "$GI_MARK" "$NOGI_PROJ/.gitignore")" = "0" ] && ok "init 缺省不写工作流私有段（--gitignore 专属）" || bad "init 缺省不应写工作流私有段"
@@ -1358,7 +1358,7 @@ with tempfile.TemporaryDirectory() as tmp:
     git("add", "-A")
     git("commit", "-qm", "chore: 升级工作流框架到 0.3.0")  # 提交消息不含任务 ID
 
-    tasks = tmp / "dispatch/tasks"
+    tasks = tmp / ".dispatch/tasks"
     tasks.mkdir(parents=True)
     (tasks / "demo02-DEV-007-ledger.md").write_text(f"- 目标项目：demo02（{repo}）\n", encoding="utf-8")
     (tasks / "demo02-DEV-099-pending.md").write_text(f"- 目标项目：demo02（{repo}）\n", encoding="utf-8")
@@ -1421,8 +1421,8 @@ with tempfile.TemporaryDirectory() as tmp:
     original_cwd = os.getcwd()
     try:
         os.chdir(tmp)
-        assert module.archived_ledger_path() == pathlib.Path.cwd() / "dispatch/archived-sessions.json", \
-            "台账路径 = <cwd>/dispatch/archived-sessions.json"
+        assert module.archived_ledger_path() == pathlib.Path.cwd() / ".dispatch/archived-sessions.json", \
+            "台账路径 = <cwd>/.dispatch/archived-sessions.json"
         assert module.load_archived_session_ids() == set(), "无台账时为空集"
         module.record_archived_sessions([
             {"sessionId": "s-a", "project": "p1", "title": "t1"},
@@ -1448,9 +1448,9 @@ with tempfile.TemporaryDirectory() as tmp:
              row("s-other", cwd="/tmp/elsewhere")], target,
             archived_ids=set()) == [row("s-live")], "池只收同 cwd + [awf] 前缀"
         # --forget-archived 重置台账
-        assert pathlib.Path("dispatch/archived-sessions.json").is_file()
+        assert pathlib.Path(".dispatch/archived-sessions.json").is_file()
         code = module.run_forget_archived(argparse.Namespace(json=False))
-        assert code == 0 and not pathlib.Path("dispatch/archived-sessions.json").exists()
+        assert code == 0 and not pathlib.Path(".dispatch/archived-sessions.json").exists()
         assert module.load_archived_session_ids() == set(), "重置后归档 id 恢复为空"
         # 重置后 s-a 恢复进入复用池
         sel2 = module.select_reuse_session([row("s-a", updated=5)], target, "工作流", sender="lead")
@@ -1558,7 +1558,7 @@ assert "超上限新建（--allow-over-3 确认）" in logs[0], "超限新建必
 # ---- ③ 并发新建互斥：文件锁串行化 + 锁后重读池再决策 ----
 lock_path = module.project_lock_path(target)
 assert lock_path.name == f".lock-{project}", lock_path
-assert str(lock_path).startswith(str(pathlib.Path.cwd())), "锁文件必须位于本地 dispatch/ 下"
+assert str(lock_path).startswith(str(pathlib.Path.cwd())), "锁文件必须位于本地 .dispatch/ 下"
 # 持锁期间第二个调用方阻塞，释放后拿到
 held_at = []
 result = []
@@ -1661,7 +1661,7 @@ with tempfile.TemporaryDirectory() as tmp:
         # dry-run：只列出，不归档、不写台账
         dry = module.cleanup_sessions(api_c, clean_rows, apply=False, json_mode=False)
         assert dry["dryRun"] is True and dry["archived"] == [] and api_c.archived == [], dry
-        assert not pathlib.Path("dispatch/archived-sessions.json").exists(), "dry-run 不写台账"
+        assert not pathlib.Path(".dispatch/archived-sessions.json").exists(), "dry-run 不写台账"
         # --apply：归档候选并写台账
         applied = module.cleanup_sessions(api_c, clean_rows, apply=True, json_mode=False)
         assert applied["errors"] == [] and applied["ok"] is True, applied
@@ -1760,7 +1760,7 @@ fi
 printf '# 任务：TEST-001 冒烟派发\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n\n1. 只读验证。\n' > "$TMP/task.md"
 ( cd "$TMP" && "$DISPATCH_CLI" "$PROJ" task.md --handoff >/dev/null ) \
   && ok "handoff 生成交接单" || bad "handoff 失败"
-[ -f "$TMP"/dispatch/handoff/*.md ] && ok "交接单文件存在" || bad "交接单文件缺失"
+[ -f "$TMP"/.dispatch/handoff/*.md ] && ok "交接单文件存在" || bad "交接单文件缺失"
 mkdir -p "$TMP/noworkflow"
 if "$DISPATCH_CLI" "$TMP/noworkflow" "$TMP/task.md" --dry-run >"$TMP/out" 2>&1; then
   bad "无工作流时派发应失败"
@@ -1772,7 +1772,7 @@ fi
 DISPATCH="$DISPATCH_CLI"
 PRUNE="$TMP/prune"
 PRUNE_TARGET="$TMP/prune-target"
-mkdir -p "$PRUNE/dispatch/tasks" "$PRUNE_TARGET/agent-workflow/tasks/dev"
+mkdir -p "$PRUNE/.dispatch/tasks" "$PRUNE_TARGET/agent-workflow/tasks/dev"
 mkdir -p "$PRUNE_TARGET/agent-workflow/tasks/dev/done"
 printf '## [DEV-101] 已完成\n' > "$PRUNE_TARGET/agent-workflow/tasks/dev/done/DEV-101.md"
 git -C "$PRUNE_TARGET" init -q
@@ -1785,19 +1785,19 @@ git -C "$PRUNE" init -q
 git -C "$PRUNE" config user.email smoke@example.com
 git -C "$PRUNE" config user.name smoke
 
-cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" <<EOF
+cat > "$PRUNE/.dispatch/tasks/demo01-DEV-101-tracked.md" <<EOF
 # demo01 · DEV-101
 
 - 目标项目：demo01（${PRUNE_TARGET}）
 EOF
-cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
+cat > "$PRUNE/.dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
 # demo01 · DEV-101 副本
 
 - 目标项目：demo01（${PRUNE_TARGET}）
 EOF
-git -C "$PRUNE" add dispatch/tasks/demo01-DEV-101-tracked.md
+git -C "$PRUNE" add .dispatch/tasks/demo01-DEV-101-tracked.md
 git -C "$PRUNE" commit -qm "chore: 种子票据（只把 tracked 加入索引）"
-cat > "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
+cat > "$PRUNE/.dispatch/tasks/demo01-DEV-101-untracked.md" <<EOF
 # demo01 · DEV-101 副本
 
 - 目标项目：demo01（${PRUNE_TARGET}）
@@ -1808,7 +1808,7 @@ if ( cd "$PRUNE" && "$DISPATCH" --prune --json > plan.json ); then
 else
   bad "--prune dry-run 失败"
 fi
-if [ -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && [ ! -e "$PRUNE/dispatch/archive" ]; then
+if [ -f "$PRUNE/.dispatch/tasks/demo01-DEV-101-tracked.md" ] && [ ! -e "$PRUNE/.dispatch/archive" ]; then
   ok "dry-run 不删除文件、不建 archive"
 else
   bad "dry-run 改动了票据文件"
@@ -1838,9 +1838,9 @@ if ( cd "$PRUNE" && "$DISPATCH" --prune --apply --json > apply.json ); then
 else
   bad "--prune --apply 失败"
 fi
-[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-tracked.md" ] && ok "apply 删除已跟踪票据（git rm）" || bad "已跟踪票据未删除"
-[ ! -f "$PRUNE/dispatch/tasks/demo01-DEV-101-untracked.md" ] && ok "apply 删除未跟踪票据" || bad "未跟踪票据未删除"
-[ ! -e "$PRUNE/dispatch/archive" ] && ok "不再产生 dispatch/archive" || bad "仍产生 dispatch/archive"
+[ ! -f "$PRUNE/.dispatch/tasks/demo01-DEV-101-tracked.md" ] && ok "apply 删除已跟踪票据（git rm）" || bad "已跟踪票据未删除"
+[ ! -f "$PRUNE/.dispatch/tasks/demo01-DEV-101-untracked.md" ] && ok "apply 删除未跟踪票据" || bad "未跟踪票据未删除"
+[ ! -e "$PRUNE/.dispatch/archive" ] && ok "不再产生 .dispatch/archive" || bad "仍产生 .dispatch/archive"
 if python3 - "$PRUNE/apply.json" <<'PY'
 import json
 import sys

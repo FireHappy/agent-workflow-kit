@@ -28,12 +28,12 @@
 
 用法：
   ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --dry-run
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --new
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --sender agent-workflow-kit
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --wait
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --dry-run
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --new
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --module 工作流
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --sender agent-workflow-kit
+  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --session session-xxx
   ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless
   ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff
   ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team
@@ -120,11 +120,11 @@ DEFAULT_DSH = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli
 # inbox 自动触发其回合处理，派发方无需轮询）；RPC 不可达 / 未注入派发方会话时
 # 降级写收件箱文件（默认目录相对派发方/目标侧 cwd）。回执内容仍按必报点表组织。
 REPORT_MARKER = "【回执请求】"
-REPORT_INBOX_DIR = "dispatch/reports/inbox"
-# DEV-214：本地归档台账（派发方 cwd 下的 dispatch/ 目录，不入库）——记录被 --cleanup
+REPORT_INBOX_DIR = ".dispatch/reports/inbox"
+# DEV-214：本地归档台账（派发方 cwd 下的 .dispatch/ 目录，不入库）——记录被 --cleanup
 # 经 workspace/archiveSession 归档的会话 id；组装复用池/统计每项目 [awf] 会话数时排除。
 ARCHIVED_LEDGER_NAME = "archived-sessions.json"
-# DEV-214：同项目新建决策互斥锁文件名前缀（dispatch/.lock-<project>）。
+# DEV-214：同项目新建决策互斥锁文件名前缀（.dispatch/.lock-<project>）。
 LOCK_FILE_PREFIX = ".lock-"
 
 
@@ -382,14 +382,14 @@ def check_workflow(target: Path) -> None:
 
 def _is_generated_change(line: str) -> bool:
     """--allow-dirty=tasks 豁免的账本自我生成物（DISPATCH-139 P1）：
-    agent-workflow/tasks/status.md、tasks/<type>/<dir>/README.md、dispatch/log.md
+    agent-workflow/tasks/status.md、tasks/<type>/<dir>/README.md、.dispatch/log.md
     （由 awf status / 工具再生成）；业务/代码改动不豁免。"""
     path = line[3:].strip()
     if path == "agent-workflow/tasks/status.md":
         return True
     if path.startswith("agent-workflow/tasks/") and path.endswith("/README.md"):
         return True
-    if path == "dispatch/log.md":
+    if path == ".dispatch/log.md":
         return True
     return False
 
@@ -417,7 +417,7 @@ def check_git(target: Path, allow_dirty: bool, allow_dirty_scope: str = "") -> s
         if blocked:
             raise DispatchError(
                 "G3 可写失败：--allow-dirty=tasks 只豁免账本自我生成物"
-                "（tasks/status.md、tasks/*/README.md、dispatch/log.md）；"
+                "（tasks/status.md、tasks/*/README.md、.dispatch/log.md）；"
                 "业务/代码改动仍拦截：\n"
                 + "\n".join(blocked[:10])
                 + "\n→ 先提交/清理业务改动；确实要全豁免再用裸 --allow-dirty"
@@ -859,7 +859,7 @@ def report_json_path(cwd: Path, ticket: str) -> Path:
 
 def write_report_json(cwd, *, ticket: str, source: str, target_session: str, body: str,
                       source_label: str = "", target_label: str = "") -> Path:
-    """把回执落盘为结构化 JSON（目标项目 dispatch/reports/，供插件面板渲染）。
+    """把回执落盘为结构化 JSON（目标项目 .dispatch/reports/，供插件面板渲染）。
 
     纯函数（时间戳当次生成），供 --report 与 smoke 断言。不改业务文件。
     """
@@ -905,7 +905,7 @@ def render_report_message(source: str, target_session: str, ticket: str, body: s
 
 
 def inbox_path_for(source: str, ticket: str = "") -> Path:
-    """收件箱文件路径（降级通道）：<cwd>/dispatch/reports/inbox/<来源会话ID>[-<派发单>].md。"""
+    """收件箱文件路径（降级通道）：<cwd>/.dispatch/reports/inbox/<来源会话ID>[-<派发单>].md。"""
     name = sanitize_filepart(source)
     if ticket:
         name = "%s-%s" % (name, sanitize_filepart(ticket))
@@ -937,10 +937,10 @@ def report_channel_section(dispatcher_session: str = "") -> str:
     else:
         target_part = "本任务未注入派发方会话（派发方环境无 DSH_SESSION_ID）；"
         cmd = ("`awf-dispatch --report \"<回执文本>\"`"
-               "（将自动降级写收件箱文件 `dispatch/reports/inbox/<来源会话ID>.md`）")
+               "（将自动降级写收件箱文件 `.dispatch/reports/inbox/<来源会话ID>.md`）")
     return (
         "- **回执投递**：" + target_part + "回执时运行 " + cmd
-        + "（推送派发方收件箱；RPC 不可达自动降级写 `dispatch/reports/inbox/`）。\n"
+        + "（推送派发方收件箱；RPC 不可达自动降级写 `.dispatch/reports/inbox/`）。\n"
         "  细则（必报点表/时机/字段）见技能 `skills/cross-project-dispatch/SKILL.md`，此处不重复。\n"
     )
 
@@ -1131,7 +1131,7 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
     任务名段不参与判定，复用后由调用方改名覆盖。
     非 `[awf]` 前缀的会话（用户自建/普通）不进池；池为空时的无前缀旧格式
     （DEV-126 前 `<项目> · <任务>`）迁移由 legacy_probe 把关闭（RT-1）。
-    DEV-214：本地归档台账（dispatch/archived-sessions.json）记录的会话 id 不进池——
+    DEV-214：本地归档台账（.dispatch/archived-sessions.json）记录的会话 id 不进池——
     组装复用池与统计每项目 [awf] 会话数时排除（archived_ids 缺省从台账读取）。""".format(MAX=MAX_SENDER_SESSIONS)
     project = Path(target).name
     real = os.path.realpath(str(target))
@@ -1741,8 +1741,8 @@ def judge_ticket(target, task_id: str):
 
 
 def scan_tickets(root: Path):
-    """扫描 ./dispatch/tasks/（含子目录，如 upgrade-v<版本>/）的票据并逐个判定；只读，不删除。"""
-    tasks_dir = root / "dispatch/tasks"
+    """扫描 ./.dispatch/tasks/（含子目录，如 upgrade-v<版本>/）的票据并逐个判定；只读，不删除。"""
+    tasks_dir = root / ".dispatch/tasks"
     items = []
     if not tasks_dir.is_dir():
         return items
@@ -1795,7 +1795,7 @@ def git_tracked(root: Path, rel: str) -> bool:
 def delete_ticket(root: Path, source: Path) -> str:
     """删除票据文件（用完即删，不留存根）：git 索引里的用 git rm，其余直接 unlink。
 
-    删除后向上清理空目录（如 dispatch/tasks/upgrade-v<版本>/），不留空壳。
+    删除后向上清理空目录（如 .dispatch/tasks/upgrade-v<版本>/），不留空壳。
     """
     rel_src = source.relative_to(root).as_posix()
     if git_tracked(root, rel_src):
@@ -1813,7 +1813,7 @@ def delete_ticket(root: Path, source: Path) -> str:
 
 
 def _prune_empty_parents(start: Path) -> None:
-    """自票据所在目录向上删除空目录，直到 dispatch/tasks 为止（tasks 本身保留）。"""
+    """自票据所在目录向上删除空目录，直到 .dispatch/tasks 为止（tasks 本身保留）。"""
     cur = start
     while cur.name != "tasks":
         try:
@@ -1828,7 +1828,7 @@ def _prune_empty_parents(start: Path) -> None:
 
 def run_prune(args) -> int:
     root = Path.cwd().resolve()
-    tasks_dir = root / "dispatch/tasks"
+    tasks_dir = root / ".dispatch/tasks"
     items = scan_tickets(root)
     apply = bool(args.apply)
     counts = {"completed": 0, "pending": 0, "unknown": 0}
@@ -1877,7 +1877,7 @@ def run_prune(args) -> int:
         print(f"prune：{mode}")
         print(f"票据目录：{tasks_dir}")
         if not items:
-            print("没有票据：dispatch/tasks 为空或不存在。")
+            print("没有票据：.dispatch/tasks 为空或不存在。")
         for item in items:
             print()
             print(f"{item['status']:<9} {item['file']}")
@@ -1906,12 +1906,12 @@ def run_prune(args) -> int:
 # 四件套：① 归档台账（archived-sessions.json）排除已归档会话；② --new 超上限需
 # --allow-over-3 确认并留痕；③ 同项目新建决策文件锁串行化、锁后重读池再决策；
 # ④ --cleanup 列出每项目超 3 的空闲 [awf] 会话并归档写入台账。
-# 台账与锁文件都在派发方 cwd 的 dispatch/ 下（.gitignore 已忽略 dispatch/，不入库）。
+# 台账与锁文件都在派发方 cwd 的 .dispatch/ 下（.gitignore 已忽略 .dispatch/，不入库）。
 
 
 def archived_ledger_path() -> Path:
-    """本地归档台账路径：<cwd>/dispatch/archived-sessions.json。"""
-    return Path.cwd() / "dispatch" / ARCHIVED_LEDGER_NAME
+    """本地归档台账路径：<cwd>/.dispatch/archived-sessions.json。"""
+    return Path.cwd() / ".dispatch" / ARCHIVED_LEDGER_NAME
 
 
 def load_archived_session_ids() -> set:
@@ -1976,7 +1976,7 @@ def run_forget_archived(args) -> int:
 
 
 def project_lock_path(target: Path) -> Path:
-    """同项目新建决策锁文件：<cwd>/dispatch/.lock-<project>。"""
+    """同项目新建决策锁文件：<cwd>/.dispatch/.lock-<project>。"""
     base = Path.cwd() / "dispatch"
     token = re.sub(r"[^A-Za-z0-9_.-]", "_", (target.name or "project"))
     return base / (LOCK_FILE_PREFIX + token)
@@ -2399,7 +2399,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         # 池满（3 个 [awf] 会话且全忙）时 select 已返回忙碌候选，由下方 else 分支进入
         # wait_for_idle 排队等待——达到每项目上限不再是「拒绝不发」，而是等待空闲后再发；
         # 等待超时（--queue-timeout）才报错，--force 为强制新建逃生口。无全局总数上限。
-        # DEV-214 并发互斥：同项目新建决策用文件锁（dispatch/.lock-<project>）串行化，
+        # DEV-214 并发互斥：同项目新建决策用文件锁（.dispatch/.lock-<project>）串行化，
         # 拿到锁后重读池再决策——并发方刚建出的可复用会话直接改复用，不重复新建；
         # 显式 --new 做上限校验（池≥3 且全忙需 --allow-over-3），不再静默绕过上限。
         def _legacy_probe(row: dict) -> bool:
@@ -2483,7 +2483,7 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
 
     prompt_ms = int(time.time() * 1000)
     # DISPATCH-146：派发方会话 = 派发方运行本命令时所在会话（env DSH_SESSION_ID），
-    # 注入目标提示（目标回执经 --report 投递回该会话），同时写入 dispatch/log.md 供审计。
+    # 注入目标提示（目标回执经 --report 投递回该会话），同时写入 .dispatch/log.md 供审计。
     dispatcher = dispatcher_session_env()
     # DEV-215：并发记账提示——同项目活跃 [awf] 池 >1（含本会话）时，要求目标按票据任务编号
     # 记账/commit，避免多个并行 worker 自排相同 ID 造成账本覆盖（满池实测 002/003 撞 DEV-091）。
@@ -2744,7 +2744,7 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
 
     emit("模式：headless（会话不会出现在 GUI 工作区，用户无法直接续聊）", args.json)
 
-    outdir = Path.cwd() / "dispatch/headless"
+    outdir = Path.cwd() / ".dispatch/headless"
     outdir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out_path = outdir / f"{stamp}-{target.name}-{uuid.uuid4().hex[:6]}.log"
@@ -2942,7 +2942,7 @@ def dispatch_headless(target: Path, task: Path, text: str, title: str, args):
 
 def dispatch_handoff(target: Path, task: Path, text: str, title: str, args):
     preflight(target, args, need_channel=False)
-    outdir = Path.cwd() / "dispatch/handoff"
+    outdir = Path.cwd() / ".dispatch/handoff"
     outdir.mkdir(parents=True, exist_ok=True)
     dest = outdir / f"{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}-{target.name}.md"
     dest.write_text(
@@ -2970,11 +2970,11 @@ def main(argv=None) -> int:
         ),
         epilog=(
             "示例：\n"
-            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md            # 默认异步：复用/新建后只发送\n"
-            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --wait     # 等待回合结束\n"
-            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --new      # 强制新建会话\n"
-            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --module 工作流  # 指定模块会话\n"
-            "  awf-dispatch demo02 dispatch/tasks/DEV-003.md --session session-xxx  # 指定会话\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md            # 默认异步：复用/新建后只发送\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --wait     # 等待回合结束\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --new      # 强制新建会话\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --module 工作流  # 指定模块会话\n"
+            "  awf-dispatch demo02 .dispatch/tasks/DEV-003.md --session session-xxx  # 指定会话\n"
             "  awf-dispatch demo02 task.md --dry-run\n"
             "  awf-dispatch demo02 task.md --headless\n"
             "  awf-dispatch demo02 task.md --handoff\n"
@@ -2984,16 +2984,16 @@ def main(argv=None) -> int:
             "  awf-dispatch --prune --json                           # 结构化输出\n"
             "  awf-dispatch --cleanup                                # dry-run：列出每项目超 3 的空闲 [awf] 会话\n"
             "  awf-dispatch --cleanup --apply                        # 归档超限空闲会话并写入台账（workspace/archiveSession）\n"
-            "  awf-dispatch --forget-archived                        # 重置本地归档台账（dispatch/archived-sessions.json）\n"
-            "\n--prune：扫描 ./dispatch/tasks/（含子目录，如 upgrade-v<版本>/）下的票据，从正文「- 目标项目：<别名>（<路径>）」\n"
+            "  awf-dispatch --forget-archived                        # 重置本地归档台账（.dispatch/archived-sessions.json）\n"
+            "\n--prune：扫描 ./.dispatch/tasks/（含子目录，如 upgrade-v<版本>/）下的票据，从正文「- 目标项目：<别名>（<路径>）」\n"
             "        取别名与路径、从文件名取任务 ID；git log --all 命中 ID，或目标账本 done.md 已含 ID → completed。\n"
             "        默认 dry-run 只打印计划，--apply 才删除（git 索引里的票据用 git rm，其余直接删除），\n"
-            "        删除后向上清空目录留下空壳（dispatch/tasks 本身保留）。无票据或全部 pending 时退出码 0。\n"
+            "        删除后向上清空目录留下空壳（.dispatch/tasks 本身保留）。无票据或全部 pending 时退出码 0。\n"
             "        --prune 不接受 target/task 位置参数（同时出现报用法错误，退出码 2）。\n"
             "\n--cleanup（DEV-214 归档台账）：扫描全部工作区会话，按项目聚合 [awf] 前缀会话——每项目保留\n"
             "        最近更新的 3 个，其余**空闲**会话列为归档候选（运行中跳过不归档）；默认 dry-run 只列出，\n"
             "        --apply 才逐个经 workspace/archiveSession 归档，并把 {sessionId, project, title, archivedAt}\n"
-            "        写入本地归档台账 dispatch/archived-sessions.json（不入库）。\n"
+            "        写入本地归档台账 .dispatch/archived-sessions.json（不入库）。\n"
             "        **归档台账在组装复用池/统计每项目 [awf] 会话数时排除**——已归档会话不再参加复用与上限统计；\n"
             "        误重置用 --forget-archived（删除台账，其中会话恢复进入复用池）。--cleanup 不接受 target/task。\n"
             "\n激活式路由（票据来源，DEV-115 定义 / DEV-128 放开转派）：读取任务文件头部的「来源：用户 | 工作流」；\n"
@@ -3013,13 +3013,13 @@ def main(argv=None) -> int:
             "        不会静默改成新建；上下文压力 ≥ 0.9 只在输出/日志里提示可考虑 --new，不自动切换。\n"
             "        没有可用会话时才新建并同样命名，作为该项目该模块后续派发的常驻会话。\n"
             "        --new 强制新建（隔离/调试）；--session <id> 直接向指定会话发送；--reuse 可显式书写（默认值）。\n"
-            "        **新建并发互斥（DEV-214）**：同一项目的新建决策用文件锁（dispatch/.lock-<project>）串行化，\n"
+            "        **新建并发互斥（DEV-214）**：同一项目的新建决策用文件锁（.dispatch/.lock-<project>）串行化，\n"
             "        拿到锁后重读池再决策——并发调用方看到刚建出的可复用会话时改为复用，不重复新建。\n"
             "        **--new 上限校验（DEV-214）**：目标项目 [awf] 池 ≥3 且全忙时，--new 继续新建需显式加\n"
             "        --allow-over-3 确认（本次超限新建写入派发日志留痕），不再静默绕过每项目 3 个上限。\n"
             "\n默认异步：复用/创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
             "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
-            "        未等待时 dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
+            "        未等待时 .dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
             "\n--wait 可靠性：\n"
             "        初始 HEAD 在 prompt 发送前一刻采集（idle-wait 期间的无关 commit 不落入判定区间）；\n"
             "        回合结束后还要等落地：目标 HEAD 变化且最新 commit 含任务 ID（commit），\n"
@@ -3039,7 +3039,7 @@ def main(argv=None) -> int:
             "        （--from 默认取当前会话 env DSH_SESSION_ID，--ticket 可带派发单号；--dry-run 只渲染不发送）；\n"
             "        经 RPC 推送进派发方会话 inbox 并触发其回合处理，派发方无需轮询即可收到；\n"
             "        RPC 不可达（GUI 关闭 / 无凭证）或未指定 --to 时降级写收件箱文件\n"
-            "        dispatch/reports/inbox/<来源会话ID>.md（派发方可查）。不派发任务、不加账本、不改目标仓库。\n"
+            "        .dispatch/reports/inbox/<来源会话ID>.md（派发方可查）。不派发任务、不加账本、不改目标仓库。\n"
             "\n--screen-state（DISPATCH-143）：只查询本机显示器状态并退出（on/off/locked/unknown），\n"
             "        不派发；off/locked＝远程办公状态（remote），需用户确认的决策由派发端经 IM 即时通知用户。\n"
             "\n退出码：0 成功（--wait 时回合已结束且已落地；未等待时表示已发送；--report 表示已投递/已落收件箱）；\n"
@@ -3057,7 +3057,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--prune",
         action="store_true",
-        help="清理已完成票据：扫描 ./dispatch/tasks/（含子目录）并打印计划（默认 dry-run）",
+        help="清理已完成票据：扫描 ./.dispatch/tasks/（含子目录）并打印计划（默认 dry-run）",
     )
     parser.add_argument(
         "--apply",
@@ -3068,12 +3068,12 @@ def main(argv=None) -> int:
         "--cleanup",
         action="store_true",
         help="（DEV-214）列出每项目超过 3 个的空闲 [awf] 会话（默认 dry-run；"
-        "--apply 经 workspace/archiveSession 归档并写入本地归档台账 dispatch/archived-sessions.json）",
+        "--apply 经 workspace/archiveSession 归档并写入本地归档台账 .dispatch/archived-sessions.json）",
     )
     parser.add_argument(
         "--forget-archived",
         action="store_true",
-        help="（DEV-214）重置本地归档台账（删除 dispatch/archived-sessions.json）；"
+        help="（DEV-214）重置本地归档台账（删除 .dispatch/archived-sessions.json）；"
         "其中记录的会话恢复进入复用池与每项目数量统计",
     )
     parser.add_argument("--headless", action="store_true", help="回退 dsh --profile headless（会话不可见）")
@@ -3186,7 +3186,7 @@ def main(argv=None) -> int:
         action="store_true",
         help="回执投递模式（DISPATCH-146）：把回执文本经通道投递到派发方会话收件箱"
              "（RPC 推送，派发方无需轮询即可收到），RPC 不可达 / 未指定 --to 时降级写"
-             "收件箱文件 dispatch/reports/inbox/；不派发任务",
+             "收件箱文件 .dispatch/reports/inbox/；不派发任务",
     )
     parser.add_argument("--text", default="",
                         help="--report 模式的回执文本（缺省取第一个位置参数，或经 stdin 读取）")
@@ -3256,7 +3256,7 @@ def main(argv=None) -> int:
         parser.error("--idle-wait 不能为负数")
     if args.prune:
         if args.target or args.task:
-            parser.error("--prune 不接受 target / task 位置参数；它只扫描 ./dispatch/tasks/")
+            parser.error("--prune 不接受 target / task 位置参数；它只扫描 ./.dispatch/tasks/")
         if args.headless or args.handoff:
             parser.error("--prune 不能与 --headless / --handoff 同时使用")
         return run_prune(args)
@@ -3276,7 +3276,7 @@ def main(argv=None) -> int:
         if args.target or args.task or args.prune or args.cleanup or args.session \
                 or args.headless or args.handoff or args.report or args.screen_state:
             parser.error(
-                "--forget-archived 只重置本地归档台账（dispatch/archived-sessions.json），"
+                "--forget-archived 只重置本地归档台账（.dispatch/archived-sessions.json），"
                 "不能与其他模式或 target/task 位置参数同用"
             )
         return run_forget_archived(args)

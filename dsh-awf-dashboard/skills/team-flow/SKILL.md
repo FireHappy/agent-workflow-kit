@@ -25,7 +25,7 @@ whenToUse: 任务需多角色/多会话协办、可并行拆分、需独立复�
 2. 团队名用 `<任务ID>-<slug>`（如 `<任务ID>-team-flow`），归档后能按 ID 检索
 3. 成员**不写** `tasks/**`；只报告改动文件、命令输出、目标 HEAD
 4. 收尾时由队长把团队产出写进账本并归档：**归档 → check → awf status → commit**；归档前按「收工三步」补完最后一条 `awf log`（改正文 → 记一条 → 回读末行；执行记录只由 awf 追加，禁止手改）
-5. `.agent-teams/` 不入库；对账依据是 `dispatch/log.md` + 账本 + `git log`
+5. `.agent-teams/` 不入库；对账依据是 `.dispatch/log.md` + 账本 + `git log`
 
 这一步是原来最大的缺口：团队"完成"很容易，账本里却查不到对应记录。
 
@@ -89,10 +89,10 @@ hypothesis-b（假设 2 验证）┤─> fix（根因修复 + 回归）
 
 ### 派发动作
 
-1. 主线登记本仓库账本（`agent-workflow/tasks/<type>/current.md`，见 §0），写票据 `dispatch/tasks/<项目>-<ID>-<slug>.md`——**只含 用户意图 / 硬约束 / 验收标准 / 路由裁决**，不写执行步骤、不做前置侦察（模板见 `docs/dispatch.md` 任务包模板）
+1. 主线登记本仓库账本（`agent-workflow/tasks/<type>/current.md`，见 §0），写票据 `.dispatch/tasks/<项目>-<ID>-<slug>.md`——**只含 用户意图 / 硬约束 / 验收标准 / 路由裁决**，不写执行步骤、不做前置侦察（模板见 `docs/dispatch.md` 任务包模板）
 2. 主线执行 `awf-dispatch <目标> <票据>`：**默认异步**，创建/复用目标工作区会话、发送任务后立即返回会话 ID，**主会话不被钉住**
 3. 需要本回合结果/落地确认时显式加 `--wait --timeout <秒>`；不加时稍后回到图形界面会话查看目标 agent 的任务包五项回执
-4. 收尾：主线写 `dispatch/log.md`、更新本仓库账本、归档票据、本地 commit
+4. 收尾：主线写 `.dispatch/log.md`、更新本仓库账本、归档票据、本地 commit
 
 ### 多目标与依赖
 
