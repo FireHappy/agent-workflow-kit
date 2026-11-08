@@ -3035,13 +3035,16 @@ window.__ModuleLoader__.load({
         const layout = ctx && typeof ctx.get === 'function' ? ctx.get('layout') : null
         try {
           if (isWorkflowVisible()) {
-            // 关闭 = 收起右侧栏（保留工作流页签）：下次打开直接显示看板，不再弹「新标签页」菜单
+            // 关闭工作流：点击右侧栏页签自带的「关闭」按钮；
+            // 关掉最后一个页签时宿主会自动收起侧栏，开着其他页签则保持侧栏（即恢复打开前状态）
             try {
-              if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
-              else {
-                const closeBtn = findBtn('收起右侧边栏')
-                if (closeBtn) realClick(closeBtn)
-              }
+              const root = rightbarRoot()
+              const closeBtn = root ? Array.from(root.querySelectorAll('button')).find((b) => {
+                const t = b.getAttribute('title') || b.getAttribute('aria-label') || ''
+                return t.indexOf('关闭') >= 0
+              }) : null
+              if (closeBtn) realClick(closeBtn)
+              else if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
             } catch { /* 忽略 */ }
             savedRef.current = null
             setActive(false)
