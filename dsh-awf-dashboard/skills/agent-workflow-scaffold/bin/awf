@@ -1612,9 +1612,11 @@ cmd_release_prep() {
     die "请先同步（或运行 ./bin/awf init . --force --no-register 有意刷新，会覆盖 agent-workflow 侧改动）后再执行 release-prep"
   fi
 
-  # a. 刷新生成副本与 AGENTS 入口
-  release_run "$ROOT/bin/awf" init . --force --no-register
-  release_run "$ROOT/bin/awf" bootstrap
+  # a. 刷新生成副本与 AGENTS 入口（DEV-219：优先项目内 bin/awf；kit 自身已无根 bin/awf → 回退脚本自身）
+  local AWF_BIN="$ROOT/bin/awf"
+  [ -x "$AWF_BIN" ] || AWF_BIN="$SCRIPT_DIR/awf"
+  release_run "$AWF_BIN" init . --force --no-register
+  release_run "$AWF_BIN" bootstrap
 
   # b. 账本（current.md；校验通过后归档）
   if [ -n "$(release_done_id)" ]; then
@@ -1628,8 +1630,21 @@ cmd_release_prep() {
     die "缺少 CHANGELOG.md，无法更新版本条目（请手动补）"
   fi
   mkdir -p "$(dirname "$VF")"
-  printf '%s\n' "$version" > "$VF"
-  say "已写版本锚点 ${VF}=$version"
+  if grep -q '"version"[[:space:]]*:' "$VF" 2>/dev/null; then
+    # DEV-219：JSON 版本锚点（如 package.json）——只替换 version 字段值，保留其余内容
+    local vtmp
+    vtmp="$(mktemp "${TMPDIR:-/tmp}/awf-ver.XXXXXX")" || vtmp="$VF.tmp.$$"
+    if sed "s/\"version\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"version\": \"$version\"/" "$VF" > "$vtmp" && grep -q '\"version\"' "$vtmp"; then
+      mv "$vtmp" "$VF"
+      say "已写版本锚点 ${VF}（JSON version 字段）=$version"
+    else
+      rm -f "$vtmp"
+      die "版本锚点写入失败（JSON 格式无法安全替换）：$VF"
+    fi
+  else
+    printf '%s\n' "$version" > "$VF"
+    say "已写版本锚点 ${VF}=$version"
+  fi
   if grep -q '^## \[Unreleased\]' "$ROOT/CHANGELOG.md"; then
     awfk -v ver="$version" -v day="$(today)" '
       !done && /^## \[Unreleased\]/ {

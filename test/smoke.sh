@@ -319,6 +319,29 @@ else
   bad "DEV-198 check 未对默认根 VERSION 项目给软提示：$(printf '%s\n' "$chk_vf_def_out" | grep -i 'VERSION' | head -3)"
 fi
 
+# DEV-219：JSON 版本锚点（version_file → package.json）只替换 version 字段，保留其余内容
+REL_JSON="$TMP/release-json"
+make_release_fixture "$REL_JSON"
+printf 'id: release-json\nversion_file: package.json\n' > "$REL_JSON/agent-workflow/project.yaml"
+printf '{\n  "name": "demo",\n  "version": "0.0.1",\n  "private": true\n}\n' > "$REL_JSON/package.json"
+rm -f "$REL_JSON/VERSION"
+if json_out="$("$SKILLS_BIN" release-prep --root "$REL_JSON" 0.4.2 2>&1)"; then
+  ok "DEV-219 release-prep JSON 锚点装配成功"
+else
+  bad "DEV-219 release-prep JSON 锚点装配失败：$json_out"
+fi
+if python3 - "$REL_JSON/package.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("version") == "0.4.2", d.get("version")
+assert d.get("name") == "demo" and d.get("private") is True
+PY
+then
+  ok "DEV-219 JSON 锚点：version 字段更新且其他字段保留"
+else
+  bad "DEV-219 JSON 锚点写入错误"
+fi
+
 # DEV-205 双版本模型：源持骨架版本 FRAMEWORK_VERSION（单行 semver，无 v 前缀）
 KFF_SRC="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
 [ -f "$KFF_SRC" ] || KFF_SRC="$KIT_DIR/FRAMEWORK_VERSION"
