@@ -19,9 +19,15 @@
 4. **目录改名在 git 显示为「删除 + 未跟踪」**：dsh-plugin → dsh-awf-dashboard 需 `git add -A` 由 git 识别 rename，单独 add 会丢历史。
 5. **派生指标与注释**：任务文件骨架里的 HTML 注释示例字段（`<!-- … -->`）会污染字段解析，解析必须 comment-aware（parseBlocks/deriveTaskAging 均已处理，新增解析逻辑照做）。
 
-## 后续待办（DEV-217 —— 已完成，2026-11-08）
+## 后续迭代（DEV-217/218/219 全部完成，2026-11-08）
 
 - ~~**copy 源收敛**~~：DEV-217 已落地——copy 默认源 = kit 仓库白名单（SKILL.md/skills/*/templates/*/test/* + bin/awf），产物平铺 `skills/`（框架技能与 8 个流程技能同级），manifest.source 版本契约（插件版本=package.json、骨架版=模板内），`--check` 逐文件 sha256 + 版本漂移。插件 1.6.0→1.7.0。
 - **版本契约**（DEV-217）：FRAMEWORK_VERSION 放 `templates/`（根+副本）；init/upgrade 读模板；插件版本信号读 `dsh-awf-dashboard/package.json`；技能实体根 VERSION/FRAMEWORK_VERSION 退役（install.sh 不写并清理）。**改模板才 bump 骨架版；流程技能更新不触发项目 upgrade。**
-- **重复文件治理（待做）**：git 中仍有 ~49 个内容重复文件（哈希统计 22 组），主要是源↔副本：插件内嵌 `skills/`（~30 个，计划改为构建产物：.gitignore + npm prepack 生成，不进 git）、`agent-workflow/templates/` 的 3 个 + FRAMEWORK_VERSION 副本（需改 check 排放宽，暂缓）。
+- **重复文件治理（DEV-218 已完成）**：技能源迁入插件 `dsh-awf-dashboard/skills/`（唯一开发路径）后，git 重复从 22 组/49 文件降至 10 组/21 文件；根 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本删除；`agent-workflow/templates/` 保留（check required，项目骨架必需）。
 - 全局技能实体同步（./install.sh）纳入发版流程；validate 纳入门禁前先治理 kit 历史账本数据债务。
+## DEV-218 / DEV-219 追加结论（2026-11-08）
+
+- **技能源唯一化（DEV-218）**：`dsh-awf-dashboard/skills/` = 全项目技能唯一源；`install.sh` 从插件安装；`test/`、AGENTS 模板、`project.yaml` 引用改插件路径；`copy-workflow-assets.mjs` 与 manifest 退役。**踩坑**：① 批量 `dispatch/ → .dispatch/` 替换误伤 `cross-project-dispatch/`（需二次修复）；② `.gitignore` 被同一替换改成 `/..dispatch/`（双点笔误，需 `git check-ignore` 验证）；③ `awf-dispatch` 内 `Path.cwd()/"dispatch"` 独立字符串未被替换，锁测试每次重建根 dispatch——清索引后仍复现，最终以「grep 全部 dispatch 字面量 + 实体 install 同步」闭环；④ 测试残留锁文件泄漏进 git（需 git rm --cached + 断言强化防回归）。
+- **版本锚点统一（DEV-219）**：kit 发布版本锚点 = `dsh-awf-dashboard/package.json`（`version_file`），删除 `agent-workflow/VERSION`；`awf release-prep` JSON 锚点用 python3 精准改写**顶层** version 字段（sed 会把 npm `scripts.version` 生命周期脚本也改掉——**绝不用 sed 处理 JSON**）；非字符串/非法 JSON/缺 version 键一律拒绝且不损坏原文件；插件 `readProjectRelease` 支持 JSON 锚点。
+- **发版 1.7.0**：commit cc74f1b + tag v1.7.0（含 DEV-217/218/219；未推送，push 由用户触发）。
+- **最终版本体系**：发布版 = `package.json`；骨架版 = `templates/FRAMEWORK_VERSION`；项目实例 = `agent-workflow/FRAMEWORK_VERSION`；流程技能更新不触发项目升级。
