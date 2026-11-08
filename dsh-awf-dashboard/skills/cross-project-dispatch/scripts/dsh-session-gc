@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""dsh-session-gc — DSH 会话文件清理（外部移除；宿主没有删除 API）。
+
+安全模型（先归档、再删文件）：
+- 默认只 `list`（只读），不写任何文件。
+- `quarantine`：把会话目录 + 会话缓存移入 ~/.dsh/.session-trash/<ts>/（可恢复）；
+  `purge`：永久删除（需 --yes）。
+- **只处理 DSH 已归档会话**（workspace.json 的 archivedSessionIds）——先归档、再删文件；
+  未归档会话需显式 `--allow-unarchived` 才可作为候选。
+- 拒绝删除当前会话（$DSH_SESSION_ID）与会话被占用（session.lock 被 flock 持有）的会话。
+- 不写 DSH workspace.json（运行中写会被宿主覆盖；已归档/已删会话的残留 id 无害）。
+
+用法见 `--help`；完整说明见 cross-project-dispatch/SKILL.md「会话文件清理」。
+"""
+
+import argparse
+import datetime
+import fcntl
+import json
+import os
+import re
+import shutil
+import sys
+import time
+from pathlib import Path
+
+ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+TS_FMT = "%Y%m%d-%H%M%S"
+
+
+def dsh_home() -> Path:
+    return Path(os.environ.get("DSH_HOME") or (Path.home() / ".dsh")).expanduser()
+
+
+def default_paths() -> dict:
+    home = dsh_home()
+    return {
+        "sessions": home / "sessions",
+        "trash": home / ".session-trash",
+        "cache": home / "storages" / "session_projcache" / "sessions",
+        "workspace": home / "storages" / "workspace.json",
+    }
+
+
+PATHS = default_paths()
+
+
+def fmt_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.1f}{unit}" if unit != "B" else f"{n}B"
+        n /= 1024.0
+    return f"{n:.1f}TB"
+
+
+def load_archived(workspace_file: Path) -> set:
+    try:
+        data = json.loads(workspace_file.read_text(encoding="utf-8"))
+        ids = (data.get("global") or {}).get("archivedSessionIds") or []
+        return {str(x) for x in ids}
+    except (OSError, ValueError, AttributeError):
+        return set()
+
+
+def load_cache(cache_root: Path, session_id: str) -> dict:
+    path = cache_root / f"{session_id}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    record = data.get("record") or data
+    identity = record.get("identity") or {}
+    rows = record.get("rows") or {}
+    title = rows.get("title")
+    if isinstance(title, dict):
+        title = title.get("val")
+    return {"cwd": identity.get("cwd") or "", "title": title or ""}
+
+
+def scan(root: Path):
+    if not root.is_dir():
+        return
+    for project_dir in sorted(root.iterdir()):
+        if not project_dir.is_dir():
+            continue
+        for session_dir in sorted(project_dir.iterdir()):
+            if session_dir.is_dir() and ID_RE.match(session_dir.name):
+                yield project_dir, session_dir
+
+
+def dir_size(path: Path) -> int:
+    total = 0
+    for base, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(base, name))
+            except OSError:
+                pass
+    return total
+
+
+def newest_mtime(path: Path) -> float:
+    newest = 0.0
+    for base, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                newest = max(newest, os.path.getmtime(os.path.join(base, name)))
+            except OSError:
+                pass
+    return newest
+
+
+def is_locked(session_dir: Path) -> bool:
+    """session.lock 被 flock 持有时视为运行中/写入中。"""
+    lock_path = session_dir / "session.lock"
+    try:
+        fd = open(lock_path, "rb")
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        fd.close()
+    return False
+
+
+def describe(project_dir: Path, session_dir: Path, archived: set, cache_root: Path) -> dict:
+    meta = load_cache(cache_root, session_dir.name)
+    size = dir_size(session_dir)
+    mtime = newest_mtime(session_dir)
+    age_days = (time.time() - mtime) / 86400 if mtime else 0
+    return {
+        "sessionId": session_dir.name,
+        "project": meta.get("cwd") or project_dir.name,
+        "projectDir": project_dir.name,
+        "title": meta.get("title") or "",
+        "size": size,
+        "mtime": datetime.datetime.fromtimestamp(mtime).isoformat(timespec="seconds") if mtime else "",
+        "ageDays": round(age_days, 1),
+        "archived": session_dir.name in archived,
+        "running": is_locked(session_dir),
+        "current": session_dir.name == (os.environ.get("DSH_SESSION_ID") or ""),
+        "path": str(session_dir),
+    }
+
+
+def select_candidates(args) -> list:
+    archived = load_archived(PATHS["workspace"])
+    rows = []
+    for project_dir, session_dir in scan(PATHS["sessions"]):
+        info = describe(project_dir, session_dir, archived, PATHS["cache"])
+        rows.append(info)
+    if args.project:
+        rows = [r for r in rows if args.project in r["project"] or args.project in r["projectDir"]]
+    if args.awf:
+        rows = [r for r in rows if r["title"].startswith("[awf]")]
+    if args.archived:
+        rows = [r for r in rows if r["archived"]]
+    if args.older_than:
+        rows = [r for r in rows if r["ageDays"] >= args.older_than]
+    if args.ids:
+        wanted = {x.strip() for x in args.ids.split(",") if x.strip()}
+        rows = [r for r in rows if r["sessionId"] in wanted]
+    return rows
+
+
+def print_rows(rows, as_json=False, limit=0) -> None:
+    if as_json:
+        print(json.dumps(rows[:limit] if limit else rows, ensure_ascii=False, indent=2))
+        return
+    if not rows:
+        print("（没有匹配的会话）")
+        return
+    total = sum(r["size"] for r in rows)
+    print(f"{'会话ID':<40} {'归档':<4} {'运行':<4} {'大小':>8} {'年龄(天)':>8}  标题")
+    for row in rows[:limit] if limit else rows:
+        flags = ("yes" if row["archived"] else "no") + ("/cur" if row["current"] else "")
+        run = "YES" if row["running"] else "-"
+        title = row["title"].replace("\n", " ")[:56]
+        print(f"{row['sessionId']:<40} {flags:<4} {run:<4} {fmt_size(row['size']):>8} "
+              f"{row['ageDays']:>8}  {title}")
+    print(f"\n合计 {len(rows)} 个会话，{fmt_size(total)}；"
+          f"其中已归档 {sum(1 for r in rows if r['archived'])} 个 / "
+          f"运行中 {sum(1 for r in rows if r['running'])} 个。")
+
+
+def guard(args, rows) -> list:
+    """过滤不可删除项；返回 (可处理, 拒绝原因)。"""
+    ok, refused = [], []
+    for row in rows:
+        sid = row["sessionId"]
+        if row["current"]:
+            refused.append((sid, "当前会话，拒绝删除"))
+            continue
+        if row["running"]:
+            refused.append((sid, "session.lock 被持有（运行中/写入中），拒绝删除"))
+            continue
+        if not row["archived"] and not args.allow_unarchived:
+            refused.append((sid, "未归档；请先归档（DSH GUI 或 workspace/archiveSession），"
+                                 "或显式 --allow-unarchived"))
+            continue
+        ok.append(row)
+    return ok, refused
+
+
+def session_dirs_for(session_id: str) -> list:
+    found = []
+    for _project_dir, session_dir in scan(PATHS["sessions"]):
+        if session_dir.name == session_id:
+            found.append(session_dir)
+    return found
+
+
+def trash_dir() -> Path:
+    base = PATHS["trash"] / datetime.datetime.now().strftime(TS_FMT)
+    path = base
+    n = 1
+    while path.exists():
+        path = base.with_name(base.name + f"-{n}")
+        n += 1
+    return path
+
+
+def cmd_list(args) -> int:
+    rows = select_candidates(args)
+    rows.sort(key=lambda r: r["size"], reverse=True)
+    print_rows(rows, as_json=args.json, limit=args.limit)
+    return 0
+
+
+def cmd_quarantine(args) -> int:
+    rows = select_candidates(args)
+    if not rows:
+        print("（没有匹配的会话）")
+        return 0
+    ok, refused = guard(args, rows)
+    total = sum(r["size"] for r in ok)
+    print(f"quarantine：{'apply' if args.apply else 'dry-run'}；候选 {len(ok)} 个，"
+          f"可回收 {fmt_size(total)}")
+    for sid, reason in refused:
+        print(f"  SKIP  {sid}：{reason}")
+    if not args.apply:
+        for row in ok:
+            print(f"  MOVE  {row['sessionId']}（{fmt_size(row['size'])}）→ 回收区")
+        print("\ndry-run：未移动任何文件；确认后加 --apply。")
+        return 0
+    dest = None
+    moved = 0
+    for row in ok:
+        src = Path(row["path"])
+        if dest is None:
+            dest = trash_dir()
+        target = dest / row["projectDir"] / row["sessionId"]
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(target))
+            cache = PATHS["cache"] / f"{row['sessionId']}.json"
+            if cache.is_file():
+                (dest / "projcache").mkdir(parents=True, exist_ok=True)
+                shutil.move(str(cache), str(dest / "projcache" / cache.name))
+            moved += 1
+            print(f"  MOVED {row['sessionId']}（{fmt_size(row['size'])}）")
+        except OSError as error:
+            print(f"  FAIL  {row['sessionId']}：{error}", file=sys.stderr)
+    if dest is None:
+        print("\n没有可移动的会话。")
+        return 0
+    print(f"\n已移入回收区 {moved} 个：{dest}")
+    print("确认不再需要后运行：dsh-session-gc trash --apply（永久删除回收区）")
+    return 0
+
+
+def cmd_purge(args) -> int:
+    if not args.yes:
+        print("purge 会永久删除文件；确认后加 --yes（或先用 quarantine 走回收区）。", file=sys.stderr)
+        return 2
+    rows = select_candidates(args)
+    if not rows:
+        print("（没有匹配的会话）")
+        return 0
+    ok, refused = guard(args, rows)
+    total = sum(r["size"] for r in ok)
+    print(f"purge：永久删除候选 {len(ok)} 个，{fmt_size(total)}")
+    for sid, reason in refused:
+        print(f"  SKIP  {sid}：{reason}")
+    deleted = 0
+    for row in ok:
+        try:
+            shutil.rmtree(row["path"])
+            cache = PATHS["cache"] / f"{row['sessionId']}.json"
+            if cache.is_file():
+                cache.unlink()
+            deleted += 1
+            print(f"  PURGED {row['sessionId']}（{fmt_size(row['size'])}）")
+        except OSError as error:
+            print(f"  FAIL  {row['sessionId']}：{error}", file=sys.stderr)
+    print(f"\n已永久删除 {deleted} 个会话。")
+    return 0
+
+
+def cmd_trash(args) -> int:
+    root = PATHS["trash"]
+    if not root.is_dir():
+        print("回收区为空。")
+        return 0
+    entries = sorted([p for p in root.iterdir() if p.is_dir()])
+    if not entries:
+        print("回收区为空。")
+        return 0
+    print("回收区：")
+    for entry in entries:
+        print(f"  {entry.name}  ({fmt_size(dir_size(entry))})")
+    if not args.apply:
+        print("\ndry-run：加 --apply 永久删除回收区。")
+        return 0
+    for entry in entries:
+        shutil.rmtree(entry, ignore_errors=True)
+        print(f"  已删除 {entry.name}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="dsh-session-gc",
+        description="DSH 会话文件清理（外部移除；默认只读）。先归档、再删文件："
+                    "默认只处理 workspace.json 已归档的会话。",
+        epilog=(
+            "示例：\n"
+            "  dsh-session-gc list --archived                  # 列出已归档会话（只读）\n"
+            "  dsh-session-gc quarantine --archived            # dry-run：计划移入回收区\n"
+            "  dsh-session-gc quarantine --archived --apply    # 移到 ~/.dsh/.session-trash\n"
+            "  dsh-session-gc trash --apply                    # 永久清空回收区\n"
+            "  dsh-session-gc purge --archived --yes           # 直接永久删除（高级）\n"
+        ),
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    def add_filters(sp):
+        sp.add_argument("--ids", default="", help="逗号分隔会话 ID（限定范围）")
+        sp.add_argument("--project", default="", help="项目 cwd / 目录名包含该子串")
+        sp.add_argument("--awf", action="store_true", help="只看标题 [awf] 前缀会话")
+        sp.add_argument("--archived", action="store_true", help="只看 DSH 已归档会话")
+        sp.add_argument("--older-than", type=float, default=0, metavar="DAYS",
+                        help="只看最后修改距今 ≥ DAYS 天")
+        sp.add_argument("--json", action="store_true", help="JSON 输出")
+
+    sp_list = sub.add_parser("list", help="只读盘点（默认）")
+    add_filters(sp_list)
+    sp_list.add_argument("--limit", type=int, default=0, help="只显示前 N 条")
+    sp_list.set_defaults(func=cmd_list)
+
+    sp_q = sub.add_parser("quarantine", help="移到回收区（可恢复；默认 dry-run）")
+    add_filters(sp_q)
+    sp_q.add_argument("--apply", action="store_true", help="真正移动")
+    sp_q.add_argument("--allow-unarchived", action="store_true",
+                      help="允许处理未归档会话（默认拒绝，先归档再删）")
+    sp_q.set_defaults(func=cmd_quarantine)
+
+    sp_p = sub.add_parser("purge", help="永久删除（需 --yes）")
+    add_filters(sp_p)
+    sp_p.add_argument("--yes", action="store_true", help="确认永久删除")
+    sp_p.add_argument("--allow-unarchived", action="store_true",
+                      help="允许处理未归档会话（默认拒绝，先归档再删）")
+    sp_p.set_defaults(func=cmd_purge)
+
+    sp_t = sub.add_parser("trash", help="查看/清空回收区")
+    sp_t.add_argument("--apply", action="store_true", help="真正删除回收区")
+    sp_t.set_defaults(func=cmd_trash)
+    return p
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("\n已中断。", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -401,6 +401,23 @@ awf-dispatch --retire-session <会话ID>            # dry-run：打印退役计�
 awf-dispatch --retire-session <会话ID> --apply    # 归档 + 写台账（非物理删除）
 ```
 
+### 会话文件清理（外部移除，先归档再删）
+
+宿主 DSH 0.2.2-rc.1 没有删除 API，官方文档说明会话文件需**外部移除**。`scripts/dsh-session-gc` 提供安全清理：
+
+- **默认只处理 DSH 已归档会话**（`workspace.json` 的 `archivedSessionIds`）——先归档、再删文件；未归档会话需显式 `--allow-unarchived`。
+- `list --archived`：只读盘点（大小 / 年龄 / 是否运行 / 归档）。
+- `quarantine --archived --apply`：移入 `~/.dsh/.session-trash/<时间戳>/`（**可恢复**），同步移走 `session_projcache`；`trash --apply` 再永久清空回收区。
+- `purge --archived --yes`：跳过回收区直接永久删除（高级用法）。
+- 拒绝当前会话（`$DSH_SESSION_ID`）与 `session.lock` 被 flock 持有的会话；不写 DSH `workspace.json`（运行中写会被宿主覆盖，残留 id 无害）。
+
+```sh
+dsh-session-gc list --archived                 # 只读：已归档会话与占用
+dsh-session-gc quarantine --archived           # dry-run：打印计划
+dsh-session-gc quarantine --archived --apply   # 移入回收区（可恢复）
+dsh-session-gc trash --apply                   # 确认后永久清空回收区
+```
+
 **权限牌一致性**：DSH 在创建会话时读取 profile 的 `permission.defaultPreset`，所以 GUI 新建与 `awf-dispatch --new` 新建默认继承同一权限预设；`awf-dispatch --permission-state` 可查默认预设与当前会话权限（只读、不派发、不改设置）。会话创建接口没有权限参数，无法按单次派发单独授权。
 
 ## 验收与收尾清单
