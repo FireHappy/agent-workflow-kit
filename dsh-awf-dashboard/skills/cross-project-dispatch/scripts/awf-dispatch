@@ -984,26 +984,33 @@ def run_report(args) -> int:
     if target_session:
         try:
             DshApi().prompt(target_session, message, str(uuid.uuid4()))
-            report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
-                                            target_session=target_session, body=text,
-                                            source_label=source_label, target_label=target_label)
-            emit("回执已落盘：%s（DEV-170 数据与渲染分离）" % report_path, args.json)
+            if getattr(args, "save_report", False):
+                report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                                target_session=target_session, body=text,
+                                                source_label=source_label, target_label=target_label)
+                emit("回执已落盘：%s（--save-report）" % report_path, args.json)
         except DispatchError as error:
             emit("RPC 投递到 %s 失败，降级写收件箱文件：%s" % (target_session, error), args.json)
             append_inbox(source, ticket, text, fallback_note=str(error))
-            report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
-                                            target_session=target_session, body=text,
-                                            source_label=source_label, target_label=target_label)
-            emit("已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (inbox_path_for(source, ticket), report_path), args.json)
+            if getattr(args, "save_report", False):
+                report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                                target_session=target_session, body=text,
+                                                source_label=source_label, target_label=target_label)
+                emit("已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (inbox_path_for(source, ticket), report_path), args.json)
+            else:
+                emit("已写入收件箱文件：%s（派发方可查）" % inbox_path_for(source, ticket), args.json)
             return 0
         emit("已投递到派发方会话 %s 收件箱（inbox；触发其回合处理，派发方无需轮询即可收到）"
              % target_session, args.json)
         return 0
     path = append_inbox(source, ticket, text, fallback_note="未注入派发方会话（--to 缺失）")
-    report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
-                                    target_session=target_session, body=text,
-                                    source_label=source_label, target_label=target_label)
-    emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (path, report_path), args.json)
+    if getattr(args, "save_report", False):
+        report_path = write_report_json(Path.cwd(), ticket=ticket, source=source,
+                                        target_session=target_session, body=text,
+                                        source_label=source_label, target_label=target_label)
+        emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）；回执已落盘 %s" % (path, report_path), args.json)
+    else:
+        emit("未指定派发方会话，已写入收件箱文件：%s（派发方可查）" % path, args.json)
     return 0
 
 
@@ -1516,6 +1523,13 @@ def append_log(entry: str) -> Path:
     local = Path.cwd() / ".dispatch"
     path = local / "log.md" if local.is_dir() else agents_home() / "dispatch.log"
     path.parent.mkdir(parents=True, exist_ok=True)
+    # DEV-225：日志体积上限——超过 120KB 时只保留最近 400 行（避免长期派发堆积）
+    try:
+        if path.exists() and path.stat().st_size > 120_000:
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            path.write_text("".join(lines[-400:]), encoding="utf-8")
+    except OSError:
+        pass
     with path.open("a", encoding="utf-8") as handle:
         handle.write(entry.rstrip() + "\n\n")
     return path
@@ -1968,10 +1982,10 @@ def run_forget_archived(args) -> int:
 
 
 def project_lock_path(target: Path) -> Path:
-    """同项目新建决策锁文件：<cwd>/.dispatch/.lock-<project>。"""
-    base = Path.cwd() / ".dispatch"
+    """同项目新建决策锁文件：$DSH_HOME/.awf-dispatch/locks/.lock-<project>。
+    DEV-225：锁文件统一放全局目录，不再在项目 .dispatch/ 生成。"""
     token = re.sub(r"[^A-Za-z0-9_.-]", "_", (target.name or "project"))
-    return base / (LOCK_FILE_PREFIX + token)
+    return registry_dir() / "locks" / (LOCK_FILE_PREFIX + token)
 
 
 @contextlib.contextmanager
@@ -3312,6 +3326,10 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--text", default="",
                         help="--report 模式的回执文本（缺省取第一个位置参数，或经 stdin 读取）")
+    parser.add_argument("--task-text", default="",
+                        help="派发模式：直接给任务文本（免票据文件，不写 .dispatch/tasks/）")
+    parser.add_argument("--save-report", action="store_true",
+                        help="--report 模式：回执 JSON 落盘到 .dispatch/reports/（默认不落盘，避免本地文件堆积）")
     parser.add_argument("--to", default="",
                         help="--report 模式：派发方会话 ID（投递目标；缺省则降级写收件箱文件）")
     parser.add_argument("--from", dest="from_id", default="",
@@ -3415,15 +3433,30 @@ def main(argv=None) -> int:
         except DispatchError as error:
             print(error, file=sys.stderr)
             return EXIT_FAIL
-    if not args.target or not args.task:
+    if not args.target or (not args.task and not args.task_text):
         parser.error(
-            "缺少参数：需要 target 与 task（或用 --prune 归档票据 / --cleanup 清理超限"
-            "会话 / --forget-archived 重置归档台账）"
+            "缺少参数：需要 target 与 task，或用 --task-text 直接给任务文本（免票据）；"
+            "--prune / --cleanup / --forget-archived 不需要"
         )
 
+    inline_task = None
     try:
         target = resolve_target(args.target)
-        task, text = read_task(args.task)
+        if args.task_text:
+            if args.task:
+                raise DispatchError("--task-text 与任务文件二选一：--task-text 直接给任务文本（免票据），或传任务文件")
+            raw = (args.task_text or "").strip()
+            if not raw:
+                raise DispatchError("--task-text 内容为空")
+            tmp = tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", suffix=".md", prefix="awf-inline-", delete=False)
+            tmp.write(raw + "\n")
+            tmp.close()
+            inline_task = Path(tmp.name)
+            task = inline_task
+            text = raw + "\n"
+        else:
+            task, text = read_task(args.task)
         args.task_text = text   # DEV-122：--check-role 软校验读取任务文本（运行时属性，不改 preflight 签名）
 
         # 激活式 router（DEV-128 起放开转派）：来源=工作流的票据允许继续向下一层派发
@@ -3460,6 +3493,12 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         print("\n已中断；已创建的会话会继续执行，可在 GUI 查看。", file=sys.stderr)
         return 130
+    finally:
+        if inline_task is not None:
+            try:
+                inline_task.unlink()
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

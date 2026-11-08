@@ -1359,7 +1359,8 @@ main_src = inspect.getsource(module.main)
 for needle in ("--reuse", "--new", "--session", "--idle-wait", "--module",
                "default=DEFAULT_REUSE", "default=DEFAULT_IDLE_WAIT",
                "--session 与 --new 互斥", "--cleanup", "--forget-archived",
-               "--allow-over-3", "run_cleanup(", "run_forget_archived("):
+               "--allow-over-3", "--task-text", "--save-report",
+               "run_cleanup(", "run_forget_archived("):
     assert needle in main_src, f"main 缺少 {needle}"
 
 # --session 参数解析：与 --new / --headless 互斥（argparse 阶段退出 2）
@@ -1657,7 +1658,8 @@ assert over_api.created == ["s-created-1"], over_api.created
 # ---- ③ 并发新建互斥：文件锁串行化 + 锁后重读池再决策 ----
 lock_path = module.project_lock_path(target)
 assert lock_path.name == f".lock-{project}", lock_path
-assert str(lock_path).startswith(str(pathlib.Path.cwd())) and ".dispatch" in str(lock_path), "锁文件必须位于本地 .dispatch/ 下"
+assert ".awf-dispatch" in str(lock_path) and "locks" in str(lock_path), \
+    "DEV-225：锁文件在全局 .awf-dispatch/locks/，不再在项目 .dispatch/ 生成"
 # 持锁期间第二个调用方阻塞，释放后拿到
 held_at = []
 result = []
