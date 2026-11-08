@@ -3138,7 +3138,7 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const activeBg = 'rgba(255,255,255,0.08)'
+      const activeBg = 'rgba(255,255,255,0.14)'
       return h('button', {
         type: 'button',
         title: '打开/关闭 Agent Workflow 工作流看板',
@@ -3148,7 +3148,7 @@ window.__ModuleLoader__.load({
         onMouseEnter: (ev) => {
           try {
             const el = ev && ev.currentTarget
-            if (el) el.style.background = active ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)'
+            if (el) el.style.background = active ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.05)'
           } catch { /* 忽略 */ }
         },
         onMouseLeave: (ev) => {
