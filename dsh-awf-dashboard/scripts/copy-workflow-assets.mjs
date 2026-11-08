@@ -1,48 +1,47 @@
 #!/usr/bin/env node
-// dsh-awf-dashboard — 内嵌技能/CLI 副本同步脚本（单源双形态分发，DEV-216）。
+// dsh-awf-dashboard — 内嵌技能/CLI 副本同步脚本（单源双形态分发，DEV-216；DEV-217 源收敛 + 平铺布局）。
 //
-// 单源双形态：源只维护一份（技能库实体 + kit 仓库 bin/awf），插件包内嵌第二形态副本。
-//   - 形态一（源）：
-//       · 技能库实体 ~/.dsh/skills/agent-workflow-scaffold（install.sh 将 kit 同步到全局，
-//         含 SKILL.md / bin/awf / skills/* / templates/* / test/*）；
-//       · kit 仓库 bin/awf（t1 落地的 CLI：awf log/validate 等子命令形态以它为准）。
-//   - 形态二（内嵌副本）：<插件>/skill/agent-workflow-scaffold/（含被覆盖的 bin/awf）
-//     + skill/manifest.json（产物清单：源路径/版本/bin/awf sha256/子命令/每文件 sha256，
-//       供 --list/--check 验证）。
-//   bin/awf 一律从 kit 仓库源覆盖进副本——bin/awf 更新（如 t1 新增 log/validate）后
-//   重跑本脚本即刷新，解析规则永不双份漂移；「装插件即装工作流」。
+// 单源双形态：源只维护一份（kit 仓库），插件包内嵌第二形态副本。
+//   - 形态一（源）：kit 仓库根（白名单：SKILL.md / skills/* / templates/* / test/*）+ bin/awf。
+//   - 形态二（内嵌副本，平铺）：<插件>/skill/
+//       · skill/agent-workflow-scaffold/  ← 框架技能：SKILL.md + bin/awf（以仓库 CLI 覆盖）+ templates/ + test/
+//       · skill/<name>/                   ← 各流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），
+//                                            与框架技能同级平铺（DEV-217：不做 agent-workflow-scaffold/skills/ 嵌套）
+//       · skill/manifest.json             ← 产物清单（版本契约 + 每文件 sha256）
+//   发版即随插件分发（package.json files 含 "skill"）；装插件即装工作流。
+//
+// 版本契约（DEV-217，清理版号）：
+//   · 插件/分发版本 = 插件 package.json version（唯一信号，manifest.source.version 记录它）；
+//   · 骨架版本 = templates/FRAMEWORK_VERSION（模板内，模板变更才 bump，manifest.source.frameworkVersion 记录）；
+//   · 不再读取/内嵌技能实体根 VERSION / 根 FRAMEWORK_VERSION。
 //
 // 用法：
 //   node scripts/copy-workflow-assets.mjs            拷贝（默认动作，幂等）
 //   node scripts/copy-workflow-assets.mjs --list     只列计划产物（dry-run，零写入）
-//   node scripts/copy-workflow-assets.mjs --check    校验内嵌副本与源一致（逐文件内容哈希比对，
-//                                                    任一文件内容漂移 → 退出码 1）
-//   node scripts/copy-workflow-assets.mjs --skill-dir <dir>   覆盖技能源（回退链见下）
-//   node scripts/copy-workflow-assets.mjs --awf <path>        覆盖 bin/awf 源（默认为 kit 仓库 bin/awf）
+//   node scripts/copy-workflow-assets.mjs --check    校验内嵌副本与源一致（逐文件内容哈希比对，漂移 → 退出码 1）
+//   node scripts/copy-workflow-assets.mjs --skill-dir <dir>   覆盖技能源根（缺省 = kit 仓库根）
+//   node scripts/copy-workflow-assets.mjs --awf <path>        覆盖 bin/awf 源（缺省 = kit 仓库 bin/awf）
 //   node scripts/copy-workflow-assets.mjs --no-cli            只拷技能库、不覆盖 bin/awf（排障用）
 //
-// 环境变量（脚本化测试 / CI 注入）：AWF_SKILL_SOURCE（技能源）、AWF_AWF_SOURCE（bin/awf 源）、
+// 环境变量（脚本化测试 / CI 注入）：AWF_SKILL_SOURCE（技能源根）、AWF_AWF_SOURCE（bin/awf 源）、
 // AWF_DEST_ROOT（副本目标根，缺省为插件根）。
 //
-// 技能源解析回退链：--skill-dir > AWF_SKILL_SOURCE 环境变量 > 全局技能库实体
-//   ~/.dsh/skills/agent-workflow-scaffold > kit 仓库 skills/agent-workflow-scaffold；
-//   全部缺失 → 报错退出（提示先装技能或传 --skill-dir）。
+// 技能源解析：--skill-dir > AWF_SKILL_SOURCE 环境变量 > kit 仓库根（内含 SKILL.md 即认定）。
+//   源目录按白名单收集：SKILL.md + skills/<name>/（平铺到 skill/<name>/）+ templates/ + test/；
+//   bin/awf 一律以 --awf / AWF_AWF_SOURCE / kit 仓库 bin/awf 为准（不在拷贝后覆盖）。
+//   仓库根 .agent-teams/、dispatch/ 等运行/文档目录天然不在白名单，不会被误内嵌。
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { homedir } from 'node:os'
 
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const KIT_ROOT = resolve(PLUGIN_ROOT, '..')
-const DEFAULT_SKILL_ENTITY = join(homedir(), '.dsh', 'skills', 'agent-workflow-scaffold')
-const DEFAULT_SKILL_IN_KIT = join(KIT_ROOT, 'skills', 'agent-workflow-scaffold')
 const DEFAULT_AWF_IN_KIT = join(KIT_ROOT, 'bin', 'awf')
-const EMBEDDED_DIR = 'skill/agent-workflow-scaffold'
 
-/** 副本目标根：AWF_DEST_ROOT（脚本化测试注入）> 默认插件根。 */
-const destRootOf = () => (process.env.AWF_DEST_ROOT ? resolve(process.env.AWF_DEST_ROOT) : PLUGIN_ROOT)
-const manifestFile = (destRoot) => join(destRoot, 'skill', 'manifest.json')
+// 副本区（平铺）：框架技能目录 + manifest 同放在 skill/ 下
+const SKILL_AREA = 'skill'
+const FRAMEWORK_DIR = SKILL_AREA + '/agent-workflow-scaffold'
 
 // 拷贝排除项：版本目录 / 构建缓存 / 平台杂物（git 元数据不入包）
 const EXCLUDE_NAMES = new Set(['.git', 'node_modules', '__pycache__', '.DS_Store'])
@@ -50,6 +49,9 @@ const SKIP = (name) => EXCLUDE_NAMES.has(name) || name.endsWith('.pyc')
 
 const say = (...a) => console.log(...a)
 const fail = (...a) => { console.error('FAIL  ' + a.join(' ')); process.exit(1) }
+
+const destRootOf = () => (process.env.AWF_DEST_ROOT ? resolve(process.env.AWF_DEST_ROOT) : PLUGIN_ROOT)
+const manifestFile = (destRoot) => join(destRoot, SKILL_AREA, 'manifest.json')
 
 /** 递归收集目录下应打包的相对路径（应用 SKIP 排除规则）。 */
 async function walkFiles(dir, base) {
@@ -74,6 +76,14 @@ async function readVer(file) {
   try { return (String(await readFile(file, 'utf8')).trim()) || null } catch { return null }
 }
 
+/** 插件 package.json 版本（分发版本唯一信号）。 */
+async function readPluginVersion() {
+  try {
+    const pkg = JSON.parse(String(await readFile(join(PLUGIN_ROOT, 'package.json'), 'utf8')))
+    return pkg.version || null
+  } catch { return null }
+}
+
 /** 提取 bin/awf 的 dispatch 分支清单（`<cmd>) cmd_xxx` 形态；log/validate 落地后自动出现）。 */
 function awfCommands(awfText) {
   const seen = new Set()
@@ -94,154 +104,203 @@ function parseArgs(argv) {
     else if (a === '--awf') o.awf = argv[++i]
     else if (a === '--no-cli') o.cli = false
     else if (a === '--help' || a === '-h') { o.action = 'help' }
-    else fail('未知参数：' + a + '（--list / --check / --skill-dir <dir> / --awf <path> / --no-cli）')
+    else fail('未知参数：' + a + '（--list / --check / --copy / --skill-dir <dir> / --awf <path> / --no-cli）')
   }
   return o
 }
 
-async function resolveSources(o) {
-  // 技能源：--skill-dir > AWF_SKILL_SOURCE 环境变量 > 全局实体 > kit 仓库目录
-  let skillSource = null
-  const candidates = [o.skillDir, process.env.AWF_SKILL_SOURCE, DEFAULT_SKILL_ENTITY, DEFAULT_SKILL_IN_KIT]
+/** 技能源根：--skill-dir > AWF_SKILL_SOURCE > kit 仓库根；源目录需含 SKILL.md。 */
+async function resolveSkillRoot(o) {
+  const candidates = [o.skillDir, process.env.AWF_SKILL_SOURCE, KIT_ROOT]
   for (const c of candidates) {
     if (!c) continue
     const abs = resolve(process.cwd(), c)
-    try { if ((await stat(abs)).isDirectory()) { skillSource = abs; break } } catch { /* 继续回退 */ }
+    try {
+      const st = await stat(abs)
+      if (!st.isDirectory()) continue
+      await stat(join(abs, 'SKILL.md'))
+      return abs
+    } catch { /* 继续回退 */ }
   }
-  if (!skillSource) {
-    fail('找不到技能源：请先安装技能（~/.dsh/skills/agent-workflow-scaffold）或传 --skill-dir <dir>')
-  }
-  // bin/awf 源：--awf > AWF_AWF_SOURCE 环境变量 > kit 仓库 bin/awf（t1 的 CLI 落地点）
+  fail('找不到技能源：请传 --skill-dir（含 SKILL.md 的目录）或设置 AWF_SKILL_SOURCE')
+}
+
+/** bin/awf 源：--awf > AWF_AWF_SOURCE > kit 仓库 bin/awf。 */
+async function resolveAwfSource(o) {
   const awfOverride = o.awf || process.env.AWF_AWF_SOURCE
   const awfSource = awfOverride ? resolve(process.cwd(), awfOverride) : DEFAULT_AWF_IN_KIT
   try { if (!(await stat(awfSource)).isFile()) throw new Error('not a file') }
-  catch { fail('找不到 bin/awf 源：' + awfSource + '（t1 的 awf log/validate 落地后此处即最新形态）') }
-  return { skillSource, awfSource }
+  catch { fail('找不到 bin/awf 源：' + awfSource) }
+  return awfSource
 }
 
-/** 计算「源 → 副本」完整产物清单（--list 预览 / --copy 写入 / --check 对照基准）。
- *  files 为每个文件记录 sha256（内容漂移检测：--check 逐文件比对哈希）。 */
-async function computeManifest({ skillSource, awfSource, cli }) {
-  const skillFiles = await walkFiles(skillSource, skillSource)
-  const awfBuf = cli ? await readFile(awfSource) : null
-  const files = []
-  for (const rel of skillFiles) {
-    const buf = await readFile(join(skillSource, rel))
-    files.push({
-      path: EMBEDDED_DIR + '/' + rel,
-      bytes: buf.length,
-      sha256: createHash('sha256').update(buf).digest('hex'),
-    })
+/**
+ * 计算「源 → 副本」完整产物清单（--list 预览 / --copy 写入 / --check 对照基准）。
+ * 产物路径相对副本区根（skill/）：框架技能固定 agent-workflow-scaffold/，
+ * 流程技能来自源 skills/<name>/，平铺为 <name>/（DEV-217 不嵌套）。
+ */
+async function computePlan({ skillRoot, awfSource, cli }) {
+  // 框架技能：SKILL.md + templates/ + test/（bin/ 由 CLI 源覆盖，这里不收集）
+  const frameworkRel = []
+  await stat(join(skillRoot, 'SKILL.md'))
+  frameworkRel.push('SKILL.md')
+  for (const sub of ['templates', 'test']) {
+    try {
+      if ((await stat(join(skillRoot, sub))).isDirectory()) {
+        for (const rel of await walkFiles(join(skillRoot, sub), skillRoot)) frameworkRel.push(rel)
+      }
+    } catch { /* 允许缺失（最小源） */ }
   }
+  // 流程技能：源 skills/<name>/ → 平铺 <name>/
+  const skills = []
+  let skillSourceNames = []
+  try {
+    const entries = await readdir(join(skillRoot, 'skills'), { withFileTypes: true })
+    skillSourceNames = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort()
+  } catch { /* 无 skills/（最小源） */ }
+
+  const files = []
+  for (const rel of frameworkRel.sort()) {
+    const buf = await readFile(join(skillRoot, rel))
+    files.push({ path: FRAMEWORK_DIR + '/' + rel, bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex') })
+  }
+  for (const name of skillSourceNames) {
+    skills.push(name)
+    for (const rel of await walkFiles(join(skillRoot, 'skills', name), join(skillRoot, 'skills', name))) {
+      const buf = await readFile(join(skillRoot, 'skills', name, rel))
+      files.push({ path: SKILL_AREA + '/' + name + '/' + rel, bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex') })
+    }
+  }
+
+  const awfBuf = cli ? await readFile(awfSource) : null
+  // CLI 副本路径固定进框架技能 bin/
+  if (cli && awfBuf) {
+    files.push({ path: FRAMEWORK_DIR + '/bin/awf', bytes: awfBuf.length, sha256: createHash('sha256').update(awfBuf).digest('hex') })
+  }
+
   return {
     generatedAt: new Date().toISOString(),
-    pluginRoot: PLUGIN_ROOT,
-    skillSource,
-    awfSource,
-    skillVersion: await readVer(join(skillSource, 'VERSION')),
-    frameworkVersion: await readVer(join(skillSource, 'FRAMEWORK_VERSION')),
+    source: {
+      kit: 'agent-workflow-kit',
+      sourceDir: relative(PLUGIN_ROOT, skillRoot) || '..',
+      version: await readPluginVersion(),                       // 插件/分发版本（package.json）
+      frameworkVersion: await readVer(join(skillRoot, 'templates', 'FRAMEWORK_VERSION')), // 骨架版（模板内）
+    },
     awf: cli && awfBuf
       ? {
-          path: relative(PLUGIN_ROOT, awfSource),
+          // 源码路径固定为仓库内路径（不写死本机绝对路径，DEV-217 分发可复现）
+          path: 'bin/awf',
           sha256: createHash('sha256').update(awfBuf).digest('hex'),
           bytes: awfBuf.length,
           commands: awfCommands(awfBuf.toString('utf8')),
         }
       : null,
-    files,
+    skills,            // 平铺的流程技能目录名（不含框架技能）
+    files: files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
   }
 }
 
 async function printManifest(m) {
-  say('== 内嵌技能/CLI 副本产物清单（单源双形态）==')
-  say('技能源     ：' + m.skillSource + (m.skillVersion ? '（VERSION ' + m.skillVersion + '）' : '') +
-    (m.frameworkVersion ? '（FRAMEWORK_VERSION ' + m.frameworkVersion + '）' : ''))
+  say('== 内嵌技能/CLI 副本产物清单（单源双形态 · 平铺）==')
+  say('技能源     ：kit 仓库（' + m.source.sourceDir + '）')
+  say('插件版本　 ：' + (m.source.version || '(未知)') + '（package.json）')
+  say('骨架版本　 ：' + (m.source.frameworkVersion || '(无)') + '（templates/FRAMEWORK_VERSION）')
   if (m.awf) {
-    say('bin/awf 源 ：' + m.awfSource)
+    say('bin/awf 源 ：kit 仓库 bin/awf')
     say('  sha256    ：' + m.awf.sha256)
     say('  字节数    ：' + m.awf.bytes)
     say('  子命令    ：' + (m.awf.commands.join(' / ') || '（未识别到 cmd_ dispatch 分支）'))
   } else {
     say('bin/awf 源 ：（--no-cli，本次不覆盖 CLI 副本）')
   }
+  say('布局       ：' + SKILL_AREA + '/agent-workflow-scaffold/（框架）+ ' + (m.skills.length ? m.skills.join(' / ') : '（无流程技能）') + '（平铺）')
   say('共 ' + m.files.length + ' 个文件：')
   for (const f of m.files) say('  ' + f.path)
 }
 
 async function actionList(o, destRoot) {
-  const src = await resolveSources(o)
-  const m = await computeManifest({ ...src, cli: o.cli })
-  await printManifest(m) // 零写入：只打印计划产物
+  const skillRoot = await resolveSkillRoot(o)
+  const awfSource = await resolveAwfSource(o)
+  await printManifest(await computePlan({ skillRoot, awfSource, cli: o.cli })) // 零写入
 }
 
 async function actionCopy(o, destRoot) {
-  const src = await resolveSources(o)
-  const m = await computeManifest({ ...src, cli: o.cli })
-  const destScaffold = join(destRoot, EMBEDDED_DIR)
-  // 只清空副本区（skill/agent-workflow-scaffold + manifest），绝不触碰插件其他内容
-  await rm(destScaffold, { recursive: true, force: true })
-  await rm(manifestFile(destRoot), { force: true })
-  await mkdir(dirname(destScaffold), { recursive: true })
-  // 技能库整体复制（过滤 git/构建缓存等）
-  await cp(src.skillSource, destScaffold, { recursive: true, filter: (s) => !SKIP(basename(s)) })
+  const skillRoot = await resolveSkillRoot(o)
+  const awfSource = await resolveAwfSource(o)
+  const m = await computePlan({ skillRoot, awfSource, cli: o.cli })
+  const area = join(destRoot, SKILL_AREA)
+  // 只清空副本区（skill/ 下的框架技能 + 平铺流程技能 + manifest），绝不触碰插件其他内容
+  await rm(area, { recursive: true, force: true })
+  await mkdir(join(destRoot, FRAMEWORK_DIR), { recursive: true })
+
+  // 框架技能：SKILL.md / templates / test（复制白名单；过滤 git/构建缓存）
+  await cp(join(skillRoot, 'SKILL.md'), join(destRoot, FRAMEWORK_DIR, 'SKILL.md'))
+  for (const sub of ['templates', 'test']) {
+    try {
+      if ((await stat(join(skillRoot, sub))).isDirectory()) {
+        await cp(join(skillRoot, sub), join(destRoot, FRAMEWORK_DIR, sub), { recursive: true, filter: (s) => !SKIP(basename(s)) })
+      }
+    } catch { /* 最小源允许缺失 */ }
+  }
+  // 流程技能：逐目录平铺到 skill/<name>/（与框架技能同级）
+  for (const name of m.skills) {
+    await cp(join(skillRoot, 'skills', name), join(destRoot, SKILL_AREA, name), { recursive: true, filter: (s) => !SKIP(basename(s)) })
+  }
+  // CLI 单源覆盖：bin/awf 一律以 kit 仓库源为准（含 log/validate）
   if (o.cli) {
-    // CLI 单源覆盖：bin/awf 一律以 kit 仓库源为准（含 t1 落地的 log/validate）
-    await mkdir(join(destScaffold, 'bin'), { recursive: true })
-    await cp(src.awfSource, join(destScaffold, 'bin', 'awf'))
+    await mkdir(join(destRoot, FRAMEWORK_DIR, 'bin'), { recursive: true })
+    await cp(awfSource, join(destRoot, FRAMEWORK_DIR, 'bin', 'awf'))
   }
   await writeFile(manifestFile(destRoot), JSON.stringify(m, null, 2) + '\n', 'utf8')
   await printManifest(m)
-  say('已写入内嵌副本：' + destScaffold + ' + ' + relative(destRoot, manifestFile(destRoot)))
-  say('打包即随插件分发（package.json files 含 "skill"）；bin/awf 更新后重跑本脚本刷新。')
+  say('已写入内嵌副本：' + relative(destRoot, area) + '/（平铺）+ manifest.json')
+  say('打包即随插件分发（package.json files 含 "skill"）；改源后重跑本脚本刷新。')
 }
 
-/** 校对当前源与内嵌副本（文件清单 + 逐文件内容哈希 + bin/awf sha + 版本文件）；漂移 → exit 1。 */
+/** 校对当前源与内嵌副本（清单 + 逐文件 sha256 + CLI sha + 版本契约）；漂移 → exit 1。 */
 async function actionCheck(o, destRoot) {
   const mf = manifestFile(destRoot)
   let manifest
   try { manifest = JSON.parse(await readFile(mf, 'utf8')) }
   catch { fail('缺少产物清单 ' + relative(destRoot, mf) + '：先运行 node scripts/copy-workflow-assets.mjs（--copy）') }
-  const src = await resolveSources(o)
-  const current = await computeManifest({ ...src, cli: o.cli })
-  const destScaffold = join(destRoot, EMBEDDED_DIR)
-  const issues = []
-  const rootPath = (p) => join(destRoot, p)
-  const have = (p) => stat(rootPath(p)).then(() => true).catch(() => false)
+  const skillRoot = await resolveSkillRoot(o)
+  const awfSource = await resolveAwfSource(o)
+  const current = await computePlan({ skillRoot, awfSource, cli: o.cli })
 
-  // 1) 文件清单：内嵌副本 vs 当前源（多/少/变更文件列出路径）
-  const embeddedNow = (await walkFiles(destScaffold, destScaffold).catch(() => [])).map((r) => EMBEDDED_DIR + '/' + r).sort()
-  const want = current.files.map((f) => f.path)
+  const issues = []
+  const absOf = (p) => join(destRoot, p)
+  const have = async (p) => { try { await stat(absOf(p)); return true } catch { return false } }
+
+  // 1) 文件清单：内嵌副本（walk skill/，排除 manifest.json）vs 当前源
+  const embeddedNow = (await walkFiles(join(destRoot, SKILL_AREA), join(destRoot, SKILL_AREA)).catch(() => []))
+    .map((r) => SKILL_AREA + '/' + r)
+    .filter((p) => p !== SKILL_AREA + '/manifest.json')
+    .sort()
+  const want = current.files.map((f) => f.path).sort()
   for (const p of want) if (!embeddedNow.includes(p)) issues.push('缺失文件：' + p)
   for (const p of embeddedNow) if (!want.includes(p)) issues.push('多余文件（源已移除）：' + p)
 
-  // 2) 逐文件内容哈希比对（manifest.files 记录的 sha256 vs 内嵌副本实际内容；
-  //    内容漂移（任一非 CLI 文件被改）→ 检出并退出 1）
-  const cliPath = EMBEDDED_DIR + '/bin/awf'
+  // 2) 逐文件内容哈希比对（manifest.files 记录的 sha256 vs 副本实际内容）
   for (const f of current.files) {
-    if (o.cli && f.path === cliPath) continue // CLI 副本单独以 bin/awf 源（kit）比对
     let sha = null
-    try { sha = createHash('sha256').update(await readFile(rootPath(f.path))).digest('hex') } catch { /* 缺失已由清单比对报告 */ }
+    try { sha = createHash('sha256').update(await readFile(absOf(f.path))).digest('hex') } catch { /* 缺失已由清单比对报告 */ }
     if (sha !== null && sha !== f.sha256) issues.push('内容不一致：' + f.path + '（副本与源内容不同，重跑 --copy 刷新）')
   }
-  if (o.cli) {
-    if (!(await have(cliPath))) issues.push('缺失 CLI 副本：' + cliPath)
-    else {
-      const buf = await readFile(rootPath(cliPath))
-      const sha = createHash('sha256').update(buf).digest('hex')
-      if (sha !== current.awf.sha256) {
-        issues.push('CLI 副本与源不一致（bin/awf 已更新？重跑 --copy 刷新）')
-      }
-    }
+
+  // 3) 版本契约：manifest 记录的 version/frameworkVersion vs 当前（漂移提示重跑）
+  if (current.source.version !== manifest.source?.version) {
+    issues.push('插件版本漂移：清单 ' + (manifest.source?.version ?? '(无)') + ' vs 当前 package.json ' + current.source.version)
   }
-  // 3) 版本文件与清单一致
-  if (current.skillVersion !== manifest.skillVersion) issues.push('技能版本漂移：清单 ' + manifest.skillVersion + ' vs 源 ' + current.skillVersion)
-  if (current.frameworkVersion !== manifest.frameworkVersion) issues.push('骨架版本漂移：清单 ' + manifest.frameworkVersion + ' vs 源 ' + current.frameworkVersion)
+  if (current.source.frameworkVersion !== manifest.source?.frameworkVersion) {
+    issues.push('骨架版本漂移：清单 ' + (manifest.source?.frameworkVersion ?? '(无)') + ' vs 当前 templates/FRAMEWORK_VERSION ' + current.source.frameworkVersion)
+  }
 
   if (issues.length > 0) {
     for (const i of issues) console.error('DRIFT  ' + i)
     fail('发现 ' + issues.length + ' 处漂移，请运行 node scripts/copy-workflow-assets.mjs --copy 重新同步')
   }
-  say('副本一致：' + current.files.length + ' 个文件（逐文件 sha256 一致）、bin/awf sha256 ' + current.awf.sha256 + '、技能 ' + current.skillVersion + '（骨架 ' + current.frameworkVersion + '）')
+  say('副本一致：' + current.files.length + ' 个文件（逐文件 sha256 一致）、bin/awf sha256 ' + (current.awf ? current.awf.sha256 : '（--no-cli）') +
+    '、插件版本 ' + (current.source.version ?? '(未知)') + '、骨架版本 ' + (current.source.frameworkVersion ?? '(无)'))
 }
 
 async function main() {

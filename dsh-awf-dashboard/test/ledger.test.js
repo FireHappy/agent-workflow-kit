@@ -1,3 +1,12 @@
+// 插件分发版本（DEV-217 版本契约：唯一信号 = 本插件 package.json version）
+const PLUGIN_PKG_VERSION = JSON.parse(
+  await (await import('node:fs/promises')).readFile(
+    (await import('node:path')).join(
+      (await import('node:path')).dirname(
+        (await import('node:path')).dirname(
+          (await import('node:url')).fileURLToPath(import.meta.url))), 'package.json'),
+    'utf8')).version
+
 
 // ---- DEV-132：readSource 带任务 id → 单任务文件详情（点已完成/当前任务不再开整桶索引） ----
 test('DEV-132 readSource dir：带 id 读单任务文件；不带 id 读桶 README', async () => {
@@ -711,15 +720,17 @@ async function writeAgentsIndex(agentsHome, kitPath) {
   ].join('\n') + '\n')
 }
 
-// kit 夹具：骨架版 1.0.0 / 技能版 1.4.1 / AWF 代次 2 / version_file → agent-workflow/VERSION。
+// kit 夹具：骨架版 = kit/templates/FRAMEWORK_VERSION 1.0.0 / AWF 代次 2（DEV-217：技能/分发版本
+// 来自插件 package.json，不再读 agent-workflow/VERSION；骨架版源 = 模板内）。
 async function writeKitFixture(kitPath) {
   const { mkdir, writeFile } = await import('node:fs/promises')
   const { join } = await import('node:path')
   await mkdir(join(kitPath, 'agent-workflow', 'bin'), { recursive: true })
+  await mkdir(join(kitPath, 'templates'), { recursive: true })
   await writeFile(join(kitPath, 'agent-workflow', 'project.yaml'),
     'id: agent-workflow-kit\nname: agent-workflow-kit\nversion_file: agent-workflow/VERSION\n')
-  await writeFile(join(kitPath, 'agent-workflow', 'FRAMEWORK_VERSION'), '1.0.0\n')
   await writeFile(join(kitPath, 'agent-workflow', 'VERSION'), '1.4.1\n')
+  await writeFile(join(kitPath, 'templates', 'FRAMEWORK_VERSION'), '1.0.0\n')
   await writeFile(join(kitPath, 'agent-workflow', 'bin', 'awf'), '#!/usr/bin/env bash\nAWF_VERSION=2\n')
 }
 
@@ -761,20 +772,20 @@ test('DEV-205 versionStatus 骨架链：骨架落后 → outdated（upgradeTo=v�
   assert.equal(vs.installed, 'v0.9.0')
   assert.equal(vs.installedFramework, 'v0.9.0')
   assert.equal(vs.latestFramework, 'v1.0.0')
-  assert.equal(vs.skillVersion, 'v1.4.1')
+  assert.equal(vs.skillVersion, 'v' + PLUGIN_PKG_VERSION)
   assert.equal(vs.installedRelease, '5.5.5')
 })
 
 test('DEV-205 versionStatus 骨架链：骨架相同 → latest（技能更新不触发 outdated）', async () => {
   const { versionStatus } = await import('../lib/index.js')
-  // 骨架相同 1.0.0；项目发布版 1.3.9 落后于 kit 技能版 1.4.1 —— 技能差量不判 outdated
+  // 骨架相同 1.0.0；项目发布版 1.3.9 落后于插件分发版 1.6.0 —— 技能差量不判 outdated
   const projPath = join(awfAgentsHome, 'proj-same')
   await writeProjectFixture(projPath, { framework: '1.0.0', release: '1.3.9', awf: 2 })
   const vs = await versionStatus(projPath)
   assert.equal(vs.status, 'latest')
   assert.equal(vs.upgradeTo, null)
   assert.equal(vs.installed, 'v1.0.0')
-  assert.equal(vs.skillVersion, 'v1.4.1')
+  assert.equal(vs.skillVersion, 'v' + PLUGIN_PKG_VERSION)
 })
 
 test('DEV-205 versionStatus 回退链 1：无骨架版 → AWF 代次落后判 outdated（提示骨架版本迁移补写）', async () => {
@@ -787,7 +798,7 @@ test('DEV-205 versionStatus 回退链 1：无骨架版 → AWF 代次落后判 o
   assert.match(vs.upgradeTo, /v2（骨架契约升级；骨架版本迁移，awf upgrade 补写）/)
   assert.equal(vs.latestFramework, 'v1.0.0')
   assert.equal(vs.installedFramework, null)
-  assert.equal(vs.skillVersion, 'v1.4.1')
+  assert.equal(vs.skillVersion, 'v' + PLUGIN_PKG_VERSION)
   // AWF 代次相同 → latest
   const projPath2 = join(awfAgentsHome, 'proj-awf2')
   await writeProjectFixture(projPath2, { awf: 2 })
@@ -797,29 +808,33 @@ test('DEV-205 versionStatus 回退链 1：无骨架版 → AWF 代次落后判 o
 
 test('DEV-205 versionStatus 回退链 2：无骨架版 + 无 AWF 代次 → 发布版 semver 判定（outdated 带迁移提示）', async () => {
   const { versionStatus } = await import('../lib/index.js')
-  // 无 FRAMEWORK_VERSION、无 bin/awf，发布版 0.5.0 < kit 1.4.1 → 回退链 2 判 outdated
+  // 无 FRAMEWORK_VERSION、无 bin/awf，发布版 0.5.0 < 插件分发版 1.6.0 → 回退链 2 判 outdated
   const projPath = join(awfAgentsHome, 'proj-rel')
   await writeProjectFixture(projPath, { release: '0.5.0' })
   const vs = await versionStatus(projPath)
   assert.equal(vs.status, 'outdated')
-  assert.equal(vs.upgradeTo, '1.4.1（骨架版本迁移，awf upgrade 补写）')
+  assert.equal(vs.upgradeTo, PLUGIN_PKG_VERSION + '（骨架版本迁移，awf upgrade 补写）')
   assert.equal(vs.installed, 'v0.5.0')
 })
 
-test('DEV-206 kitVersions 技能实体优先：实体 VERSION/FRAMEWORK_VERSION/bin/awf 优先于 kit 仓库', async () => {
+test('DEV-217 kitVersions：插件版本=package.json；骨架版=模板（实体 templates 优先于 kit 仓库）', async () => {
   const { mkdir, writeFile } = await import('node:fs/promises')
   const { join } = await import('node:path')
-  // 在受控 DSH_HOME 下构造技能实体：技能版 2.5.0 / 骨架版 2.0.0 / AWF 代次 3（kit 夹具为 1.4.1/1.0.0/2）
+  // 在受控 DSH_HOME 下构造技能实体：模板骨架版 2.0.0 / AWF 代次 3（kit 夹具模板为 1.0.0/2）
+  // DEV-217：实体根 VERSION 不再被读（分发版本 = 插件 package.json）。
   const entityDir = join(awfDshHome, 'skills', 'agent-workflow-scaffold')
   await mkdir(join(entityDir, 'bin'), { recursive: true })
-  await writeFile(join(entityDir, 'VERSION'), '2.5.0\n')
-  await writeFile(join(entityDir, 'FRAMEWORK_VERSION'), '2.0.0\n')
+  await mkdir(join(entityDir, 'templates'), { recursive: true })
+  await writeFile(join(entityDir, 'templates', 'FRAMEWORK_VERSION'), '2.0.0\n')
   await writeFile(join(entityDir, 'bin', 'awf'), '#!/usr/bin/env bash\nAWF_VERSION=3\n')
   const { kitVersions } = await import('../lib/index.js')
+  // 插件分发版本 = 本插件 package.json version（DEV-217 唯一信号）
+  const pkgVersion = JSON.parse(await (await import('node:fs/promises')).readFile(
+    join((await import('node:path')).dirname((await import('node:path')).dirname((await import('node:url')).fileURLToPath(import.meta.url))), 'package.json'), 'utf8')).version
   const k = await kitVersions()
-  assert.equal(k.skillVersion, '2.5.0')       // 实体优先（kit 夹具 1.4.1 被忽略）
-  assert.equal(k.latestFramework, '2.0.0')    // 实体优先（kit 夹具 1.0.0 被忽略）
-  assert.equal(k.latestRelease, '2.5.0')
+  assert.equal(k.skillVersion, pkgVersion) // 插件 package.json
+  assert.equal(k.latestFramework, '2.0.0')    // 实体 templates 优先（kit 夹具 1.0.0 被忽略）
+  assert.equal(k.latestRelease, k.skillVersion)
   assert.equal(k.latestAWF, 3)                // 实体 bin/awf 代次优先
   assert.equal(k.kitPath, awfKitPath)         // kit 回退路径仍带出
   // versionStatus 联动：项目骨架 1.0.0 < 实体 2.0.0 → outdated，升级目标 = 实体骨架版
@@ -829,7 +844,7 @@ test('DEV-206 kitVersions 技能实体优先：实体 VERSION/FRAMEWORK_VERSION/
   const vs = await versionStatus(projPath)
   assert.equal(vs.status, 'outdated')
   assert.equal(vs.upgradeTo, 'v2.0.0（骨架升级）')
-  assert.equal(vs.skillVersion, 'v2.5.0')
+  assert.equal(vs.skillVersion, 'v' + pkgVersion)
   assert.equal(vs.latestFramework, 'v2.0.0')
 })
 

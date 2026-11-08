@@ -55,9 +55,16 @@ test('DEV-216 copy-workflow-assets：manifest 每文件 sha256 + 非 CLI 文件�
     const c = runCli(['--copy'], env)
     assert.equal(c.status, 0, '--copy 应成功：' + c.stdout + c.stderr)
 
-    // manifest.files 每个文件记录 sha256（64 位 hex）与字节数
+    // manifest.files 每个文件记录 sha256（64 位 hex）与字节数；最小源 = SKILL.md + CLI 副本（DEV-217 平铺布局）
     const manifest = JSON.parse(await readFile(join(dest, 'skill', 'manifest.json'), 'utf8'))
-    assert.ok(Array.isArray(manifest.files) && manifest.files.length >= 4, 'files 至少含 VERSION/FRAMEWORK_VERSION/SKILL.md/bin/awf')
+    assert.ok(Array.isArray(manifest.files) && manifest.files.length >= 2, 'files 至少含 SKILL.md 与 bin/awf')
+    const paths = manifest.files.map((f) => f.path)
+    assert.ok(paths.includes('skill/agent-workflow-scaffold/SKILL.md'), '应内嵌框架技能 SKILL.md：' + paths)
+    assert.ok(paths.includes('skill/agent-workflow-scaffold/bin/awf'), '应内嵌 CLI 副本 bin/awf：' + paths)
+    // 版本契约（DEV-217）：分发版本 = 插件 package.json；骨架版 = 模板内（最小源无模板 → null）
+    assert.ok(manifest.source && typeof manifest.source.version === 'string', 'manifest.source.version 应记录插件版本')
+    const pluginPkg = JSON.parse(await readFile(join(pluginRoot, 'package.json'), 'utf8'))
+    assert.equal(manifest.source.version, pluginPkg.version, 'manifest.source.version 应等于插件 package.json version')
     for (const f of manifest.files) {
       assert.ok(typeof f.sha256 === 'string' && /^[0-9a-f]{64}$/.test(f.sha256),
         f.path + ' 应记录 sha256（实际：' + f.sha256 + '）')

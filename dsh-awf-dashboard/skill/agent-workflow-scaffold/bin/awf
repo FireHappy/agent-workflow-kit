@@ -777,12 +777,12 @@ cmd_init() {
            "$target/agent-workflow/bin" \
            "$target/agent-workflow/templates"
 
-  # DEV-205 双版本模型：init 登记当前骨架版本（固定路径 agent-workflow/FRAMEWORK_VERSION）。
-  # 源 = 技能实体（安装后的唯一事实源），未安装回退 kit 仓库。技能版本（VERSION）由发版
-  # 流程维护，init 不写——骨架版与技能版解耦，技能更新不需项目升级。
+  # DEV-205 双版本模型 / DEV-217 版本契约：init 登记当前骨架版本（固定路径 agent-workflow/FRAMEWORK_VERSION）。
+  # 源 = 模板内 templates/FRAMEWORK_VERSION（技能实体优先，未安装回退 kit 仓库）；骨架版与模板同源，
+  # 模板变更才 bump。插件/分发版本由 dsh-awf-dashboard/package.json 维护，init 不写。
   local kff_src
-  kff_src="$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION"
-  [ -f "$kff_src" ] || kff_src="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
+  kff_src="$HOME/.dsh/skills/agent-workflow-scaffold/templates/FRAMEWORK_VERSION"
+  [ -f "$kff_src" ] || kff_src="$KIT_DIR/templates/FRAMEWORK_VERSION"
   if [ -f "$kff_src" ]; then
     cp "$kff_src" "$target/agent-workflow/FRAMEWORK_VERSION"
   fi
@@ -1746,8 +1746,8 @@ cmd_upgrade() {
   # 发生在技能实体（install.sh 重装），无需项目升级。骨架源读技能实体（安装后的唯一
   # 事实源），未安装时回退 kit 仓库 agent-workflow/FRAMEWORK_VERSION。
   local KFF cur_kff
-  KFF="$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION"
-  [ -f "$KFF" ] || KFF="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
+  KFF="$HOME/.dsh/skills/agent-workflow-scaffold/templates/FRAMEWORK_VERSION"
+  [ -f "$KFF" ] || KFF="$KIT_DIR/templates/FRAMEWORK_VERSION"
   cur_kff="$(project_framework_version "$target")"
 
   # 骨架已最新：dry-run 与执行均跳过（不复制、不写锚点、不跑 bootstrap/check）；--force 强刷

@@ -11,12 +11,11 @@
 | dev | DEV-194 | P1 | active | lead | 派发 v1.4.0 升级至全部登记项目（10 目标） |
 | dev | DEV-196 | P1 | blocked | lead | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） |
 | dev | DEV-201 | P1 | blocked | lead | 派发打包任务至 rokid_system_components（用户直派） |
+| dev | DEV-217 | P2 | review | lead | 插件技能副本源收敛:copy 以仓库/发布 tag 为源(技能分发独立化) |
 
 ## 待处理
 
-| 工作流 | 任务ID | 优先级 | 描述 | 登记日期 |
-|--------|--------|--------|------|----------|
-| dev | DEV-217 | P2 | 插件技能副本源收敛:copy 以仓库/发布 tag 为源(技能分发独立化) | 2026-11-08 |
+（无）
 
 ## 最近完成
 
@@ -31,5 +30,5 @@
 | dev | DEV-204 | P1 | 发布 v1.4.1（派发技能自包含 + 测试对齐 + 编号清理批次） | 2026-11-07 |
 | dev | DEV-205 | P1 | 双版本模型：Skill-Version（技能版本）+ Framework-Version（骨架版本）解耦 | 2026-11-07 |
 
-*最后更新：2026-11-08 14:20*
+*最后更新：2026-11-08 14:40*
 <!-- awf:status:end -->

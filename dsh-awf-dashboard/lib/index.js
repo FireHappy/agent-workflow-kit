@@ -44,7 +44,8 @@
 //                         插件只注入 + 监听版本文件/账本变化。code: up-to-date(409) / path-not-allowed
 // 白名单：path 必须绝对路径，且在全局索引（~/.agents/AGENTS.md readIndex）项目路径内，
 //         或等于客户端上报的当前工作区根 workspaceRoot。
-import { join, isAbsolute, resolve } from 'node:path'
+import { join, dirname, isAbsolute, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { readFile, stat, writeFile, mkdir } from 'node:fs/promises'
 import { watch } from 'node:fs'
@@ -63,6 +64,9 @@ import {
 // DEV-039：宿主 ctx.agents.create() 服务端子代理最小拉起骨架（t1 POC，mock 契约测试锁定）
 import { probeAgentsService } from '../src/agents-poc.js'
 import { runManagedActionAgent } from '../src/managed-action-agent.js'
+
+/** 插件根（版本契约：插件/分发版本读本包 package.json，DEV-217）。 */
+const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 export const inject = ['webServer', 'connection']
 
@@ -293,7 +297,7 @@ function skillEntityDir() {
   return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skills', 'agent-workflow-scaffold')
 }
 
-/** 读技能实体根版本文件（VERSION / FRAMEWORK_VERSION）；不存在/空 → null。 */
+/** 读技能实体根版本文件（相对实体根的路径）；不存在/空 → null。 */
 async function readEntityVersionFile(name) {
   try {
     const v = String(await readFile(join(skillEntityDir(), name), 'utf8')).trim()
@@ -301,33 +305,39 @@ async function readEntityVersionFile(name) {
   } catch { return null }
 }
 
+/** 插件/分发版本（DEV-217 唯一信号）：读本插件 package.json 的 version。 */
+async function readPluginVersion() {
+  try {
+    const pkg = JSON.parse(String(await readFile(join(PLUGIN_ROOT, 'package.json'), 'utf8')))
+    return pkg.version || null
+  } catch { return null }
+}
+
 /**
- * kit 侧最新版本信号（双版本模型 DEV-205 + DEV-206 技能实体优先）：
- *   - skillVersion    = 技能版本（插件显示；技能更新不触发项目 outdated）——技能实体根 VERSION 优先，回退 kit agent-workflow/VERSION
- *   - latestFramework = 骨架版本（upgrade/outdated 判定依据）——技能实体根 FRAMEWORK_VERSION 优先，回退 kit agent-workflow/FRAMEWORK_VERSION
- *   - latestRelease   = 最新发布版（旧 client 兼容字段）——取 skillVersion，再回退 kit 自身 version_file
+ * kit 侧最新版本信号（DEV-205 双版本模型 / DEV-217 版本契约）：
+ *   - skillVersion    = 插件/分发版本——读插件 package.json，唯一信号（不再读技能实体 VERSION）
+ *   - latestFramework = 骨架版本（upgrade/outdated 判定依据）——技能实体 templates/FRAMEWORK_VERSION 优先，
+ *                       回退 kit templates/FRAMEWORK_VERSION（与模板同源：模板变更才 bump）
+ *   - latestRelease   = 最新发布版（旧 client 兼容字段）——取 skillVersion
  *   - latestAWF       = 骨架契约代次（旧信号，回退链兼容）——技能实体 bin/awf 优先，回退 kit agent-workflow/bin/awf
- * 技能实体未安装/不可读时逐字段回退 kit 仓库；两者都不可读时对应字段为 null
- * （实体存在时 kit 未登记也能正确显示技能/骨架版本）。
+ * 技能实体未安装/不可读时骨架版回退 kit 仓库；两者都不可读时为 null。
  */
 async function kitVersions() {
   const kit = await findKitProject()
-  // DEV-206：实体优先（安装后的唯一事实源，与 bin/awf upgrade KFF/KVF 同构）
-  let skillVersion = await readEntityVersionFile('VERSION')
-  let latestFramework = await readEntityVersionFile('FRAMEWORK_VERSION')
+  // DEV-217：插件版本 = package.json（唯一分发信号），骨架版 = 模板内
+  const skillVersion = await readPluginVersion()
+  let latestFramework = await readEntityVersionFile('templates/FRAMEWORK_VERSION')
   let latestAWF = null
   try {
     latestAWF = parseAWFVersion(String(await readFile(join(skillEntityDir(), 'bin', 'awf'), 'utf8')))
   } catch { /* 实体无 bin/awf → 走 kit 回退 */ }
-  // kit 仓库回退（实体未安装/不可读时）
-  if (skillVersion === null && kit) {
+  if (latestFramework === null && kit) {
     try {
-      skillVersion = String(await readFile(join(kit.path, 'agent-workflow', 'VERSION'), 'utf8')).trim() || null
+      latestFramework = String(await readFile(join(kit.path, 'templates', 'FRAMEWORK_VERSION'), 'utf8')).trim() || null
     } catch { /* 读不到 → null */ }
   }
-  if (latestFramework === null && kit) latestFramework = await readProjectFrameworkVersion(kit.path)
   if (latestAWF === null && kit) latestAWF = await readProjectAWFVersion(kit.path)
-  const latestRelease = skillVersion || (kit ? await readProjectRelease(kit.path) : null)
+  const latestRelease = skillVersion
   return { kitPath: (kit && kit.path) || null, latestAWF, latestRelease, latestFramework, skillVersion }
 }
 

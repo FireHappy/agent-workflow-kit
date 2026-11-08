@@ -40,11 +40,11 @@ install_skill() {
     # kit 的 docs/ 是项目文档（design/arch-review），不进技能（DEV-191）。
     mkdir -p "$dest"
     cp "$src/SKILL.md" "$dest/SKILL.md"
-    # 技能版本锚点：主技能的版本 = 仓库 agent-workflow/VERSION（脚手架自身版本），落到实体根 VERSION
-    [ -f "$src/agent-workflow/VERSION" ] && cp "$src/agent-workflow/VERSION" "$dest/VERSION"
-    # DEV-205 双版本模型：骨架版本同步到实体根（awf upgrade 判定与插件 outdated 消费的源）；
-    # install_skill 被 skills/*/ 循环调用，子技能缺该文件必须跳过不报错
-    [ -f "$src/agent-workflow/FRAMEWORK_VERSION" ] && cp "$src/agent-workflow/FRAMEWORK_VERSION" "$dest/FRAMEWORK_VERSION"
+    # DEV-217 版本契约（清理版号）：实体不再写 VERSION / 根 FRAMEWORK_VERSION——
+    #   · 插件/分发版本 = 插件 dsh-awf-dashboard/package.json（插件唯一信号）；
+    #   · 骨架版本 = templates/FRAMEWORK_VERSION（模板内，随 templates/ 整体拷贝，见下方循环）。
+    # 清理旧版淘汰文件（幂等）：旧实体的版本文件不再被任何读点消费。
+    rm -f "$dest/VERSION" "$dest/FRAMEWORK_VERSION"
     for sub in skills bin templates test scripts; do
       [ -d "$src/$sub" ] && cp -R "$src/$sub" "$dest/$sub"
     done

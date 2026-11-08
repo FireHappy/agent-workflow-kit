@@ -99,6 +99,8 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 5. 提交一次本地 git commit（**禁止 push**）
 6. 由其他任务触发时，完成后回到来源任务继续
 
+改任务正文后按「收工三步」补一条 `awf log`（改正文 → 记一条 → 回读末行）；归档前完成最后一条记录（归档后 `awf log` 拒绝追加）。`### Execution Log` 只由 awf 追加，禁止手改。
+
 ---
 
 ## 必问用户
@@ -110,6 +112,7 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 ## 自检清单
 
 - [ ] 按状态机推进，每步更新任务块「状态 / 最近更新 / 下一步」
+- [ ] 收工三步：改正文 → `awf log` 记一条 → 回读末行；归档前完成最后一条记录（归档后只读）
 - [ ] 验证命令实际执行（compile/test），命令不可用写明 `验证阻塞：<原因>` 并置 blocked
 - [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
 
@@ -118,6 +121,7 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 - 未验证的判断写「待确认」，不写结论
 - 状态只写 active / blocked / review / verify / handoff；一个任务块只有一个 Owner
 - 归档后必须跑通过校验；status.md 由 awf status 刷新才算完成
+- 手改 `### Execution Log`：该节只由 `awf log` 追加，历史行不改写
 - 不自动 push、不改写历史
 
 ## 无技能环境兜底

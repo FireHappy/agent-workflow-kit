@@ -1,14 +1,15 @@
 {
-  "generatedAt": "2026-11-08T06:11:57.531Z",
-  "pluginRoot": "/Users/chenlin/Documents/GitHub/agent-workflow-kit/dsh-awf-dashboard",
-  "skillSource": "/Users/chenlin/.dsh/skills/agent-workflow-scaffold",
-  "awfSource": "/Users/chenlin/Documents/GitHub/agent-workflow-kit/bin/awf",
-  "skillVersion": "1.6.0",
-  "frameworkVersion": "1.5.0",
+  "generatedAt": "2026-11-08T06:39:07.285Z",
+  "source": {
+    "kit": "agent-workflow-kit",
+    "sourceDir": "..",
+    "version": "1.7.0",
+    "frameworkVersion": "1.5.0"
+  },
   "awf": {
-    "path": "../bin/awf",
-    "sha256": "8ec3d524401ed514a48fa4ca00cf1efed755449b466c2d2e340a2b13b971edc4",
-    "bytes": 104153,
+    "path": "bin/awf",
+    "sha256": "624e8fcbf347db359ac7c025b2c41b37a6f852209cab4860dad55ff36eb52f99",
+    "bytes": 104200,
     "commands": [
       "bootstrap",
       "check",
@@ -25,86 +26,41 @@
       "validate"
     ]
   },
+  "skills": [
+    "cross-project-dispatch",
+    "debug",
+    "dev",
+    "docs",
+    "release",
+    "review",
+    "team-flow",
+    "upgrade"
+  ],
   "files": [
-    {
-      "path": "skill/agent-workflow-scaffold/FRAMEWORK_VERSION",
-      "bytes": 6,
-      "sha256": "acb57a7135b2d7d6e665f67f056e21353023b93835f54def1ae523bf76f1bfb3"
-    },
     {
       "path": "skill/agent-workflow-scaffold/SKILL.md",
       "bytes": 7385,
       "sha256": "bc6e2ed30cd574f01b121dea45fa2c8e046ddf93d4e39b29df3e2715446fa748"
     },
     {
-      "path": "skill/agent-workflow-scaffold/VERSION",
-      "bytes": 6,
-      "sha256": "cb1d9a30bc4ab8a397f39b7d786bb82aca0b816077eefc35d7c822017d75f6a5"
-    },
-    {
       "path": "skill/agent-workflow-scaffold/bin/awf",
-      "bytes": 91164,
-      "sha256": "fbcf22c2a9e64f22db73bdbe49ec0520fd36b46e766bc7a0f0c22709d2dc0a68"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/README.md",
-      "bytes": 2023,
-      "sha256": "0cfdd45b260a05387dcb8a545ccb8689986c8158f4ad8701017cd59d39580a79"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/cross-project-dispatch/SKILL.md",
-      "bytes": 24803,
-      "sha256": "107623528effbb900c054cd70feb281e00c9c312f66ff655d20f5d09827f584e"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/cross-project-dispatch/scripts/awf-dispatch",
-      "bytes": 156044,
-      "sha256": "44d7dc4fc7f8777c4bf23c52f1f7679b18d8eede0f3db7e1ceb5042fd15d68e6"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/debug/SKILL.md",
-      "bytes": 4651,
-      "sha256": "e8f118df3a261db9599007b7cd27af48a5240681cf0f37619f7d19c51c72fce0"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/dev/SKILL.md",
-      "bytes": 5675,
-      "sha256": "9c4af4121accd6312194d2bd26143853bfa116c8ecf832854a45dc45e89e5b64"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/docs/SKILL.md",
-      "bytes": 4132,
-      "sha256": "a48f576404bcc9f6ed3107c3505d5a991ae827554ccab783ecd4cacfb22b05aa"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/release/SKILL.md",
-      "bytes": 18277,
-      "sha256": "c91ed81d5a994eef952eea759af4a118448afdda5da827b53ce085fb3f45d37a"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/review/SKILL.md",
-      "bytes": 4076,
-      "sha256": "1a7b7ccd5c946103ac998cc5da4d3d136e974184469ee9ef46888548c4525fa0"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/team-flow/SKILL.md",
-      "bytes": 15235,
-      "sha256": "6a938e071c534880aa774f5b8acf94d64d6caef8779d849e10d32194dffe2ed5"
-    },
-    {
-      "path": "skill/agent-workflow-scaffold/skills/upgrade/SKILL.md",
-      "bytes": 10339,
-      "sha256": "7df53818b896088ac8185b704add447bb18f89d71f98a4a2e87532dcc25ac155"
+      "bytes": 104200,
+      "sha256": "624e8fcbf347db359ac7c025b2c41b37a6f852209cab4860dad55ff36eb52f99"
     },
     {
       "path": "skill/agent-workflow-scaffold/templates/AGENTS.md.tmpl",
-      "bytes": 3946,
-      "sha256": "42109374ed72baac757c4a7b7e1461bbacdff4f3dd9c5dc8508090e7835c899c"
+      "bytes": 4407,
+      "sha256": "4e749e9377326030993cb0d6f4416c53361673efc79e86b74f63f72187064655"
+    },
+    {
+      "path": "skill/agent-workflow-scaffold/templates/FRAMEWORK_VERSION",
+      "bytes": 6,
+      "sha256": "acb57a7135b2d7d6e665f67f056e21353023b93835f54def1ae523bf76f1bfb3"
     },
     {
       "path": "skill/agent-workflow-scaffold/templates/README.md",
-      "bytes": 8676,
-      "sha256": "4dde5130e9b620148b44fa7f3c818660858985d96ae52ef7495d186f0bb04064"
+      "bytes": 9016,
+      "sha256": "1858187077c994d7afe054962221d51eb8bee53b2cba1efbd1e20540d48720e9"
     },
     {
       "path": "skill/agent-workflow-scaffold/templates/pre-commit",
@@ -128,8 +84,8 @@
     },
     {
       "path": "skill/agent-workflow-scaffold/test/smoke.sh",
-      "bytes": 164705,
-      "sha256": "e65a8ee7b351aff3b7dc1c5068896c29e7dc186930203361783c94a9a01511aa"
+      "bytes": 172954,
+      "sha256": "28801c660f3d66da7399ce8254299edd96769fe2f73dd6c59c4177eddab46b95"
     },
     {
       "path": "skill/agent-workflow-scaffold/test/test_dispatch_title.py",
@@ -140,6 +96,51 @@
       "path": "skill/agent-workflow-scaffold/test/upgrade.sh",
       "bytes": 19592,
       "sha256": "162106d8880f0ae00c41241ad0c98cfaa5329e1d06a3e9a946eab30bea836f14"
+    },
+    {
+      "path": "skill/cross-project-dispatch/SKILL.md",
+      "bytes": 24803,
+      "sha256": "107623528effbb900c054cd70feb281e00c9c312f66ff655d20f5d09827f584e"
+    },
+    {
+      "path": "skill/cross-project-dispatch/scripts/awf-dispatch",
+      "bytes": 156044,
+      "sha256": "44d7dc4fc7f8777c4bf23c52f1f7679b18d8eede0f3db7e1ceb5042fd15d68e6"
+    },
+    {
+      "path": "skill/debug/SKILL.md",
+      "bytes": 5100,
+      "sha256": "8cba9bb6ec6a17db950bff558900b13e8b5cb79b5b349551512950237101fdc2"
+    },
+    {
+      "path": "skill/dev/SKILL.md",
+      "bytes": 9768,
+      "sha256": "2a7a059253b220834f09ba4685caffed6682d1d4eeec81c960eeb453e1c590c8"
+    },
+    {
+      "path": "skill/docs/SKILL.md",
+      "bytes": 4581,
+      "sha256": "361981de8f7096cb345c3e7c5e1c26bc691004577563f07be06cf3322b58f83f"
+    },
+    {
+      "path": "skill/release/SKILL.md",
+      "bytes": 18277,
+      "sha256": "c91ed81d5a994eef952eea759af4a118448afdda5da827b53ce085fb3f45d37a"
+    },
+    {
+      "path": "skill/review/SKILL.md",
+      "bytes": 4522,
+      "sha256": "111b0f4bd2e13e450e93ee738c39d853e059b7995814f49af8dcfe14d54dd789"
+    },
+    {
+      "path": "skill/team-flow/SKILL.md",
+      "bytes": 15695,
+      "sha256": "c938728baa73a0893344e920568edcaf65abbca76e33bff99c8e4c97f16896fb"
+    },
+    {
+      "path": "skill/upgrade/SKILL.md",
+      "bytes": 10339,
+      "sha256": "7df53818b896088ac8185b704add447bb18f89d71f98a4a2e87532dcc25ac155"
     }
   ]
 }
