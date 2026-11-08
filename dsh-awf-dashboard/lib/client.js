@@ -2529,7 +2529,13 @@ window.__ModuleLoader__.load({
       // DEV-044：版本状态条并入项目卡（见 renderLedgerBody 项目卡），此处不再单独渲染。
       const versionBar = null
 
-      const body = notInit
+      // 加载/锚定中不渲染空态或引导卡，避免打开时闪一帧初始化界面
+      const pending = !indexReady
+        || (!selected && !!anchorRoot)
+        || (!!selected && !ledger && !notInit && !error)
+      const body = pending
+        ? h('div', { style: { height: '100%' } })
+        : notInit
         ? renderInitCard({
             // DEV-041：needsUpgrade 引导卡按钮的 busy 绑定升级中态（upgrading），
             //   点击后变「更新中…」+旋转动画+禁点；未初始化卡仍用 initBusy
@@ -2902,41 +2908,243 @@ window.__ModuleLoader__.load({
     // 优先 better-sidebar 的 openTab（本 profile 已装，点击展开侧边栏并聚焦页签）；
     // 未装时回退宿主 layout.openRightbar（右侧栏显示后用户点 Agent Workflow 页签）。
     // 服务用 ctx.get 动态读取（不写进 exports.inject，避免宿主无该服务时整个插件 pending）。
-    function OpenWorkflowButton() {
-      const open = () => {
+    function OpenWorkflowButton(props) {
+      const ctx = (props && props.ctx) || null
+      const [active, setActive] = useState(false)
+      const savedRef = useRef(null)
+
+      const rightbarRoot = () => {
         try {
-          const better = typeof ctx.get === 'function' ? ctx.get('betterSidebar') : null
-          if (better && typeof better.openTab === 'function') {
-            better.openTab({ type: 'awf-dashboard' })
+          return document.querySelector('[class*="rightbar"],[class*="Rightbar"]') || null
+        } catch { return null }
+      }
+      const rightbarOpen = () => {
+        const root = rightbarRoot()
+        if (!root) return false
+        try {
+          const r = root.getBoundingClientRect()
+          return r.width > 0 && r.height > 0
+        } catch { return false }
+      }
+      const awfTab = () => {
+        const root = rightbarRoot()
+        if (!root) return null
+        try {
+          const btn = Array.from(root.querySelectorAll('[role="tab"],button')).find((el) => {
+            return (el.textContent || '').trim().indexOf('Agent Workflow') >= 0
+          })
+          if (btn) return btn
+          // 页签可能是普通 DIV（无 role/aria-selected），取文本精确匹配的叶子节点
+          const leaf = Array.from(root.querySelectorAll('div,span')).find((el) => {
+            return el.children.length === 0 && (el.textContent || '').trim() === 'Agent Workflow'
+          })
+          return leaf ? (leaf.closest('button,[role="tab"]') || leaf.parentElement || leaf) : null
+        } catch { return null }
+      }
+      const findBtn = (kw) => {
+        try {
+          return Array.from(document.querySelectorAll('button')).find((b) => {
+            const t = (b.getAttribute('title') || b.getAttribute('aria-label') || '')
+            return t.indexOf(kw) >= 0
+          }) || null
+        } catch { return null }
+      }
+      // 真实点击序列：宿主部分按钮只响应 pointer/mouse down-up，element.click() 不生效
+      const realClick = (el) => {
+        if (!el) return
+        const fire = (name, isPointer) => {
+          try {
+            if (isPointer && typeof PointerEvent === 'function') {
+              el.dispatchEvent(new PointerEvent(name, { bubbles: true, cancelable: true, pointerId: 1, button: 0 }))
+            } else {
+              el.dispatchEvent(new MouseEvent(name, { bubbles: true, cancelable: true, view: window, button: 0 }))
+            }
+          } catch { /* 忽略 */ }
+        }
+        fire('pointerdown', true)
+        fire('mousedown', false)
+        fire('pointerup', true)
+        fire('mouseup', false)
+        fire('click', false)
+      }
+      const menuItem = () => {
+        try {
+          return Array.from(document.querySelectorAll('span')).find((e) => {
+            return e.children.length === 0 && (e.textContent || '').trim() === 'Agent Workflow'
+              && e.closest('button')
+          }) || null
+        } catch { return null }
+      }
+      const isWorkflowVisible = () => {
+        if (!rightbarOpen()) return false
+        const root = rightbarRoot()
+        if (!root) return false
+        try {
+          const text = root.innerText || ''
+          return text.indexOf('当前任务') >= 0
+            || text.indexOf('工作流已最新') >= 0
+            || text.indexOf('最近完成') >= 0
+            || text.indexOf('待办') >= 0
+        } catch { return false }
+      }
+
+      const moveTo = (el) => {
+        try {
+          if (!el) return
+          setTimeout(() => {
+            try {
+              if (!el.parentElement) return
+              const parent = el.parentElement
+              const siblings = Array.from(parent.querySelectorAll('button')).filter((b) => b !== el)
+              const target = siblings[3] || null
+              if (target) parent.insertBefore(el, target)
+            } catch { /* 忽略 */ }
+          }, 60)
+        } catch { /* 忽略 */ }
+      }
+
+      useEffect(() => {
+        let raf = 0
+        const update = () => {
+          if (raf) return
+          raf = (typeof requestAnimationFrame === 'function')
+            ? requestAnimationFrame(() => { raf = 0; setActive(isWorkflowVisible()) })
+            : 0
+          if (!raf) setActive(isWorkflowVisible())
+        }
+        update()
+        let obs = null
+        try {
+          obs = new MutationObserver(update)
+          obs.observe(document.body, {
+            subtree: true, childList: true, attributes: true,
+            attributeFilter: ['aria-selected', 'class', 'style', 'hidden'],
+          })
+        } catch { /* 忽略 */ }
+        const timer = setInterval(update, 500)
+        const t300 = setTimeout(update, 300)
+        return () => {
+          try { if (obs) obs.disconnect() } catch { /* 忽略 */ }
+          clearInterval(timer)
+          clearTimeout(t300)
+          if (raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf)
+        }
+      }, [])
+
+      const open = () => {
+        const layout = ctx && typeof ctx.get === 'function' ? ctx.get('layout') : null
+        try {
+          if (isWorkflowVisible()) {
+            // 关闭 = 收起右侧栏（保留工作流页签）：下次打开直接显示看板，不再弹「新标签页」菜单
+            try {
+              if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
+              else {
+                const closeBtn = findBtn('收起右侧边栏')
+                if (closeBtn) realClick(closeBtn)
+              }
+            } catch { /* 忽略 */ }
+            savedRef.current = null
+            setActive(false)
+            setTimeout(() => setActive(isWorkflowVisible()), 350)
             return
           }
-          const layout = typeof ctx.get === 'function' ? ctx.get('layout') : null
-          if (layout && typeof layout.openRightbar === 'function') {
-            layout.openRightbar(true, false)
+          // 打开：记录当前侧栏状态，未开则先点「打开右侧边栏」，再激活 Agent Workflow 页签
+          const wasOpen = rightbarOpen()
+          let prevTab = null
+          if (wasOpen) {
+            const root = rightbarRoot()
+            const activeTab = root ? Array.from(root.querySelectorAll('[role="tab"],button')).find((el) => {
+              return el.getAttribute('aria-selected') === 'true'
+            }) : null
+            prevTab = activeTab ? (activeTab.textContent || '').trim() : null
+            if (prevTab && prevTab.indexOf('Agent Workflow') >= 0) prevTab = null
           }
+          savedRef.current = { wasOpen, prevTab }
+          if (!wasOpen) {
+            const openBtn = findBtn('打开右侧边栏')
+            if (openBtn) realClick(openBtn)
+            else if (layout && typeof layout.openRightbar === 'function') layout.openRightbar(true, false)
+          }
+          setActive(true)
+          // 确保工作流显示：有页签则激活；没有页签（空面板）则走「新标签页 → Agent Workflow」添加
+          const ensureWorkflow = (tries) => {
+            try {
+              if (isWorkflowVisible()) { setActive(true); return }
+              if (tries <= 0) { setActive(isWorkflowVisible()); return }
+              if (!rightbarOpen()) { setTimeout(() => ensureWorkflow(tries - 1), 150); return }
+              const tab = awfTab()
+              if (tab) {
+                if (tab.getAttribute('aria-selected') !== 'true') realClick(tab)
+                setTimeout(() => {
+                  if (isWorkflowVisible()) setActive(true)
+                  else ensureWorkflow(tries - 1)
+                }, 250)
+                return
+              }
+              // 菜单可能已弹出（打开右侧栏时自动弹），优先点菜单项
+              const item = menuItem()
+              if (item) {
+                realClick(item.closest('button'))
+                setTimeout(() => {
+                  if (isWorkflowVisible()) setActive(true)
+                  else ensureWorkflow(tries - 1)
+                }, 350)
+                return
+              }
+              const newTabBtn = Array.from(document.querySelectorAll('button')).find((b) => {
+                const t = b.getAttribute('title') || b.getAttribute('aria-label') || ''
+                return t.indexOf('新标签页') >= 0
+              })
+              if (!newTabBtn) { setTimeout(() => ensureWorkflow(tries - 1), 150); return }
+              realClick(newTabBtn)
+              setTimeout(() => {
+                try {
+                  const it2 = menuItem()
+                  if (it2) realClick(it2.closest('button'))
+                } catch { /* 忽略 */ }
+                setTimeout(() => {
+                  if (isWorkflowVisible()) setActive(true)
+                  else ensureWorkflow(tries - 1)
+                }, 350)
+              }, 220)
+            } catch { setActive(isWorkflowVisible()) }
+          }
+          ensureWorkflow(6)
         } catch (err) {
-          // 打不开面板不阻塞对话（按钮只是入口，失败静默）
-          try { console.warn('[awf] 打开工作流面板失败', err) } catch { /* 忽略 */ }
+          try { console.warn('[awf] 切换工作流看板失败', err) } catch { /* 忽略 */ }
         }
       }
+
+      const activeBg = 'rgba(255,255,255,0.08)'
       return h('button', {
         type: 'button',
-        title: '打开 Agent Workflow 工作流面板',
-        'aria-label': '打开 Agent Workflow 工作流面板',
+        title: '打开/关闭 Agent Workflow 工作流看板',
+        'aria-label': '打开或关闭 Agent Workflow 工作流看板',
+        'aria-pressed': active ? 'true' : 'false',
+        ref: moveTo,
+        onMouseEnter: (ev) => {
+          try {
+            const el = ev && ev.currentTarget
+            if (el) el.style.background = active ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)'
+          } catch { /* 忽略 */ }
+        },
+        onMouseLeave: (ev) => {
+          try {
+            const el = ev && ev.currentTarget
+            if (el) el.style.background = active ? activeBg : 'transparent'
+          } catch { /* 忽略 */ }
+        },
         onClick: open,
         style: {
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: F(26), height: F(26), marginLeft: F(4), padding: 0,
-          border: 'none', borderRadius: F(6), background: 'transparent',
+          width: F(24), height: F(24), marginLeft: F(4), padding: 0,
+          border: 'none', borderRadius: F(6), background: active ? activeBg : 'transparent',
           color: 'inherit', cursor: 'pointer', opacity: 0.82,
         },
       }, h('svg', {
-        width: F(15), height: F(15), viewBox: '0 0 16 16', fill: 'none',
-        stroke: 'currentColor', 'stroke-width': 1.5,
-        'stroke-linecap': 'round', 'stroke-linejoin': 'round',
-      },
-        h('rect', { x: 2, y: 2.5, width: 12, height: 11, rx: 2 }),
-        h('path', { d: 'M5 6.2h6M5 9h6M5 11.8h3.5' })))
+        width: F(14), height: F(14), 'data-icon': 'dsw-icon-checklist-outline-regular',
+        'aria-hidden': 'true',
+      }, h('use', { href: '#dsw-icon-checklist-outline-regular' })))
     }
 
     // ---- 插件体 -----------------------------------------------------------
@@ -2969,11 +3177,6 @@ window.__ModuleLoader__.load({
           key: 'awf-dashboard',
           inject: (sessionId) => ({ sessionId }),
         }, TabTitle)))
-        // DEV-226：对话右上角「工作流」按钮——点击直接打开/聚焦右侧栏的 Agent Workflow 页签。
-        disposers.push(ctx.slots.inject('conversation.session.header.corner', () => ctx.slots.register({
-          name: 'conversation.session.header.corner',
-          key: 'awf-open-workflow',
-        }, OpenWorkflowButton)))
         // DEV-170 v2：会话头部回执入口已移除（用户弃用）；回执经 --report 投递派发方会话，无独立 UI 面板（DEV-195 移除 awf-reports）
         // 通道 2：better-sidebar 接管右侧边栏时（本 profile 已装），把页签注册进它的
         // registerTab 服务，用户才看得到。注意必须用 ctx.inject(['betterSidebar'], cb)
@@ -3000,6 +3203,25 @@ window.__ModuleLoader__.load({
             return () => { ends.forEach((end) => { try { end() } catch { /* 忽略 */ } }) }
           } catch { return () => {} }
         }))
+
+        // DEV-226：对话右上角「工作流」按钮——actions 是 list 槽（corner 是 single，注册不进去），
+        // 放在所有核心注册之后 + 异常隔离，按钮注册失败不影响工作流页签。
+        try {
+          disposers.push(ctx.slots.inject('conversation.session.header.utilities', () => {
+            try {
+              return ctx.slots.register({
+                name: 'conversation.session.header.utilities',
+                id: 'awf-open-workflow',
+                priority: 1,
+                inject: (sessionId) => ({ sessionId }),
+              }, (props) => h(OpenWorkflowButton, { ctx: ctx, sessionId: props && props.sessionId }))
+            } catch (err) {
+              return () => {}
+            }
+          }))
+        } catch (err) {
+          try { console.warn('[awf] 注册对话右上角按钮失败（不影响工作流页签）', err) } catch { /* 忽略 */ }
+        }
 
         return () => disposers.forEach((d) => { try { d() } catch { /* 忽略 */ } })
       })

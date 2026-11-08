@@ -471,6 +471,19 @@ assert module.awf_session_title("lead", "") == "[awf] [lead] [未命名任务]"
 assert module.awf_title_sender(title) == "lead"
 assert module.awf_title_sender("[awf] 周报") == ""
 
+# DEV-228：--title 只作任务名——裸标题恒带 [awf] 前缀（retire 判据稳定可过）；
+# 显式带 [awf] 前缀（旧用法/高级场景）原样保留，不二次包装；空/空白兜底默认。
+assert module.resolve_session_title("工作流测试", "lead", "回退名") == "[awf] [lead] [工作流测试]", \
+    "裸 --title 只作任务名，前缀由框架生成"
+assert module.resolve_session_title("[awf] 高级场景", "lead", "回退名") == "[awf] 高级场景", \
+    "显式 [awf] 前缀原样使用，不二次包装"
+assert module.resolve_session_title(" [awf] 高级场景 ", "lead", "回退名") == "[awf] 高级场景", \
+    "带空白前缀剥离后原样"
+assert module.resolve_session_title("", "lead", "回退名") == "[awf] [lead] [回退名]", \
+    "不传 --title 行为不变（默认任务名）"
+assert module.resolve_session_title("  ", "lead", "回退名") == "[awf] [lead] [回退名]", \
+    "空白 --title 兜底默认任务名"
+
 # 模块来源：--module > 票据「模块：」行 > 默认「通用」
 ticket = "任务：TEST-001\n\n- 目标项目：proj（/tmp/proj）\n- 模块：工作流\n"
 assert module.ticket_module(ticket) == "工作流"

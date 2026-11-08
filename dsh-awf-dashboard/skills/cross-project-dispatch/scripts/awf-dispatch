@@ -265,6 +265,17 @@ def awf_session_title(sender: str, task_name: str = "",
             f"[{task_clean}]")
 
 
+def resolve_session_title(title_arg: str, sender: str, fallback: str) -> str:
+    """会话标题归一（DEV-228）：`--title` 只作任务名，不再作为完整标题字面值——
+    标题恒为 `[awf] [派发者] [<任务名>]`（awf_session_title 保证前缀与格式），
+    前缀不可能丢，--retire-session 前缀判据稳定可过；
+    仅当调用方已显式带 `[awf]` 前缀（旧用法/高级场景）才原样使用，不二次包装。"""
+    title_arg = (title_arg or "").strip()
+    if title_arg.startswith(AWF_TITLE_PREFIX):
+        return title_arg
+    return awf_session_title(sender, title_arg or fallback)
+
+
 def ticket_sender(text: str) -> str:
     """读取票据头部「派发者：<名>」行；没写返回空串。"""
     for line in text.splitlines():
@@ -746,7 +757,7 @@ def _session_locked_cg() -> bool:
         "d=cg.CGSessionCopyCurrentDictionary()\n"
         "if not d: sys.exit(0)\n"
         "v=cf.CFDictionaryGetValue(d,key)\n"
-        "sys.exit(1 if (v and cg.CFBooleanGetValue(v)) else 0)\n"
+        "sys.exit(1 if (v and cf.CFBooleanGetValue(v)) else 0)\n"
     )
     try:
         proc = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=5)
@@ -2591,10 +2602,12 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     workspace = state["workspace"]
 
     # 会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者 + 动态任务摘要；
-    # 模块只影响展示/票据分类（--module 已解析）；--title 完全定制时优先。
+    # 模块只影响展示/票据分类（--module 已解析）；DEV-228：--title 只作任务名
+    # （前缀由框架保证，retire 前缀判据稳定可过）；显式带 [awf] 前缀的原样使用。
     module = resolve_module(text, args.module)
     sender = resolve_sender(text, getattr(args, "sender", ""))
-    session_name = args.title or awf_session_title(sender, task_display(task, text))
+    session_name = resolve_session_title(
+        args.title, sender, task_display(task, text))
     # G4 探针已在 preflight 拉过 session/list，这里直接复用，避免重复调用。
     rows = state.get("sessions") or []
     owner = f"{resolve_sender(text, getattr(args, 'sender', ''))}|{task.name}"
@@ -3489,7 +3502,7 @@ def main(argv=None) -> int:
         action="store_true",
         help="开启 --check-role 时静默 role 不匹配警告（仍不硬拒）",
     )
-    parser.add_argument("--title", default="", help="完全定制会话标题（默认 [awf] [派发者] [任务名]）")
+    parser.add_argument("--title", default="", help="任务名（默认取票据短标题）——标题由框架生成 [awf] [派发者] [<任务名>]，前缀恒在；显式带 [awf] 前缀的原样使用")
     parser.add_argument("--json", action="store_true", help="最终输出 JSON")
     parser.add_argument(
         "--screen-state",
@@ -3699,7 +3712,15 @@ def main(argv=None) -> int:
             )
 
         kind = task_type(text)
-        title = args.title or f"{target.name} · {task_title(task, text)}"
+        if (args.title or "").strip():
+            # DEV-228：--title 只作任务名——dry-run 展示/交接单/headless 日志
+            # 一律显示最终会话标题（[awf] [派发者] [<任务名>]；显式 [awf] 前缀原样）。
+            title = resolve_session_title(
+                args.title,
+                resolve_sender(text, getattr(args, "sender", "")),
+                task_display(task, text))
+        else:
+            title = f"{target.name} · {task_title(task, text)}"
 
         emit(f"目标：{target}", args.json)
         emit(f"任务：{title}（{kind}）", args.json)
@@ -3732,3 +3753,5 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# __PROBE2_MARK__
