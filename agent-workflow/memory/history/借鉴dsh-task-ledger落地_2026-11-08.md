@@ -46,3 +46,13 @@
   - **建议修复（待实施）**：`awf-dispatch` 发送后短轮询会话事件，检测"turn 结束且零 assistant/工具"→ 自动 `--new` 重发一次并记录「空回合自愈」；避免复用旧会话时静默失败。
 - **全局 v1.7.0 幂等复核**：7 目标全部复用（零新建），6 个已最新；**finderpathbar 发现真实差异**（模板仍旧版 + 空 bin/）→ 同步 v1.7.0 模板 + bootstrap（digest 4b5dd747）+ 删空 bin/，commit 0e4c5e8。教训：升级后要跑一次"幂等复核"，能抓出上次未落地的项目。
 - 其他坑：`.dispatch/` 未被部分项目 `.gitignore` 覆盖（仅提示，勿误判为脏改动）。
+
+## 派发文件瘦身（DEV-225，2026-11-08）
+
+用户反馈「派发技能很多问题，没必要本地生成这么多派发文件」。优化：
+- **回执默认不落盘**：`--report` 只走通道投递；逐回执 JSON 写入 `.dispatch/reports/` 改为显式 `--save-report`（此前 7 个项目共 27 个回执 JSON）。
+- **锁文件全局化**：`$DSH_HOME/.awf-dispatch/locks/.lock-<project>`，不在项目 `.dispatch/` 生成（此前每个派发项目根部残留 `.lock-*`）。
+- **免票据派发**：`--task-text "<文本>"` 直接派发，不写 `.dispatch/tasks/`（内部临时文件用完即删）——之前的"每任务一个票据 md"可避免。
+- **日志上限**：log.md >120KB 只保留最近 400 行；存量 log 987→200 行。
+- **清理存量**：本仓库 `.dispatch` 18→2 文件（archived-sessions + log.md）；7 个目标项目 `.dispatch` 全清。
+- 验证：smoke 242/0、install、check 全过、`--task-text --dry-run --allow-dirty` rc=0 且无票据生成。
