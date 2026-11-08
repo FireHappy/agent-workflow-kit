@@ -27,10 +27,8 @@ loader = importlib.machinery.SourceFileLoader('dispatch_skill_test', sys.argv[1]
 spec = importlib.util.spec_from_loader(loader.name, loader)
 module = importlib.util.module_from_spec(spec)
 loader.exec_module(module)
-messages = []
-module.emit = lambda message, *args, **kwargs: messages.append(message)
-with patch.dict(os.environ, {'AWF_MAX_SESSIONS': 'invalid'}, clear=True):
-    assert module.resolve_max_global_sessions(pathlib.Path('/tmp/test')) == module.DEFAULT_MAX_GLOBAL_AWF_SESSIONS
-assert messages and 'invalid' in messages[0]
+# DEV-212 起会话上限改为常量（满 MAX_SENDER_SESSIONS 时启动独立监听等待空闲）：
+# 按项目环境变量覆盖上限的实现已移除，断言当前实现契约（常量存在且为 3）。
+assert module.MAX_SENDER_SESSIONS == 3, module.MAX_SENDER_SESSIONS
 PY
 printf '通过：copy/link 安装、独立复制、CLI、回执 dry-run、Python 导入；无旧派发入口。\n'

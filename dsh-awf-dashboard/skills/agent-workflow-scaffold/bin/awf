@@ -554,7 +554,7 @@ migrate_ledger_files() {
           say "账本迁移：$f 已全部拆出 $blocks 块 → tasks/$t/$bucket/（移除旧文件）"
           rm -f "$f"
         else
-          say "账本迁移：$f 仍有未拆出块（$miss），保留原文件待人工处理"
+          say "账本迁移：$f 仍有未拆出块（${miss}，保留原文件待人工处理"
           continue
         fi
       fi
@@ -703,7 +703,7 @@ check_growth_hints() {
     if [ "$vf_root" = "VERSION" ]; then
       say "提示：项目根存在 VERSION 文件（version_file 未配置，默认根 VERSION）——若本项目用 C++/Unity 构建（clang -I. 会遮蔽 libc++ <version> 头，见 SP-302），建议迁移：git mv VERSION agent-workflow/VERSION 并在 agent-workflow/project.yaml 设 version_file: agent-workflow/VERSION；纯脚本项目可忽略"
     else
-      say "提示：项目根存在残留 VERSION 文件（version_file 已指向 $vf_root）——仍可能遮蔽 libc++ <version> 头，建议 git mv VERSION agent-workflow/VERSION 或删除；纯脚本项目可忽略"
+      say "提示：项目根存在残留 VERSION 文件（version_file 已指向 ${vf_root}——仍可能遮蔽 libc++ <version> 头，建议 git mv VERSION agent-workflow/VERSION 或删除；纯脚本项目可忽略"
     fi
   fi
 
@@ -917,7 +917,7 @@ append_gitignore() {
     printf '%s\n' '/AGENTS.md'
     printf '%s\n' '/CLAUDE.md'
   } >> "$gi"
-  say "已写入 $gi：agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
+  say "已写入 ${gi}agent-workflow/、AGENTS.md、CLAUDE.md 不入库"
 }
 
 # 把本机派发产物忽略段写入 $1/.gitignore（init 默认执行；已含标记则跳过）。
@@ -937,7 +937,7 @@ append_dispatch_gitignore() {
     printf '%s\n' '/.dispatch/headless/'
     printf '%s\n' '/.agent-teams/'
   } >> "$gi"
-  say "已写入 $gi：派发流水/回报/运行时状态不入库"
+  say "已写入 ${gi}派发流水/回报/运行时状态不入库"
 }
 
 cmd_gitignore() {
@@ -951,7 +951,7 @@ cmd_gitignore() {
   done
   target="$(cd "$target" 2>/dev/null && pwd)" || die "目录不存在：$target"
   [ -f "$target/agent-workflow/project.yaml" ] \
-    || die "目标不是 agent-workflow 项目：$target（没有 agent-workflow/project.yaml；新项目请用 awf init --gitignore）"
+    || die "目标不是 agent-workflow 项目：${target}没有 agent-workflow/project.yaml；新项目请用 awf init --gitignore）"
   append_gitignore "$target"
 }
 
@@ -1636,7 +1636,7 @@ cmd_release_prep() {
     # DEV-219：JSON 版本锚点（如 package.json）——python3 解析后只改【顶层 version 字段】，
     # 保留 scripts.version 等其它同名字段；临时文件同目录 + 原子替换 + 保留原权限，失败不损坏原文件。
     if ! command -v python3 >/dev/null 2>&1; then
-      die "JSON 版本锚点需要 python3，当前环境缺失：$VF（或改用文本锚点）"
+      die "JSON 版本锚点需要 python3，当前环境缺失：${VF}或改用文本锚点）"
     fi
     if ! python3 - "$VF" "$version" <<'PYEOF'
 import json, os, sys, tempfile
@@ -1840,10 +1840,10 @@ cmd_upgrade() {
     if [ -f "$awf_dir/$tool" ]; then
       if [ "$slim" -eq 1 ]; then
         if [ "$dry_run" -eq 1 ]; then
-          say "  将删除 $awf_dir/$tool（存量工具副本；工具在技能 bin/）"
+          say "  将删除 $awf_dir/${tool}存量工具副本；工具在技能 bin/）"
         else
           rm -f "$awf_dir/$tool"
-          say "  已删除 $awf_dir/$tool（工具技能化迁移完成：调用技能 ~/.dsh/skills/agent-workflow-scaffold/bin/awf）"
+          say "  已删除 $awf_dir/${tool}工具技能化迁移完成：调用技能 ~/.dsh/skills/agent-workflow-scaffold/bin/awf）"
         fi
       else
         say "  提示：$awf_dir/$tool 为存量工具副本（技能化后不再需要），可用 awf upgrade --slim 清理"
@@ -1875,7 +1875,7 @@ cmd_upgrade() {
     say "  将保留：agent-workflow/project.yaml、tasks/**（账本历史）、memory/**、tools/**、AGENTS.md 区块外内容"
     if [ -f "$KFF" ]; then
       if [ -n "$cur_kff" ]; then
-        say "  将写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = $cur_kff）"
+        say "  将写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = ${cur_kff}"
       else
         say "  将写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（迁移补写：存量项目未登记骨架版本）"
       fi
@@ -1895,13 +1895,13 @@ cmd_upgrade() {
   if [ -f "$KFF" ]; then
     cp "$KFF" "$target/agent-workflow/FRAMEWORK_VERSION"
     if [ -n "$cur_kff" ]; then
-      say "已写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = $cur_kff）"
+      say "已写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（目标当前 = ${cur_kff}"
     else
       say "已写骨架版 agent-workflow/FRAMEWORK_VERSION = $(cat "$KFF")（迁移补写：存量项目未登记骨架版本）"
     fi
   fi
 
-  ( cd "$target" && $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap ) || die "bootstrap 失败：$target（技能工具不可用，请先运行 ./install.sh 安装技能）"
+  ( cd "$target" && $HOME/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap ) || die "bootstrap 失败：${target}技能工具不可用，请先运行 ./install.sh 安装技能）"
   say "已刷新 AGENTS.md 入口（bootstrap）"
 
   local rc=0
@@ -2209,7 +2209,7 @@ log_usage() {
   <任务ID>  任务 ID（如 DEV-216）；省略时仅在 current/ 恰有一个进行中任务时自动推断。
   --note    说明（必填；也可把说明作为末尾位置参数）
   --type    记录类型（默认 log；可写 claim / implement / verify / review / archive 等）
-  --owner   执行者（默认 $AWF_OWNER / $AWF_AGENT → project.yaml 的 role/name → $USER）
+  --owner   执行者（默认 $AWF_OWNER / $AWF_AGENT → project.yaml 的 role/name → ${USER}
   任务文档无该节时自动在文末补 `### Execution Log`（兼容旧别名 `### 执行记录`）。
   已归档（done/）任务拒绝追加：执行记录只写未归档任务（todo/current/）。
 
@@ -2271,12 +2271,12 @@ cmd_log() {
     [ -n "$auto" ] || die "没有进行中任务可推断；请显式指定 ID（如 awf log DEV-216 --note ...）"
     id="$(basename "$auto" .md)"
   fi
-  printf '%s' "$id" | grep -Eq '^[A-Z]+-[0-9]+$' || die "任务 ID 非法：$id（应为 类型-数字，如 DEV-216）"
+  printf '%s' "$id" | grep -Eq '^[A-Z]+-[0-9]+$' || die "任务 ID 非法：${id}应为 类型-数字，如 DEV-216）"
 
   local f
-  f="$(log_find_task "$id")" || die "未找到任务 $id（已查 tasks/{dev,debug,docs}/{todo,current,done}/$id.md）"
+  f="$(log_find_task "$id")" || die "未找到任务 ${id}已查 tasks/{dev,debug,docs}/{todo,current,done}/$id.md）"
   case "$f" in
-    */done/*) die "任务 $id 已归档（$f）；执行记录只追加到未归档任务（todo/current/），如需补记请先移回 current/" ;;
+    */done/*) die "任务 $id 已归档（${f}；执行记录只追加到未归档任务（todo/current/），如需补记请先移回 current/" ;;
   esac
 
   [ -n "$note" ] || die "缺少说明：用 --note 说明（或把说明作为末尾位置参数）"
@@ -2349,7 +2349,7 @@ validate_task_file() {
   local f="$1" bucket="$2" type="$3" id hid out
   id="$(basename "$f" .md)"
   if ! printf '%s' "$id" | grep -Eq '^[A-Z]+-[0-9]+$'; then
-    vfail "$type/$bucket 文件 ID 非法：$id（应为 类型-数字，如 DEV-001）"
+    vfail "$type/$bucket 文件 ID 非法：${id}应为 类型-数字，如 DEV-001）"
     return 1
   fi
   hid="$(task_id "$f")"
@@ -2454,7 +2454,7 @@ cmd_validate() {
     for b in todo current done; do
       dir="agent-workflow/tasks/$t/$b"
       if [ ! -d "$dir" ]; then
-        vfail "缺目录 tasks/$t/$b（运行 awf init 重建或手工补目录）"
+        vfail "缺目录 tasks/$t/${b}运行 awf init 重建或手工补目录）"
         continue
       fi
       readme="$dir/README.md"
@@ -2473,11 +2473,11 @@ cmd_validate() {
         if [ "$file_ids" != "$readme_ids" ]; then
           for id in $file_ids; do
             printf '%s\n' "$readme_ids" | grep -qxF "$id" \
-              || vfail "$t/$b README 索引缺任务 $id（文件存在但索引未列；运行 awf status 重生成）"
+              || vfail "$t/$b README 索引缺任务 ${id}文件存在但索引未列；运行 awf status 重生成）"
           done
           for id in $readme_ids; do
             printf '%s\n' "$file_ids" | grep -qxF "$id" \
-              || vfail "$t/$b README 索引含多余任务 $id（无对应文件；运行 awf status 重生成）"
+              || vfail "$t/$b README 索引含多余任务 ${id}无对应文件；运行 awf status 重生成）"
           done
         fi
       fi

@@ -36,5 +36,5 @@ if [ -d "$HERE/skills" ]; then
   echo "已同步内嵌副本 skills/（$(find "$HERE/skills" -type f | wc -l | tr -d ' ') 个文件）"
 fi
 
-echo "已同步 $HERE → $DEST（版本：$(node -p "require('$DEST/package.json').version")）"
+echo "已同步 $HERE → ${DEST}版本：$(node -p "require('$DEST/package.json').version")）"
 echo "重启 DSH（或刷新 GUI 页面）后生效。"

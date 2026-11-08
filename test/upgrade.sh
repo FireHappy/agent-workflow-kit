@@ -22,7 +22,20 @@
 set -eu
 
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
-AWF="$KIT/bin/awf"
+# v1.8.0（DEV-218）：技能/CLI/模板唯一源 = dsh-awf-dashboard/skills/agent-workflow-scaffold/
+# 仓库形态（KIT=仓库根）走插件内嵌技能；技能形态（KIT=技能根，脚本在技能根/test/）直接用 KIT。
+if [ -d "$KIT/dsh-awf-dashboard/skills/agent-workflow-scaffold" ]; then
+  SKILL_ROOT="$KIT/dsh-awf-dashboard/skills/agent-workflow-scaffold"
+else
+  SKILL_ROOT="$KIT"
+fi
+AWF="$SKILL_ROOT/bin/awf"
+# 派发技能源（仓库形态在插件 skills/ 下；技能形态在 ~/.dsh/skills/ 并列）
+if [ -d "$KIT/dsh-awf-dashboard/skills/cross-project-dispatch" ]; then
+  DISPATCH_SKILL="$KIT/dsh-awf-dashboard/skills/cross-project-dispatch"
+else
+  DISPATCH_SKILL="$KIT/../cross-project-dispatch"
+fi
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/awf-upgrade.XXXXXX")"
 WORK="$(cd "$WORK" && pwd)"
 export DSH_AGENTS_HOME="$WORK/.agents"
@@ -30,30 +43,31 @@ trap 'rm -rf "$WORK"' EXIT
 # DEV-186 工具技能化：项目内 bin/ 为空，项目内命令统一走技能路径。测试用隔离安装定位技能。
 SKILL_BIN="$WORK/skills/agent-workflow-scaffold/bin/awf"
 mkdir -p "$WORK/skills/agent-workflow-scaffold/bin"
-cp "$KIT/bin/awf" "$SKILL_BIN"
+cp "$AWF" "$SKILL_BIN"
 chmod +x "$SKILL_BIN"
 chk() { ( cd "$1" && "$SKILL_BIN" "${@:2}" ); }
-# 隔离守卫（DEV-203）：upgrade 内部 bootstrap/check 硬编码 $HOME/.dsh/skills，不随
+# 隔离守卫（DEV-203/DEV-217）：upgrade 内部 bootstrap/check 硬编码 $HOME/.dsh/skills，不随
 # DSH_AGENTS_HOME 重定向——全局技能实体必须与 checkout 一致，否则测试会静默测旧技能假绿。
-GLOBAL_AWF="$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf"
-if [ ! -f "$GLOBAL_AWF" ] || ! cmp -s "$GLOBAL_AWF" "$KIT/bin/awf"; then
-  echo "FAIL  全局技能实体与 checkout 不一致（$GLOBAL_AWF）；请先运行 ./install.sh 再跑本测试" >&2
+# DEV-217 版本契约：实体根 VERSION/FRAMEWORK_VERSION 已退役，骨架版 = templates/FRAMEWORK_VERSION。
+GLOBAL_SKILL="$HOME/.dsh/skills/agent-workflow-scaffold"
+GLOBAL_AWF="$GLOBAL_SKILL/bin/awf"
+if [ ! -f "$GLOBAL_AWF" ] || ! cmp -s "$GLOBAL_AWF" "$AWF"; then
+  echo "FAIL  全局技能实体与 checkout 不一致（${GLOBAL_AWF}）；请先运行 ./install.sh 再跑本测试" >&2
   exit 1
 fi
-[ -f "$HOME/.dsh/skills/agent-workflow-scaffold/templates/AGENTS.md.tmpl" ] \
-  && cmp -s "$HOME/.dsh/skills/agent-workflow-scaffold/templates/AGENTS.md.tmpl" "$KIT/templates/AGENTS.md.tmpl" \
+[ -f "$GLOBAL_SKILL/templates/AGENTS.md.tmpl" ] \
+  && cmp -s "$GLOBAL_SKILL/templates/AGENTS.md.tmpl" "$SKILL_ROOT/templates/AGENTS.md.tmpl" \
   || { echo "FAIL  全局技能模板与 checkout 不一致；请先运行 ./install.sh" >&2; exit 1; }
-# DEV-205 隔离守卫：upgrade 的骨架源读技能实体 FRAMEWORK_VERSION——实体与 checkout 必须一致
-[ -f "$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION" ] \
-  && cmp -s "$HOME/.dsh/skills/agent-workflow-scaffold/FRAMEWORK_VERSION" "$KIT/agent-workflow/FRAMEWORK_VERSION" \
-  || { echo "FAIL  全局技能骨架版本与 checkout 不一致（FRAMEWORK_VERSION）；请先运行 ./install.sh" >&2; exit 1; }
+[ -f "$GLOBAL_SKILL/templates/FRAMEWORK_VERSION" ] \
+  && cmp -s "$GLOBAL_SKILL/templates/FRAMEWORK_VERSION" "$SKILL_ROOT/templates/FRAMEWORK_VERSION" \
+  || { echo "FAIL  全局技能骨架版本与 checkout 不一致（templates/FRAMEWORK_VERSION）；请先运行 ./install.sh" >&2; exit 1; }
 
 fail() { echo "FAIL  $*" >&2; exit 1; }
 ok()   { echo "ok    $*"; }
 
-# kit 骨架版（upgrade 判定与断言期望的源）
-KIT_KFF="$(cat "$KIT/agent-workflow/FRAMEWORK_VERSION")"
-[ -n "$KIT_KFF" ] || fail "kit agent-workflow/FRAMEWORK_VERSION 缺失或为空"
+# kit 骨架版（upgrade 判定与断言期望的源）：v1.8.0 契约 = templates/FRAMEWORK_VERSION
+KIT_KFF="$(cat "$SKILL_ROOT/templates/FRAMEWORK_VERSION")"
+[ -n "$KIT_KFF" ] || fail "kit templates/FRAMEWORK_VERSION 缺失或为空"
 
 echo "# awf upgrade 回归测试"
 
@@ -105,19 +119,19 @@ fi
 ok "A upgrade 执行成功且 check 通过"
 
 # 断言：骨架模板与 kit 一致（派发工具在技能，不复制到项目；存量副本由 --slim 清理）
-[ -f "$KIT/skills/cross-project-dispatch/scripts/awf-dispatch" ] || fail "A 派发技能缺少自带脚本"
-cmp -s "$PA/agent-workflow/templates/AGENTS.md.tmpl" "$KIT/templates/AGENTS.md.tmpl" \
+[ -f "$DISPATCH_SKILL/scripts/awf-dispatch" ] || fail "A 派发技能缺少自带脚本（${DISPATCH_SKILL}"
+cmp -s "$PA/agent-workflow/templates/AGENTS.md.tmpl" "$SKILL_ROOT/templates/AGENTS.md.tmpl" \
   || fail "A templates/AGENTS.md.tmpl 与 kit 不一致"
-cmp -s "$PA/agent-workflow/templates/pre-commit" "$KIT/templates/pre-commit" \
+cmp -s "$PA/agent-workflow/templates/pre-commit" "$SKILL_ROOT/templates/pre-commit" \
   || fail "A templates/pre-commit 与 kit 不一致"
-cmp -s "$PA/agent-workflow/README.md" "$KIT/templates/README.md" || fail "A README 与 kit 不一致"
+cmp -s "$PA/agent-workflow/README.md" "$SKILL_ROOT/templates/README.md" || fail "A README 与 kit 不一致"
 grep -q 'OLD-GATE' "$PA/agent-workflow/check_workflow.sh" || fail "A 自定义门禁被静默覆盖"
 ok "A 升级后骨架模板与 kit 一致，自定义门禁保留"
 
 # DEV-205：升级登记目标骨架版 = kit 骨架版（落后 0.9.0 → 1.0.0）
 [ "$(cat "$PA/agent-workflow/FRAMEWORK_VERSION")" = "$KIT_KFF" ] \
   || fail "A 目标 FRAMEWORK_VERSION 未升级到 kit 骨架版：$(cat "$PA/agent-workflow/FRAMEWORK_VERSION")"
-ok "A 目标 FRAMEWORK_VERSION = kit 骨架版（$KIT_KFF）"
+ok "A 目标 FRAMEWORK_VERSION = kit 骨架版（${KIT_KFF}"
 
 # 断言：保留清单逐字节不动
 grep -q 'upgrade-marker-keep-project-yaml' "$PA/agent-workflow/project.yaml" || fail "A project.yaml 未保留"

@@ -3015,14 +3015,14 @@ PROJ9EOF
 if [ "$P9RC" -eq 0 ] && grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check1.log"; then
   ok "DEV-124 check 软提示：无沉淀+3 归档 → 提示且 rc=0"
 else
-  bad "DEV-124 check 软提示未出现（rc=$P9RC）"
+  bad "DEV-124 check 软提示未出现（rc=${P9RC}"
 fi
 printf '# 经验沉淀\n\n- 背景：造数验证\n- 结论：软提示工作正常\n' > "$TMP/proj9/agent-workflow/memory/history/软提示验证_2026-11-04.md"
 ( cd "$TMP/proj9" && "$KIT_DIR/bin/awf" check > "$TMP/proj9-check2.log" 2>&1 ); P9RC2=$?
 if [ "$P9RC2" -eq 0 ] && ! grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check2.log"; then
   ok "DEV-124 check 软提示：有沉淀 → 提示消失（rc=0）"
 else
-  bad "DEV-124 check 软提示未随沉淀消失（rc=$P9RC2）"
+  bad "DEV-124 check 软提示未随沉淀消失（rc=${P9RC2}"
 fi
 
 # 27. DEV-126 part C：会话命名 [awf] <目标项目> + 队列等待 --queue-timeout
@@ -3364,7 +3364,7 @@ second_ln="$(grep -n '第二条记录' "$LOG_TASK" | cut -d: -f1)"
 if [ -n "$first_ln" ] && [ -n "$second_ln" ] && [ "$first_ln" -lt "$second_ln" ]; then
   ok "D-216-t1 awf log 记录按追加顺序排列"
 else
-  bad "D-216-t1 awf log 记录顺序异常（first=$first_ln second=$second_ln）"
+  bad "D-216-t1 awf log 记录顺序异常（first=$first_ln second=${second_ln}"
 fi
 
 # 31.4 不存在任务 → 明确错误 + 非零
