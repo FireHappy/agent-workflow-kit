@@ -134,7 +134,9 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
     技能实体根 `VERSION` / 根 `FRAMEWORK_VERSION` 退役（install.sh 不再写、读点改模板）；
   - `--check` 增加版本契约漂移（manifest.source.version / frameworkVersion）与逐文件 sha256 校验。
 
-- **1.6.0（DEV-216）**：内嵌技能/awf CLI 副本（单源双形态，装插件即装工作流）+ 当前任务停滞/逾期派生指标
+- **1.6.0（DEV-216）**：
+  > 注：本条的 `copy-workflow-assets.mjs` 副本机制与 `copy-assets.test.js` 已于 1.7.1（DEV-218）退役（技能源迁入插件 `skills/`）；以下为历史记录。
+内嵌技能/awf CLI 副本（单源双形态，装插件即装工作流）+ 当前任务停滞/逾期派生指标
   - 单源双形态分发：新增 `scripts/copy-workflow-assets.mjs`（`--list` 零写入列产物 / `--copy` 幂等生成 /
     `--check` 漂移校验，退出码 1 即不一致），把技能库实体 `~/.dsh/skills/agent-workflow-scaffold`
     （含 SKILL.md / skills/* / templates/* / test/*）打进 `skills/agent-workflow-scaffold/`，并把 kit 仓库

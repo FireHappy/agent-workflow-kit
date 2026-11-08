@@ -1562,7 +1562,7 @@ assert "超上限新建（--allow-over-3 确认）" in logs[0], "超限新建必
 # ---- ③ 并发新建互斥：文件锁串行化 + 锁后重读池再决策 ----
 lock_path = module.project_lock_path(target)
 assert lock_path.name == f".lock-{project}", lock_path
-assert str(lock_path).startswith(str(pathlib.Path.cwd())), "锁文件必须位于本地 .dispatch/ 下"
+assert str(lock_path).startswith(str(pathlib.Path.cwd())) and ".dispatch" in str(lock_path), "锁文件必须位于本地 .dispatch/ 下"
 # 持锁期间第二个调用方阻塞，释放后拿到
 held_at = []
 result = []
