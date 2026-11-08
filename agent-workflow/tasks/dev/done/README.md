@@ -116,3 +116,4 @@
 | DEV-216 | P1 | 借鉴 dsh-task-ledger 落地 5 项(执行记录/validate/纪律/插件单源化/派生指标) | 2026-11-08 |
 | DEV-217 | P2 | 插件技能副本源收敛:copy 以仓库/发布 tag 为源(技能分发独立化) | 2026-11-08 |
 | DEV-218 | P2 | 技能源迁入插件（唯一开发路径）+ 仓库去重 + dispatch 改名 | 2026-11-08 |
+| DEV-219 | P2 | 版本锚点统一到插件 package.json + 删除 agent-workflow/VERSION | 2026-11-08 |

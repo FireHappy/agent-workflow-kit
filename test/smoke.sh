@@ -361,6 +361,24 @@ else
   bad "DEV-219 拒绝改写时原文件被修改"
 fi
 
+# DEV-219：JSON 锚点缺顶层 version 键 → 拒绝改写（不得落入文本分支覆盖 JSON）
+REL_JSON_NOV="$TMP/release-json-nov"
+make_release_fixture "$REL_JSON_NOV"
+printf 'id: release-json-nov\nversion_file: package.json\n' > "$REL_JSON_NOV/agent-workflow/project.yaml"
+printf '{\n  "name": "demo",\n  "private": true\n}\n' > "$REL_JSON_NOV/package.json"
+rm -f "$REL_JSON_NOV/VERSION"
+json_nov_before="$(cat "$REL_JSON_NOV/package.json")"
+if "$SKILLS_BIN" release-prep --root "$REL_JSON_NOV" 0.4.2 >/dev/null 2>&1; then
+  bad "DEV-219 缺 version 键的 JSON 锚点应拒绝（实际成功）"
+else
+  ok "DEV-219 缺 version 键的 JSON 锚点拒绝改写（非零退出）"
+fi
+if [ "$(cat "$REL_JSON_NOV/package.json")" = "$json_nov_before" ]; then
+  ok "DEV-219 缺 version 键时原 JSON 保持不变"
+else
+  bad "DEV-219 缺 version 键时原 JSON 被改写"
+fi
+
 # DEV-205 双版本模型：源持骨架版本 FRAMEWORK_VERSION（单行 semver，无 v 前缀）
 KFF_SRC="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
 [ -f "$KFF_SRC" ] || KFF_SRC="$KIT_DIR/FRAMEWORK_VERSION"

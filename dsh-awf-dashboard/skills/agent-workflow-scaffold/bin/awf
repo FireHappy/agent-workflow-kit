@@ -1630,7 +1630,9 @@ cmd_release_prep() {
     die "缺少 CHANGELOG.md，无法更新版本条目（请手动补）"
   fi
   mkdir -p "$(dirname "$VF")"
-  if grep -q '"version"[[:space:]]*:' "$VF" 2>/dev/null; then
+  # JSON 锚点判定：.json 扩展名或文件以 { 开头（DEV-219 边界修复：缺 version 键也必须走 JSON 分支被拒绝，
+  # 不能落入文本分支把 package.json 覆盖成纯文本）
+  if [ "${VF##*.}" = "json" ] || head -c 1 "$VF" 2>/dev/null | grep -q '{'; then
     # DEV-219：JSON 版本锚点（如 package.json）——python3 解析后只改【顶层 version 字段】，
     # 保留 scripts.version 等其它同名字段；临时文件同目录 + 原子替换 + 保留原权限，失败不损坏原文件。
     if ! command -v python3 >/dev/null 2>&1; then

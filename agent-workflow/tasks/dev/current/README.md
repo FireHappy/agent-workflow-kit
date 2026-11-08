@@ -7,4 +7,3 @@
 | DEV-194 | P1 | active | lead | 派发 v1.4.0 升级至全部登记项目（10 目标） |
 | DEV-196 | P1 | blocked | lead | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） |
 | DEV-201 | P1 | blocked | lead | 派发打包任务至 rokid_system_components（用户直派） |
-| DEV-219 | P2 | review | lead | 版本锚点统一到插件 package.json + 删除 agent-workflow/VERSION |
