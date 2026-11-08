@@ -3380,9 +3380,10 @@ def main(argv=None) -> int:
         "--retire-session",
         default="",
         metavar="SESSION_ID",
-        help="（SESSION-20261108）单次派发的收尾：把已完成核验的派发会话归档退役"
+        help="（SESSION-20261108）单次派发收尾第 1 步：把已完成核验的派发会话归档退役"
         "（默认 dry-run；--apply 经 workspace/archiveSession 归档并写本地台账）。"
-        "宿主 DSH 没有会话物理删除接口——归档 = 隐藏 + 退出复用池，数据仍在磁盘、可恢复",
+        "宿主 DSH 没有会话物理删除接口——归档 = 隐藏 + 退出复用池；"
+        "第 2 步用 dsh-session-gc 删文件（先归档、再删）",
     )
     parser.add_argument(
         "--permission-state",
@@ -3410,7 +3411,7 @@ def main(argv=None) -> int:
         "--new",
         dest="reuse",
         action="store_false",
-        help="强制新建会话（隔离/调试），不复用",
+        help="强制新建会话（新范式：每次派发都新建，完成后 --retire-session 归档 + dsh-session-gc 删文件）",
     )
     parser.add_argument(
         "--module",

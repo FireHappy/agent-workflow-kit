@@ -67,6 +67,7 @@ router 只写：**用户意图 / 硬约束 / 验收标准 / 路由裁决**。
 
 ### 会话命名与模块
 
+- **标准会话生命周期（用户定，SESSION-20261108 + PURGE-20261108）**：每次派发用 `--new` → 任务完成回执核验 → `--retire-session <ID> --apply` 归档 → `dsh-session-gc quarantine --ids <ID> --apply` 移出会话目录（可恢复）→ 确认后 `dsh-session-gc trash --apply` 永久清空。`--reuse` 仅保留兼容/特殊场景，不再作为默认期望
 - 标题固定为 `[awf] [派发者] [任务名]`，复用时动态改名；模块仅用于票据分类展示
 - 复用池 = 同一项目 cwd 下**全部未归档** `[awf]` 前缀会话，不区分派发者/模块/任务名/blank；**归档台账（`.dispatch/archived-sessions.json`）记录的会话 id 不进池**（已归档会话不参加复用与统计）
 - **无每项目 [awf] 会话数量上限**（DEV-224 取消）：入池后只校验忙碌状态；池内都忙 → 轮询等待任一空闲；默认不新建，`--new` 为显式逃生口
@@ -394,7 +395,12 @@ DEV-224 起**无每项目数量上限**：入池=项目下未归档 `[awf]` 会�
   5. `it.each([... "session/delete" ...])` 是 SDK 协议测试（校验无 session header 时拒绝），不是 DSH 行为。
   6. `workspace/archiveSession` = 仅隐藏；`workspace/delete` = 删除工作区登记但**保留文件与会话**；会话右键菜单无删除；会话后端文档自述「不删除会话文件」。**DSH 侧无任何可达的物理删除路径。**
 - **最接近替代（已落地命令）**：`--retire-session <会话ID> [--apply]`（仅 `[awf]` 派发会话；非派发用户会话拒绝退役）——归档 + 写本地归档台账，会话退出复用池与 GUI 分组。与物理删除的差异：**不回收磁盘、可经 `workspace/unarchiveSession` 恢复、`~/.dsh/sessions/` 仍保留**；脚本**不硬删任何文件**
-- **推荐流程**：`--new` 派发 → 必报点 10 完成回执 → 派发方核验（commit / 账本）→ `--retire-session <ID> --apply` → `--prune` 删票据。宿主将来提供删除 RPC 后可替换为真删除
+- **标准流程（先归档、再删文件）**：
+  1. `--new` 派发；必报点 10 完成回执；派发方核验（commit / 账本）
+  2. `awf-dispatch --retire-session <ID> --apply`：归档 + 写台账（退出复用池 / GUI 分组）
+  3. `dsh-session-gc quarantine --ids <ID> --apply`：会话目录 + `session_projcache` 移入 `~/.dsh/.session-trash/<ts>/`（可恢复）
+  4. 确认不再需要：`dsh-session-gc trash --apply` 永久清空回收区；`--prune` 删票据
+  宿主将来提供删除 RPC 后可把第 3 步替换为真删除
 
 ```sh
 awf-dispatch --retire-session <会话ID>            # dry-run：打印退役计划
@@ -405,7 +411,7 @@ awf-dispatch --retire-session <会话ID> --apply    # 归档 + 写台账（非�
 
 宿主 DSH 0.2.2-rc.1 没有删除 API，官方文档说明会话文件需**外部移除**。`scripts/dsh-session-gc` 提供安全清理：
 
-- **默认只处理 DSH 已归档会话**（`workspace.json` 的 `archivedSessionIds`）——先归档、再删文件；未归档会话需显式 `--allow-unarchived`。
+- **默认只处理 DSH 已归档会话**（`workspace.json` 的 `archivedSessionIds`）——先归档、再删文件；未归档会话需显式 `--allow-unarchived`。派发收尾用 `--ids <ID>` 精确清理刚归档的会话。
 - `list --archived`：只读盘点（大小 / 年龄 / 是否运行 / 归档）。
 - `quarantine --archived --apply`：移入 `~/.dsh/.session-trash/<时间戳>/`（**可恢复**），同步移走 `session_projcache`；`trash --apply` 再永久清空回收区。
 - `purge --archived --yes`：跳过回收区直接永久删除（高级用法）。
