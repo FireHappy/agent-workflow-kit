@@ -112,9 +112,9 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 - 派生只读字段（`src/ledger.js` `deriveTaskAging`，DEV-216）：任务块 `stale`（最近更新距今 ≥3 天）、
   `overdue`（认领/最近更新距今 ≥7 天）；取不到时间戳（字段缺失或日期非法）→ `null`，不编造；
   字段抽取 comment-aware（`<!-- ... -->` 注释区间跳过，注释内旧示例不污染派生指标）
-- 测试：`node --test test/ledger.test.js test/client-chunk.test.js test/copy-assets.test.js`（无需 GUI）
+- 测试：`node --test test/ledger.test.js test/client-chunk.test.js`（无需 GUI）
 - 开发中改动同步到已安装副本：`./scripts/sync-profile.sh`；刷新/重启宿主后生效
-- 内嵌技能/awf CLI 副本：`node scripts/copy-workflow-assets.mjs --copy`（见「内嵌技能/CLI 副本」一节）
+- 技能源：`dsh-awf-dashboard/skills/`（唯一开发路径，见「技能源」一节，DEV-218）
 
 ## 约束
 

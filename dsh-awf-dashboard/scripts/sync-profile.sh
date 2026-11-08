@@ -5,8 +5,7 @@
 #   默认 profile = ~/.dsh/profiles/desktop（也可传其他 profile 目录名）。
 # 把本插件目录的 lib/ src/ skills/ 与 package.json / README.md / cordis.patch.yml
 # 复制到已安装副本（profile 从 node_modules 解析 bundle），随后重启 DSH 生效。
-# skills/（DEV-216 内嵌技能/awf CLI 副本）存在时才同步；副本请先经
-#   node scripts/copy-workflow-assets.mjs --copy 生成。
+# skills/（DEV-218：技能唯一源）整目录同步。
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,11 +29,11 @@ sync_one() {
 for f in lib/index.js lib/client.js; do sync_one "$HERE/$f" "$DEST/$f"; done
 for f in src/ledger.js src/agents-poc.js src/task-protocol.js src/managed-action-agent.js; do sync_one "$HERE/$f" "$DEST/$f"; done
 for f in package.json README.md cordis.patch.yml; do sync_one "$HERE/$f" "$DEST/$f"; done
-# DEV-216：内嵌技能/awf CLI 副本整目录同步（先删后拷，避免源已移除文件残留）
-if [ -d "$HERE/skill" ]; then
-  rm -rf "$DEST/skill"
-  cp -R "$HERE/skill" "$DEST/skill"
-  echo "已同步内嵌副本 skills/（$(find "$HERE/skill" -type f | wc -l | tr -d ' ') 个文件）"
+# DEV-218：技能源（skills/）整目录同步（先删后拷，避免源已移除文件残留）
+if [ -d "$HERE/skills" ]; then
+  rm -rf "$DEST/skills"
+  cp -R "$HERE/skills" "$DEST/skills"
+  echo "已同步内嵌副本 skills/（$(find "$HERE/skills" -type f | wc -l | tr -d ' ') 个文件）"
 fi
 
 echo "已同步 $HERE → $DEST（版本：$(node -p "require('$DEST/package.json').version")）"

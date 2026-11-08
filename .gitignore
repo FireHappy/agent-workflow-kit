@@ -22,4 +22,4 @@ __pycache__/
 /.agent-teams/
 
 # 派发任务记录（本地，默认忽略）
-/..dispatch/
+/.dispatch/
