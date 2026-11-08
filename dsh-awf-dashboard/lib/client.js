@@ -2898,6 +2898,47 @@ window.__ModuleLoader__.load({
       return h('span', { style: { fontWeight: 600, fontSize: F(12) } }, 'Agent Workflow')
     }
 
+    // DEV-226：对话右上角「工作流」入口——点击直接打开右侧栏的 Agent Workflow 页签。
+    // 优先 better-sidebar 的 openTab（本 profile 已装，点击展开侧边栏并聚焦页签）；
+    // 未装时回退宿主 layout.openRightbar（右侧栏显示后用户点 Agent Workflow 页签）。
+    // 服务用 ctx.get 动态读取（不写进 exports.inject，避免宿主无该服务时整个插件 pending）。
+    function OpenWorkflowButton() {
+      const open = () => {
+        try {
+          const better = typeof ctx.get === 'function' ? ctx.get('betterSidebar') : null
+          if (better && typeof better.openTab === 'function') {
+            better.openTab({ type: 'awf-dashboard' })
+            return
+          }
+          const layout = typeof ctx.get === 'function' ? ctx.get('layout') : null
+          if (layout && typeof layout.openRightbar === 'function') {
+            layout.openRightbar(true, false)
+          }
+        } catch (err) {
+          // 打不开面板不阻塞对话（按钮只是入口，失败静默）
+          try { console.warn('[awf] 打开工作流面板失败', err) } catch { /* 忽略 */ }
+        }
+      }
+      return h('button', {
+        type: 'button',
+        title: '打开 Agent Workflow 工作流面板',
+        'aria-label': '打开 Agent Workflow 工作流面板',
+        onClick: open,
+        style: {
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: F(26), height: F(26), marginLeft: F(4), padding: 0,
+          border: 'none', borderRadius: F(6), background: 'transparent',
+          color: 'inherit', cursor: 'pointer', opacity: 0.82,
+        },
+      }, h('svg', {
+        width: F(15), height: F(15), viewBox: '0 0 16 16', fill: 'none',
+        stroke: 'currentColor', 'stroke-width': 1.5,
+        'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      },
+        h('rect', { x: 2, y: 2.5, width: 12, height: 11, rx: 2 }),
+        h('path', { d: 'M5 6.2h6M5 9h6M5 11.8h3.5' })))
+    }
+
     // ---- 插件体 -----------------------------------------------------------
     //
     // 注意：这里是 cordis **服务注入**（ctx.get 可取的键），不是包名！
@@ -2928,6 +2969,11 @@ window.__ModuleLoader__.load({
           key: 'awf-dashboard',
           inject: (sessionId) => ({ sessionId }),
         }, TabTitle)))
+        // DEV-226：对话右上角「工作流」按钮——点击直接打开/聚焦右侧栏的 Agent Workflow 页签。
+        disposers.push(ctx.slots.inject('conversation.session.header.corner', () => ctx.slots.register({
+          name: 'conversation.session.header.corner',
+          key: 'awf-open-workflow',
+        }, OpenWorkflowButton)))
         // DEV-170 v2：会话头部回执入口已移除（用户弃用）；回执经 --report 投递派发方会话，无独立 UI 面板（DEV-195 移除 awf-reports）
         // 通道 2：better-sidebar 接管右侧边栏时（本 profile 已装），把页签注册进它的
         // registerTab 服务，用户才看得到。注意必须用 ctx.inject(['betterSidebar'], cb)
