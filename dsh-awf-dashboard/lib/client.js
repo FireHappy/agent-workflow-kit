@@ -3148,7 +3148,7 @@ window.__ModuleLoader__.load({
         onMouseEnter: (ev) => {
           try {
             const el = ev && ev.currentTarget
-            if (el) el.style.background = active ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.05)'
+            if (el) el.style.background = active ? 'rgba(255,255,255,0.34)' : 'rgba(255,255,255,0.10)'
           } catch { /* 忽略 */ }
         },
         onMouseLeave: (ev) => {
