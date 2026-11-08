@@ -1631,16 +1631,40 @@ cmd_release_prep() {
   fi
   mkdir -p "$(dirname "$VF")"
   if grep -q '"version"[[:space:]]*:' "$VF" 2>/dev/null; then
-    # DEV-219：JSON 版本锚点（如 package.json）——只替换 version 字段值，保留其余内容
-    local vtmp
-    vtmp="$(mktemp "${TMPDIR:-/tmp}/awf-ver.XXXXXX")" || vtmp="$VF.tmp.$$"
-    if sed "s/\"version\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"version\": \"$version\"/" "$VF" > "$vtmp" && grep -q '\"version\"' "$vtmp"; then
-      mv "$vtmp" "$VF"
-      say "已写版本锚点 ${VF}（JSON version 字段）=$version"
-    else
-      rm -f "$vtmp"
-      die "版本锚点写入失败（JSON 格式无法安全替换）：$VF"
+    # DEV-219：JSON 版本锚点（如 package.json）——python3 解析后只改【顶层 version 字段】，
+    # 保留 scripts.version 等其它同名字段；临时文件同目录 + 原子替换 + 保留原权限，失败不损坏原文件。
+    if ! command -v python3 >/dev/null 2>&1; then
+      die "JSON 版本锚点需要 python3，当前环境缺失：$VF（或改用文本锚点）"
     fi
+    if ! python3 - "$VF" "$version" <<'PYEOF'
+import json, os, sys, tempfile
+p, ver = sys.argv[1], sys.argv[2]
+try:
+    with open(p, encoding='utf-8') as f:
+        data = json.load(f)
+except Exception as e:
+    sys.exit('无法解析 JSON：%s' % e)
+if not isinstance(data, dict) or 'version' not in data:
+    sys.exit('JSON 缺少顶层 version 字段')
+data['version'] = ver
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(p)), prefix='.awf-ver-', suffix='.json')
+try:
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write('\n')
+    os.chmod(tmp, os.stat(p).st_mode)
+    os.replace(tmp, p)
+except BaseException:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    raise
+PYEOF
+    then
+      die "版本锚点写入失败（JSON）：$VF"
+    fi
+    say "已写版本锚点 ${VF}（JSON version 字段）=$version"
   else
     printf '%s\n' "$version" > "$VF"
     say "已写版本锚点 ${VF}=$version"

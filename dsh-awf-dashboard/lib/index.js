@@ -351,7 +351,7 @@ async function projectVersions(projectPath) {
 /**
  * 汇总版本状态：latest（已最新）/ outdated（落后，给出 upgradeTo）/ unknown（kit 或版本不可读）。
  * 双版本模型（DEV-205，取代 DEV-184 单一 AWF 代次判定）：
- *   - 技能版本 Skill-Version = kit agent-workflow/VERSION（skillVersion）：插件显示用，技能更新不触发项目 outdated。
+ *   - 技能版本 Skill-Version = 插件 dsh-awf-dashboard/package.json（skillVersion，DEV-217/219）：插件显示用，技能更新不触发项目 outdated。
  *   - 骨架版本 Framework-Version = agent-workflow/FRAMEWORK_VERSION（kit 与项目各一份，semver）：
  *     upgrade/outdated 判定的唯一依据。
  * 判定链：

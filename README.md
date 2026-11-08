@@ -19,7 +19,7 @@ agent-workflow-kit/
 ├── test/                    # 冒烟 / 升级回归 / 全局索引并发测试
 ├── docs/design.md           # 设计取舍（含激活式 Router 协议）
 ├── install.sh               # 从 dsh-awf-dashboard/skills/ 安装全部技能到 ~/.dsh/skills
-└── agent-workflow/          # kit 自身工作流账本与骨架（含 agent-workflow/VERSION 发布锚点）
+└── agent-workflow/          # kit 自身工作流账本与骨架（发布版本锚点 = dsh-awf-dashboard/package.json，DEV-219）
 ```
 
 ## 安装（新机器）

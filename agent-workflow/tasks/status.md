@@ -11,7 +11,7 @@
 | dev | DEV-194 | P1 | active | lead | 派发 v1.4.0 升级至全部登记项目（10 目标） |
 | dev | DEV-196 | P1 | blocked | lead | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） |
 | dev | DEV-201 | P1 | blocked | lead | 派发打包任务至 rokid_system_components（用户直派） |
-| dev | DEV-219 | P2 | active | lead | 版本锚点统一到插件 package.json + 删除 agent-workflow/VERSION |
+| dev | DEV-219 | P2 | review | lead | 版本锚点统一到插件 package.json + 删除 agent-workflow/VERSION |
 
 ## 待处理
 
@@ -30,5 +30,5 @@
 | dev | DEV-202 | P1 | 修复 upgrade 回归测试与新形态不符（workflows/ 退役 + bin 空目录） | 2026-11-07 |
 | dev | DEV-203 | P2 | upgrade 回归测试健壮性增强（DEV-202 复核建议 1/2/3/4/5/6） | 2026-11-07 |
 
-*最后更新：2026-11-08 15:17*
+*最后更新：2026-11-08 15:24*
 <!-- awf:status:end -->

@@ -1847,8 +1847,18 @@ export async function readProjectRelease(projectPath) {
   const meta = await readProjectMetaFile(projectPath)
   const file = projectVersionFile(projectPath, meta)
   try {
-    const v = String(await readFile(file, 'utf8')).trim()
-    return v || null
+    const raw = String(await readFile(file, 'utf8')).trim()
+    if (!raw) return null
+    // DEV-219：JSON 版本锚点（如 package.json）只取顶层 version 字段，避免把整段 JSON 当版本
+    if (raw.startsWith('{')) {
+      try {
+        const v = JSON.parse(raw).version
+        return typeof v === 'string' && v ? v : null
+      } catch {
+        return null
+      }
+    }
+    return raw
   } catch {
     return null
   }
