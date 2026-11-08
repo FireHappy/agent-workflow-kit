@@ -25,5 +25,5 @@
 | dev | DEV-218 | P2 | 技能源迁入插件（唯一开发路径）+ 仓库去重 + dispatch 改名 | 2026-11-08 |
 | dev | DEV-219 | P2 | 版本锚点统一到插件 package.json + 删除 agent-workflow/VERSION | 2026-11-08 |
 
-*最后更新：2026-11-08 23:31*
+*最后更新：2026-11-08 23:41*
 <!-- awf:status:end -->

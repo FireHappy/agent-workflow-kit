@@ -3034,6 +3034,26 @@ window.__ModuleLoader__.load({
       const open = () => {
         const layout = ctx && typeof ctx.get === 'function' ? ctx.get('layout') : null
         try {
+          // 优先：直接打开工作流页签（stage-1 tab 类型注册后 openTab 直达，跳过默认页签/菜单）
+          const sr = ctx && typeof ctx.get === 'function' ? ctx.get('sidebarRight') : null
+          if (sr && typeof sr.openTab === 'function') {
+            if (isWorkflowVisible()) {
+              const root = rightbarRoot()
+              const closeBtn = root ? Array.from(root.querySelectorAll('button')).find((b) => {
+                const t = (b.getAttribute('title') || b.getAttribute('aria-label') || '')
+                return t.indexOf('关闭') >= 0
+              }) : null
+              if (closeBtn) realClick(closeBtn)
+              else if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
+              setActive(false)
+              setTimeout(() => setActive(isWorkflowVisible()), 350)
+              return
+            }
+            try { sr.openTab('awf-dashboard') } catch { /* 忽略 */ }
+            setActive(true)
+            setTimeout(() => setActive(isWorkflowVisible()), 400)
+            return
+          }
           if (isWorkflowVisible()) {
             // 关闭工作流：点击右侧栏页签自带的「关闭」按钮；
             // 关掉最后一个页签时宿主会自动收起侧栏，开着其他页签则保持侧栏（即恢复打开前状态）
@@ -3209,6 +3229,21 @@ window.__ModuleLoader__.load({
 
         // DEV-226：对话右上角「工作流」按钮——actions 是 list 槽（corner 是 single，注册不进去），
         // 放在所有核心注册之后 + 异常隔离，按钮注册失败不影响工作流页签。
+        // DEV-226：注册右侧栏 tab 类型（stage 1）——使 sidebarRight.openTab(kind) 能直接打开工作流页签
+        disposers.push(ctx.inject(['sidebarRightTabs'], (injected) => {
+          const tabs = injected.get('sidebarRightTabs')
+          if (!tabs || typeof tabs.register !== 'function') return () => {}
+          try {
+            const end = tabs.register({
+              id: 'awf-dashboard',
+              kind: 'awf-dashboard',
+              title: () => 'Agent Workflow',
+              priority: 'extension',
+            })
+            return () => { try { end() } catch { /* 忽略 */ } }
+          } catch { return () => {} }
+        }))
+
         try {
           disposers.push(ctx.slots.inject('conversation.session.header.utilities', () => {
             try {
