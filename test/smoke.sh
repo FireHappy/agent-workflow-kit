@@ -343,6 +343,24 @@ else
   bad "DEV-219 JSON 锚点写入错误"
 fi
 
+# DEV-219：非字符串 version（"version": 1）→ release-prep 拒绝改写且原文件不变
+REL_JSON_BAD="$TMP/release-json-bad"
+make_release_fixture "$REL_JSON_BAD"
+printf 'id: release-json-bad\nversion_file: package.json\n' > "$REL_JSON_BAD/agent-workflow/project.yaml"
+printf '{\n  "name": "demo",\n  "version": 1\n}\n' > "$REL_JSON_BAD/package.json"
+rm -f "$REL_JSON_BAD/VERSION"
+json_bad_before="$(cat "$REL_JSON_BAD/package.json")"
+if "$SKILLS_BIN" release-prep --root "$REL_JSON_BAD" 0.4.2 >/dev/null 2>&1; then
+  bad "DEV-219 非字符串 version 应拒绝改写（实际成功）"
+else
+  ok "DEV-219 非字符串 version 拒绝改写（非零退出）"
+fi
+if [ "$(cat "$REL_JSON_BAD/package.json")" = "$json_bad_before" ]; then
+  ok "DEV-219 拒绝改写时原文件保持不变"
+else
+  bad "DEV-219 拒绝改写时原文件被修改"
+fi
+
 # DEV-205 双版本模型：源持骨架版本 FRAMEWORK_VERSION（单行 semver，无 v 前缀）
 KFF_SRC="$KIT_DIR/agent-workflow/FRAMEWORK_VERSION"
 [ -f "$KFF_SRC" ] || KFF_SRC="$KIT_DIR/FRAMEWORK_VERSION"

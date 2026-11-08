@@ -1646,6 +1646,8 @@ except Exception as e:
     sys.exit('无法解析 JSON：%s' % e)
 if not isinstance(data, dict) or 'version' not in data:
     sys.exit('JSON 缺少顶层 version 字段')
+if not isinstance(data.get('version'), str):
+    sys.exit('顶层 version 字段不是字符串，拒绝改写')
 data['version'] = ver
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(p)), prefix='.awf-ver-', suffix='.json')
 try:

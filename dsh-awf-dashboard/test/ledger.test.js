@@ -649,7 +649,7 @@ test('DEV-178 readProjectRelease 默认：未配置 version_file → 读仓库�
   }
 })
 
-test('DEV-178 readProjectRelease 已配置：version_file 指向的相对文件优先（kit 自身 = agent-workflow/VERSION）', async () => {
+test('DEV-178 readProjectRelease 已配置：version_file 指向的相对文件优先（kit 自身 = package.json，DEV-219）', async () => {
   const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
   const { join } = await import('node:path')
   const { tmpdir } = await import('node:os')
