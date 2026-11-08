@@ -1,9 +1,10 @@
-## [Unreleased]
+## [1.7.0] - 2026-11-08
 
 ### Fixed
 - **满池等待返回值同步 + 并发记账提示（DEV-215）**：`wait_session_ready` 在满池监听返回任一空闲会话后，发送/改名/日志一律以返回会话为准（此前 session_id 只更新在函数局部，等待目标≠发送目标，监听可能白等）；同项目活跃 `[awf]` 会话 >1 时任务包自动注入记账提示（按票据任务编号登记账本/commit），避免并行 worker 自排相同 ID 造成账本覆盖（UXR-POOL 002/003 曾撞 DEV-091）——经 5 连发实测定位
 
 ### Added
+- **版本锚点统一到插件 package.json（DEV-219）**：kit 发布版本锚点由 `agent-workflow/VERSION` 迁移到 `dsh-awf-dashboard/package.json`（`project.yaml` 的 `version_file` 指向），删除重复 VERSION 文件；`awf release-prep` 支持 JSON 锚点（python3 精准改写顶层 version 字段，`scripts.version` 等其它字段保留；非字符串/非法 JSON/缺 version 键一律拒绝且不损坏原文件）；`src/ledger.js readProjectRelease` 支持 JSON 锚点；版本体系收敛为「发布版 = package.json / 骨架版 = templates/FRAMEWORK_VERSION / 项目实例 = agent-workflow/FRAMEWORK_VERSION」。
 - **技能源迁入插件 + 去重（DEV-218）**：`dsh-awf-dashboard/skills/` 升格为全项目技能唯一源（唯一开发路径）；仓库根 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本移除，`install.sh` / `test/` / AGENTS 模板 / `project.yaml` / 文档引用改指插件路径；`copy-workflow-assets.mjs` 与 manifest / 构建产物机制退役（单源，无副本）；`dispatch/` 改名 `.dispatch/`（派发任务记录，默认忽略），派发技能（awf-dispatch）与文档同步；插件 1.7.0→1.7.1。
 - **满池修复四件套（DEV-214）**：`awf-dispatch` 满池监听等待逻辑补齐四个缺陷——① **本地归档台账**：`--cleanup --apply` 归档的会话 id 写入 `.dispatch/archived-sessions.json`（派发方本地、不入库），组装复用池/统计每项目 `[awf]` 会话数时排除台账记录，已归档会话不再占池（不等待/不计数）；新增 `--forget-archived` 重置台账（其中会话恢复进入复用池）；② **`--new` 上限校验**：目标项目 `[awf]` 池满 3 个且全忙时，`--new` 需显式 `--allow-over-3` 确认（本次超限新建写入派发日志留痕），不再静默绕过每项目 3 个并发上限；③ **并发新建互斥**：同一项目新建决策用文件锁 `.dispatch/.lock-<project>` 串行化，拿到锁后重读池再决策——并发方刚建出的可复用会话改为复用、不重复新建；④ **`--cleanup`**：列出每项目超 3 的空闲 `[awf]` 会话（保留最近更新 3 个、运行中跳过），`--apply` 逐个经 `workspace/archiveSession` 归档并写入台账——SKILL 参数表与机制说明同步，smoke 补归档排除/上限确认/锁互斥/清理四类断言（217 项全绿）
 

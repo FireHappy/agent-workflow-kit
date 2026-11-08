@@ -24,10 +24,10 @@
 | dev | DEV-217 | P2 | 插件技能副本源收敛:copy 以仓库/发布 tag 为源(技能分发独立化) | 2026-11-08 |
 | dev | DEV-218 | P2 | 技能源迁入插件（唯一开发路径）+ 仓库去重 + dispatch 改名 | 2026-11-08 |
 | dev | DEV-219 | P2 | 版本锚点统一到插件 package.json + 删除 agent-workflow/VERSION | 2026-11-08 |
+| dev | DEV-220 | P1 | release-prep 1.7.0 | 2026-11-08 |
 | dev | DEV-195 | P1 | 派发术语统一为「回执」+ 票据生命周期统一「用完即删」 | 2026-11-07 |
 | dev | DEV-198 | P1 | 版本锚点迁移框架支持：version_file → agent-workflow/VERSION 全链路 + 根 VERSION 防踩坑检查 | 2026-11-07 |
 | dev | DEV-201 | P1 | 派发技能自包含，移除旧入口 | 2026-11-07 |
-| dev | DEV-202 | P1 | 修复 upgrade 回归测试与新形态不符（workflows/ 退役 + bin 空目录） | 2026-11-07 |
 
-*最后更新：2026-11-08 15:34*
+*最后更新：2026-11-08 15:35*
 <!-- awf:status:end -->
