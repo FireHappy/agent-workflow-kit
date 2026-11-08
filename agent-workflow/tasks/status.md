@@ -27,5 +27,5 @@
 | dev | DEV-220 | P1 | release-prep 1.7.0 | 2026-11-08 |
 | dev | DEV-201 | P1 | 派发打包任务至 rokid_system_components（用户直派） | 2026-11-07（置 blocked） |
 
-*最后更新：2026-11-08 15:58*
+*最后更新：2026-11-08 16:00*
 <!-- awf:status:end -->
