@@ -21,10 +21,10 @@
 
 模块来源：`--module` > 票据「模块：」行 > 默认「通用」；模块只影响票据分类展示。
 会话标题统一为 `[awf] [派发者] [任务名]`（DEV-134）：派发者 = `--sender` > 票据
-「派发者：」行 > 调度方项目名（默认）；任务名 = 当次票据的 `ID 短标题`（动态）。会话收敛：
-同一派发者在同一目标项目最多 3 个 [awf] 任务会话——池内空闲（running=False）
-优先复用（改名接新任务）；都忙且池未满则新建扩充；池满（>=3）都忙才排队等待
-（--queue-timeout，默认 180s；超时按队列超时报错）。
+「派发者：」行 > 调度方项目名（默认）；任务名 = 当次票据的 `ID 短标题`（动态）。会话复用（DEV-224）：
+目标项目全部未归档 [awf] 会话入池，池内未占用且 running=False 的空闲会话优先复用（取 updatedAt 最新）；
+都忙则轮询等待任一空闲（--queue-timeout，默认 180s）；默认不新建，池空或显式 --new 才新建；
+并发占用由全局登记表（$DSH_HOME/.awf-dispatch/）+ 文件锁协调；无每项目数量上限。
 
 用法：
   ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
@@ -91,10 +91,8 @@ DEFAULT_IDLE_WAIT = 300
 # 调度方项目名（DEV-136：默认 = 发起派发的会话所在项目，如 agent-workflow-kit））
 # + 当前任务摘要（ID + 短标题，随派发动态更新）；前缀保持 [awf]（DEV-126 澄清）。
 AWF_TITLE_PREFIX = "[awf]"
-# DEV-134/DEV-210：同一项目 [awf] 任务会话总数上限（用户语义「一个项目 [awf] 会话 ≤3」）。
-# 池内空闲优先复用（在 [awf] 中取闲置会话改名接新任务）；都忙且池未满 → 新建扩充；
-# 池满（>=MAX）都忙 → 等待空闲。复用不受此限；仅「需要新建」时按项目池总数判断。
-# 无全局 [awf] 会话总数上限（DEV-183 全局上限已按用户要求移除——用户只要每项目 ≤3）。
+# DEV-224：每项目 [awf] 会话数量上限已取消。此常量仅保留给 --cleanup（存量收敛：每项目保留
+# 最近更新的 3 个空闲会话）与旧监听逻辑的兼容阈值，不再参与新建/复用决策。
 MAX_SENDER_SESSIONS = 3
 # 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
 # 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
@@ -1126,8 +1124,7 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
     派发者段/任务名/新旧格式**（`[awf] [派发者] [任务]` 新格式与
     `[awf] <项目> · <模块>` DEV-134 前旧常驻都算）：
     - 池里有空闲（running=False）→ 选最新空闲的复用（改名接新任务）；
-    - 池里都忙：池未满（<{MAX}）→ 返回 None，调用方新建扩充并发；
-    - 池满（>={MAX}）都忙 → 返回一个忙碌候选，调用方等它空闲（不新建第 {MAX}+1 个）。
+    - 池里都忙 → 返回一个忙碌候选，调用方轮询等待任一空闲（DEV-224：不再新建）。
     任务名段不参与判定，复用后由调用方改名覆盖。
     非 `[awf]` 前缀的会话（用户自建/普通）不进池；池为空时的无前缀旧格式
     （DEV-126 前 `<项目> · <任务>`）迁移由 legacy_probe 把关闭（RT-1）。
@@ -1174,7 +1171,6 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
             # 探子读不到消息记录（会话/page 失败等）：宁可不迁移，也不赌。
             return None
         return legacy[0]
-    return None
     return None
 
 
@@ -2355,8 +2351,8 @@ def wait_session_ready(api, rows, session_id, target, args):
             "--queue-timeout 可调）",
             args.json,
         )
-        # 项目池达到 3 个且全忙：启动独立监听子进程监听整个 [awf] 池，
-        # 任一会话空闲即返回给主派发流程复用；测试桩/非 DshApi 仍走内联等待。
+        # DEV-224：无每项目上限；--session / 并发重读的等待期间若项目池 ≥3 且目标会话忙，
+        # 仍启动独立监听子进程观察整个 [awf] 池（任一会话空闲即返回复用）；测试桩走内联等待。
         project_pool = project_awf_pool(rows, target)
         if isinstance(api, DshApi) and len(project_pool) >= MAX_SENDER_SESSIONS:
             emit("启动会话监听子进程：等待项目 [awf] 会话池任一空闲后继续发送", args.json)
@@ -2511,10 +2507,8 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             ready_confirmed = True  # pick_claim 已确认空闲并占用，无需再排队等待
 
     if session_id is None:
-        # 新建路径：走到这里说明「无可复用闲置会话」（select 返回 None = 池空或池未满<3）。
-        # 池满（3 个 [awf] 会话且全忙）时 select 已返回忙碌候选，由下方 else 分支进入
-        # wait_for_idle 排队等待——达到每项目上限不再是「拒绝不发」，而是等待空闲后再发；
-        # 等待超时（--queue-timeout）才报错，--force 为强制新建逃生口。无全局总数上限。
+        # 新建路径（DEV-224）：走到这里说明池里没有任何可复用 [awf] 会话（池空）或显式 --new；
+        # 池内都忙由 pick_claim_session 轮询等待，不会走到这里。
         # DEV-214 并发互斥：同项目新建决策用文件锁（.dispatch/.lock-<project>）串行化，
         # 拿到锁后重读池再决策——并发方刚建出的可复用会话直接改复用，不重复新建；
         # DEV-224：--new 不受上限约束；--allow-over-3 保留为兼容参数（no-op）。
@@ -2526,8 +2520,10 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         sender_now = resolve_sender(text, getattr(args, "sender", ""))
         if isinstance(api, DshApi):
             with project_new_lock(target):
+                # DEV-224：--new 显式新建不探测列表；复用模式锁内重读最新列表
+                fresh_rows = api.sessions() if args.reuse else []
                 decided = decide_new_session(
-                    api, api.sessions(), target, workspace["workspaceId"], args,
+                    api, fresh_rows, target, workspace["workspaceId"], args,
                     module, session_name, title, sender_now, _legacy_probe)
         else:
             # DEV-224：复用模式的新建决策必须读最新会话列表（预检快照可能已过期）；
@@ -3142,8 +3138,8 @@ def main(argv=None) -> int:
             "        --new 强制新建（隔离/调试）；--session <id> 直接向指定会话发送；--reuse 可显式书写（默认值）。\n"
             "        **新建并发互斥（DEV-214）**：同一项目的新建决策用文件锁（.dispatch/.lock-<project>）串行化，\n"
             "        拿到锁后重读池再决策——并发调用方看到刚建出的可复用会话时改为复用，不重复新建。\n"
-            "        **--new 上限校验（DEV-214）**：目标项目 [awf] 池 ≥3 且全忙时，--new 继续新建需显式加\n"
-            "        --allow-over-3 确认（本次超限新建写入派发日志留痕），不再静默绕过每项目 3 个上限。\n"
+            "        **--new 无上限（DEV-224）**：每项目 [awf] 会话数量上限已取消，--new 直接新建；\n"
+            "        --allow-over-3 仅为兼容参数（no-op）。\n"
             "\n默认异步：复用/创建会话并发送任务后立即返回并打印会话 ID，不阻塞调度方；\n"
             "        需要本回合结果时加 --wait（--timeout 仅对 --wait 生效）。\n"
             "        未等待时 .dispatch/log.md 的状态写「已发送，未等待回合」，并记录复用/新建与回到 GUI 会话的方式。\n"
@@ -3276,8 +3272,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--allow-over-3",
         action="store_true",
-        help="（DEV-214）配合 --new：目标项目 [awf] 池已满 3 个且全忙时，显式确认仍新建"
-        "（突破每项目并发上限；本次超限新建写入派发日志留痕）；不加则拒发（退出码 2）",
+        help="兼容参数（DEV-224 起 no-op）：每项目 [awf] 会话数量上限已取消，--new 直接新建",
     )
     parser.add_argument(
         "--allow-legacy-reuse",
