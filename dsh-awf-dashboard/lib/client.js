@@ -3049,6 +3049,7 @@ window.__ModuleLoader__.load({
               return
             }
             try { sr.openTab('awf-dashboard') } catch { /* 忽略 */ }
+            try { if (layout && typeof layout.openRightbar === 'function') layout.openRightbar(true, false) } catch { /* 忽略 */ }
             setActive(true)
             setTimeout(() => setActive(isWorkflowVisible()), 400)
             return
