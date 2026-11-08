@@ -3037,14 +3037,15 @@ window.__ModuleLoader__.load({
           // 优先：直接打开工作流页签（stage-1 tab 类型注册后 openTab 直达，跳过默认页签/菜单）
           const sr = ctx && typeof ctx.get === 'function' ? ctx.get('sidebarRight') : null
           if (sr && typeof sr.openTab === 'function') {
-            if (isWorkflowVisible()) {
-              const root = rightbarRoot()
-              const closeBtn = root ? Array.from(root.querySelectorAll('button')).find((b) => {
-                const t = (b.getAttribute('title') || b.getAttribute('aria-label') || '')
-                return t.indexOf('关闭') >= 0
-              }) : null
-              if (closeBtn) realClick(closeBtn)
-              else if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
+            if (rightbarOpen()) {
+              // 收起侧边栏（等同点击侧边栏按钮），保留工作流页签，不关闭工作流
+              try {
+                if (layout && typeof layout.closeRightbar === 'function') layout.closeRightbar()
+                else {
+                  const closeBtn = findBtn('收起右侧边栏')
+                  if (closeBtn) realClick(closeBtn)
+                }
+              } catch { /* 忽略 */ }
               setActive(false)
               setTimeout(() => setActive(isWorkflowVisible()), 350)
               return
