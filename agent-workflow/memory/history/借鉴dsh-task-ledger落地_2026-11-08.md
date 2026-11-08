@@ -31,3 +31,9 @@
 - **版本锚点统一（DEV-219）**：kit 发布版本锚点 = `dsh-awf-dashboard/package.json`（`version_file`），删除 `agent-workflow/VERSION`；`awf release-prep` JSON 锚点用 python3 精准改写**顶层** version 字段（sed 会把 npm `scripts.version` 生命周期脚本也改掉——**绝不用 sed 处理 JSON**）；非字符串/非法 JSON/缺 version 键一律拒绝且不损坏原文件；插件 `readProjectRelease` 支持 JSON 锚点。
 - **发版 1.7.0**：commit cc74f1b + tag v1.7.0（含 DEV-217/218/219；未推送，push 由用户触发）。
 - **最终版本体系**：发布版 = `package.json`；骨架版 = `templates/FRAMEWORK_VERSION`；项目实例 = `agent-workflow/FRAMEWORK_VERSION`；流程技能更新不触发项目升级。
+
+## 面板 UI 借鉴回退（2026-11-08，用户判断「感觉没啥用」）
+
+- DEV-221（汇总行 chips + 停滞/逾期筛选）与 DEV-222（统计卡 2×2 + 8 周趋势 + 筛选分段，复刻 dsh-task-ledger 观感）均经用户试用判定**无实际价值，已整体回退**；面板保持 v1.7.0 原版（当前任务 / 待办 / 最近完成 三区轻量行，只读）。
+- 相关 commit 已被外部 reset 丢弃（daa7aaf 等），回退后仅保留「历史任务归档」恢复（540f1e7）。
+- **教训**：UI 借鉴要克制——用户对面板的既定偏好是「只读、紧凑、无额外装饰」（DEV-026/044/179 一再确认）；未明确要求时**不要主动加统计卡/趋势图/筛选**等「信息密度」改造，即便参照成熟产品。面板只做账本事实展示。
