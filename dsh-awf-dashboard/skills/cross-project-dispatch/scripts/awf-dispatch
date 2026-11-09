@@ -1391,16 +1391,22 @@ def latest_assistant(api: DshApi, row: dict):
         event = record.get("event") or {}
         if event.get("type") != "assistant/message":
             continue
-        message = (event.get("data") or {}).get("message") or {}
-        for part in message.get("content") or []:
+        message = event.get("data") or {}
+        for part in (message.get("content") or (message.get("message") or {}).get("content") or []):
             if part.get("type") == "text" and part.get("text"):
                 texts.append(part["text"])
     return texts[-1] if texts else None
 
 
 def _message_text(message: dict) -> str:
+    """消息文本：兼容 DSH event.data 形态（content 直接在 data 上）与旧 {message: {content}} 形态。"""
+    if not message:
+        return ""
+    content = message.get("content")
+    if content is None:
+        content = (message.get("message") or {}).get("content")
     parts = []
-    for part in (message or {}).get("content") or []:
+    for part in content or []:
         if part.get("type") == "text" and part.get("text"):
             parts.append(part["text"])
     return "\n".join(parts)
@@ -1424,7 +1430,7 @@ def session_has_dispatch_marker(api: DshApi, row: dict,
         event = record.get("event") or {}
         if "user" not in str(event.get("type") or "").lower():
             continue
-        message = (event.get("data") or {}).get("message") or {}
+        message = event.get("data") or {}
         if marker in _message_text(message):
             return True
     return False
