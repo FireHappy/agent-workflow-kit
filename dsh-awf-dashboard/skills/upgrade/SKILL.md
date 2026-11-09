@@ -70,6 +70,12 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 
 标准 `check_workflow.sh` 只有 3 行（等价 `bin/awf check`）。若目标项目把它扩展成自定义门禁（例如 12.5KB 脚本），**默认保留原文件**，`awf upgrade` 会告警不覆盖；确认可替换时加 `--force`。建议升级前把自定义逻辑迁移到 `tools/` 或独立脚本，再使用标准入口——不要静默丢失项目门禁（2026-11-01 教训）。
 
+**⚠️ 已知误判：旧版标准 shim 会被当成「自定义门禁」**。项目内旧 `check_workflow.sh` 虽然只是标准 3 行等价物，但内容指向旧路径（如 `exec "$(dirname "$0")/bin/awf" check`），与 kit 当前标准入口**字节不同**，`awf upgrade` 会判为自定义门禁并保留、告警不覆盖。此时：
+
+- 若确认旧 shim 就是标准入口（非真自定义门禁）→ **必须加 `--force`** 覆盖为新技能路径 shim；否则 `--slim` 删掉项目内 `bin/awf` 后 check 断链（`exec: No such file or directory`）。
+- 判断标准：看它是否只做 `exec .../bin/awf check "$@"` 这一件事；是 → 标准入口，`--force` 安全；含额外逻辑 → 真自定义门禁，按上段处理。
+- 技能化形态标准 shim 内容应为：`exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"`。
+
 ## 旧账本迁移（check 自带修复指引）
 
 新校验器要求归档块含「状态」字段；旧项目若用英文表头 `| Status |`，`awf check` 会 FAIL 并直接给出可执行指引：
