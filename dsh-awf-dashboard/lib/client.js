@@ -3037,7 +3037,8 @@ window.__ModuleLoader__.load({
           // 优先：直接打开工作流页签（stage-1 tab 类型注册后 openTab 直达，跳过默认页签/菜单）
           const sr = ctx && typeof ctx.get === 'function' ? ctx.get('sidebarRight') : null
           if (sr && typeof sr.openTab === 'function') {
-            if (rightbarOpen()) {
+            if (rightbarOpen() && isWorkflowVisible()) {
+              // 当前激活的正是工作流看板才关闭；显示其他页签时走下面「切到工作流看板」
               // 用按钮：模拟点击侧边栏「收起右侧边栏」按钮（保留工作流页签）
               try {
                 const closeBtn = findBtn('收起右侧边栏')
