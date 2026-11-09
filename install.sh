@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 把本仓库安装为 DSH 技能（实体目录，与仓库解耦）。默认 copy；link 用于希望改仓库即改技能。
+# 把本仓库安装为 DSH 技能。默认 link：~/.dsh/skills/<name> 直接引用插件内技能路径（改插件即改技能，无需重装）；copy 用于与仓库解耦的独立实体。
 # DEV-186 技能实体化：技能 = ~/.dsh/skills/agent-workflow-scaffold/ 实体文件（SKILL.md + skills/ + bin/），
 # 不指向项目仓库；更新技能重跑 ./install.sh 即可。
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
-MODE="${1:-copy}"
+MODE="${1:-link}"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 SKILLS="$DSH_HOME/skills"
 
