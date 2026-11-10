@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import hashlib
 import datetime
 import json
 import os
@@ -2231,6 +2232,82 @@ def occupied_session_ids(data: dict) -> set:
     }
 
 
+INFLIGHT_TTL = 86400  # 派发去重：同一票据在途记录有效期（秒）
+
+
+def inflight_file() -> Path:
+    return registry_dir() / "inflight.json"
+
+
+def load_inflight() -> dict:
+    path = inflight_file()
+    if not path.is_file():
+        return {"dispatches": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"dispatches": {}}
+    if not isinstance(data, dict) or not isinstance(data.get("dispatches"), dict):
+        return {"dispatches": {}}
+    return data
+
+
+def save_inflight(data: dict) -> None:
+    registry_dir().mkdir(parents=True, exist_ok=True)
+    tmp = inflight_file().with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(inflight_file())
+
+
+def prune_inflight(data: dict) -> dict:
+    now = time.time()
+    items = data.setdefault("dispatches", {})
+    for key, item in list(items.items()):
+        at = item.get("at") if isinstance(item, dict) else None
+        if not isinstance(at, (int, float)) or now - at > INFLIGHT_TTL:
+            items.pop(key, None)
+    return data
+
+
+def check_dispatch_duplicate(ticket_id: str, target: Path, prompt_hash: str,
+                             force: bool = False):
+    """派发去重（DEV-231）：同票据 + 同目标项目 + 同内容（promptHash）在 24h 内视为重复。
+
+    返回命中的在途记录（dict）或 None。--force 跳过；内容变化（hash 不同）放行
+    （同票据更新内容可续派，覆盖记录）。
+    """
+    if not ticket_id or force:
+        return None
+    with registry_lock():
+        data = prune_inflight(load_inflight())
+        item = (data.get("dispatches") or {}).get(ticket_id)
+        save_inflight(data)  # 顺带清理过期记录
+    if not isinstance(item, dict):
+        return None
+    if item.get("project") != os.path.realpath(str(target)):
+        return None
+    if item.get("promptHash") != prompt_hash:
+        return None
+    return item
+
+
+def record_inflight(ticket_id: str, target: Path, session_id: str, prompt_hash: str,
+                    title: str, status: str = "sent") -> None:
+    if not ticket_id:
+        return
+    with registry_lock():
+        data = prune_inflight(load_inflight())
+        data.setdefault("dispatches", {})[ticket_id] = {
+            "project": os.path.realpath(str(target)),
+            "sessionId": session_id,
+            "promptHash": prompt_hash,
+            "title": title,
+            "status": status,
+            "at": time.time(),
+        }
+        save_inflight(data)
+
+
 def mark_session(sid: str, state: str, owner: str, ttl: float) -> None:
     with registry_lock():
         data = prune_registry(load_registry())
@@ -2728,6 +2805,22 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     api = state["api"]
     workspace = state["workspace"]
 
+    # DEV-231：派发去重（幂等）——同票据 + 同项目 + 同内容 24h 内只派一次。
+    # --session 显式续跑 / --force 跳过；内容变化（hash 不同）放行。
+    dedupe_ticket = ticket_task_id(task.name) or ticket_task_id(text)
+    prompt_hash = hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
+    if dedupe_ticket and not args.session and getattr(args, "dedupe", False):
+        duplicate = check_dispatch_duplicate(dedupe_ticket, target, prompt_hash,
+                                             getattr(args, "force", False))
+        if duplicate:
+            raise DispatchError(
+                f"疑似重复派发：票据 {dedupe_ticket} 已于 "
+                f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(duplicate.get('at') or 0))} "
+                f"派发到会话 {duplicate.get('sessionId')}（{duplicate.get('title') or ''}）；"
+                "同一票据/同一内容 24h 内只派发一次——确认重派请加 --force；"
+                "或先 --retire-session 归档旧会话 / 等其完成。"
+            )
+
     # 会话标题约定（DEV-134）：`[awf] [派发者] [任务名]`——派发者 + 动态任务摘要；
     # 模块只影响展示/票据分类（--module 已解析）；DEV-228：--title 只作任务名
     # （前缀由框架保证，retire 前缀判据稳定可过）；显式带 [awf] 前缀的原样使用。
@@ -2979,6 +3072,12 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
     else:
         emit(f"启动确认：会话 {session_id} 已开始处理（{launch_why}）", args.json)
     release_session(session_id, owner)
+    if dedupe_ticket:
+        try:
+            record_inflight(dedupe_ticket, target, session_id, prompt_hash, session_name,
+                            status="started" if getattr(args, "launch_timeout", 0) else "sent")
+        except Exception as error:
+            emit(f"提示：派发去重台账写入失败（不影响本次派发）：{error}", args.json)
 
     emit("任务已派发（send ok）", args.json)
     # 改名成功时以新标题为准（row 是改名前的快照，不能再用它覆盖）。
@@ -3613,6 +3712,13 @@ def main(argv=None) -> int:
         type=int,
         default=DEFAULT_IDLE_WAIT,
         help="兼容保留（DEV-126 起会话繁忙的队列等待由 --queue-timeout 控制，默认 180；本参数不再生效）",
+    )
+    parser.add_argument(
+        "--no-dedupe",
+        dest="dedupe",
+        action="store_false",
+        default=True,
+        help="关闭派发去重（同票据+同项目+同内容 24h 内只派一次；默认开启）",
     )
     parser.add_argument(
         "--launch-timeout",

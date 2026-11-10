@@ -1974,6 +1974,119 @@ else
   bad "DEV-230 坏会话兜底与健康过滤失败"
 fi
 
+# 1.6c -- DEV-231：派发去重（同票据 + 同项目 + 同内容 24h 只派一次）
+if python3 - "$DISPATCH_IMPL" <<'PY'
+import importlib.machinery
+import importlib.util
+import argparse
+import os
+import pathlib
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_dev231", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+target = pathlib.Path("/tmp/dev231-proj")
+
+with tempfile.TemporaryDirectory() as tmp:
+    old_home = os.environ.get("DSH_HOME")
+    os.environ["DSH_HOME"] = tmp
+    try:
+        # ① inflight 台账：写入/命中/内容变化放行/不同票据放行/--force/过期/项目隔离
+        assert module.load_inflight()["dispatches"] == {}, "无台账应为空"
+        module.record_inflight("TEST-231", target, "s-1", "abc123", "t")
+        data = module.load_inflight()
+        assert data["dispatches"]["TEST-231"]["sessionId"] == "s-1"
+        dup = module.check_dispatch_duplicate("TEST-231", target, "abc123")
+        assert dup is not None and dup["sessionId"] == "s-1", "同票据同内容应命中"
+        assert module.check_dispatch_duplicate("TEST-231", target, "diffhash") is None, "内容变化放行"
+        assert module.check_dispatch_duplicate("TEST-999", target, "abc123") is None, "不同票据放行"
+        assert module.check_dispatch_duplicate("TEST-231", target, "abc123", force=True) is None, "--force 跳过"
+        data = module.load_inflight()
+        data["dispatches"]["TEST-231"]["at"] -= module.INFLIGHT_TTL + 1
+        module.save_inflight(data)
+        assert module.check_dispatch_duplicate("TEST-231", target, "abc123") is None, "过期记录不拦"
+        module.record_inflight("TEST-232", target, "s-2", "h", "t")
+        assert module.check_dispatch_duplicate(
+            "TEST-232", pathlib.Path("/tmp/other-proj"), "h") is None, "不同项目不拦"
+
+        # ② dispatch_session 级：同票据同内容第二次被拒绝；--force 放行
+        class NewApi:
+            def __init__(self):
+                self.rows = []
+                self.created = []
+                self.renamed = []
+                self.prompts = []
+            def sessions(self):
+                return []
+            def create_session(self, workspace_id):
+                sid = "s-new-%d" % (len(self.created) + 1)
+                self.created.append(sid)
+                return {"sessionId": sid}
+            def rename(self, session_id, new_title):
+                self.renamed.append((session_id, new_title))
+            def prompt(self, session_id, text, request_id):
+                self.prompts.append(session_id)
+            def archive_session(self, session_id):
+                pass
+            def rpc(self, method, params, timeout=30):
+                raise module.DispatchError("unknown rpc " + method)
+
+        def make_args(**over):
+            base = dict(
+                session="", reuse=False, module="", title="", wait=False, timeout=600,
+                idle_wait=300, queue_timeout=5, force=False, team=False, json=False,
+                headless=False, handoff=False, dry_run=False, add_workspace=False,
+                allow_dirty=False, allow_active=False, apply=False, prune=False, web_url="",
+                allow_legacy_reuse=False, sender="lead", new=True, allow_over_3=False,
+                cleanup=False, forget_archived=False, launch_timeout=0,
+                allow_dirty_scope="", check_role=False, allow_role_mismatch=False,
+                dedupe=True)
+            base.update(over)
+            return argparse.Namespace(**base)
+
+        ticket_text = "任务：TEST-231 冒烟\n\n- 目标项目：/tmp/dev231-proj\n- 模块：测试\n"
+
+        def run(api, args):
+            orig = (module.preflight, module.append_log, module.emit)
+            module.preflight = lambda t, a, need_channel=True: {
+                "api": api, "workspace": {"title": "w", "workspaceId": "id"}, "sessions": []}
+            module.append_log = lambda entry: pathlib.Path("/tmp/awf-dispatch-log.md")
+            module.emit = lambda message, json_mode=False: None
+            try:
+                return module.dispatch_session(
+                    target, pathlib.Path("/tmp/TEST-231.md"), ticket_text, "TEST-231", "dev", args)
+            finally:
+                module.preflight, module.append_log, module.emit = orig
+
+        api1 = NewApi()
+        assert run(api1, make_args()) == 0, "首次派发应成功"
+        assert api1.created == ["s-new-1"]
+        assert "TEST-231" in module.load_inflight()["dispatches"], "首次派发应写入 inflight"
+        try:
+            run(NewApi(), make_args())
+            raise AssertionError("同票据同内容第二次应被拒绝")
+        except module.DispatchError as error:
+            assert "重复派发" in str(error), str(error)
+        forced_api = NewApi()
+        assert run(forced_api, make_args(force=True)) == 0, "--force 应放行"
+        assert forced_api.created == ["s-new-1"]
+    finally:
+        if old_home is None:
+            os.environ.pop("DSH_HOME", None)
+        else:
+            os.environ["DSH_HOME"] = old_home
+PY
+then
+  ok "DEV-231：派发去重（同票据同内容拒绝 / --force 放行 / 过期与项目隔离）"
+else
+  bad "DEV-231 派发去重断言失败"
+fi
+
 # 1.7 -- DEV-215：满池等待返回值同步 + 并发记账提示
 if grep -q 'session_id = row\["sessionId"\]' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch" \
    && grep -q '并发记账提示（DEV-215）' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch"; then

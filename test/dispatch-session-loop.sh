@@ -258,6 +258,23 @@ try:
                 api.archive_session(a_sid)
             except Exception:
                 pass
+
+    # S9 派发去重（真实）：同票据 + 同内容第二次派发被拒绝；--force 放行
+    wait_for(lambda: all(r.get("running") is False for r in pool()), timeout=120)
+    r9a = dispatch("TEST-9", "只回复 OK-9，立即结束。", extra=("--no-dedupe",))
+    check("S9 首次派发成功", r9a.returncode == 0, (r9a.stdout + r9a.stderr)[-300:])
+    r9b = dispatch("TEST-9", "只回复 OK-9，立即结束。")
+    check("S9 同票据同内容第二次派发被拒绝（去重）",
+          r9b.returncode != 0 and "重复派发" in (r9b.stdout + r9b.stderr),
+          (r9b.stdout + r9b.stderr)[-300:])
+    r9c = dispatch("TEST-9", "只回复 OK-9，立即结束。", extra=("--force",))
+    check("S9 --force 放行重复派发", r9c.returncode == 0, (r9c.stdout + r9c.stderr)[-300:])
+    try:
+        idata = m.load_inflight()
+        idata.get("dispatches", {}).pop("TEST-9", None)
+        m.save_inflight(idata)
+    except Exception as exc:
+        print("S9 inflight 清理异常：", exc)
 finally:
     try:
         cleanup()
