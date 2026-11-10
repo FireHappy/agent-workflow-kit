@@ -1834,6 +1834,146 @@ else
   bad "DEV-214 四件套断言失败"
 fi
 
+# 1.6b -- DEV-230：坏会话（发送后未启动）自动隔离重发 + 健康过滤 + 启动确认
+if python3 - "$DISPATCH_IMPL" <<'PY'
+import importlib.machinery
+import importlib.util
+import argparse
+import os
+import pathlib
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_dev230", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+target = pathlib.Path("/tmp/dev230-proj")
+project = target.name
+title = module.awf_session_title("lead", "TEST-230 冒烟")
+
+
+def row(sid, running=False, updated=0, title_value=None, agent_available=None, seq=1):
+    values = {"title": title_value if title_value is not None else title}
+    item = {"sessionId": sid, "cwd": str(target), "running": running, "blank": False,
+            "updatedAt": updated, "projections": {"values": values, "asOfSeq": seq}}
+    if agent_available is not None:
+        item["agentAvailable"] = agent_available
+    return item
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    old_cwd, old_home = os.getcwd(), os.environ.get("DSH_HOME")
+    os.chdir(tmp)
+    os.environ["DSH_HOME"] = tmp
+    try:
+        # ① 隔离台账读写 + session_usable（agent 不可用 / 隔离期）
+        assert module.load_quarantined_session_ids() == set(), "无台账应为空集"
+        module.quarantine_session("s-bad", "未启动", ttl=60)
+        assert module.load_quarantined_session_ids() == {"s-bad"}, "隔离台账应记录 s-bad"
+        module.quarantine_session("s-expired", "旧", ttl=-1)
+        assert "s-expired" not in module.load_quarantined_session_ids(), "过期隔离应失效"
+        assert module.session_usable(row("s-bad"), {"s-bad"}) is False
+        assert module.session_usable(row("s-dead", agent_available=False)) is False
+        assert module.session_usable(row("s-ok")) is True
+
+        # ② 复用候选过滤：隔离会话（真实台账里刚写入的 s-bad）/ agent 不可用会话不选中
+        sel = module.select_reuse_session(
+            [row("s-bad", updated=9), row("s-ok", updated=1)], target, "工作流", sender="lead")
+        assert sel is not None and sel["sessionId"] == "s-ok", sel
+        dead = module.select_reuse_session(
+            [row("s-dead", agent_available=False, updated=9)], target, "工作流", sender="lead")
+        assert dead is None or dead["sessionId"] != "s-dead", dead
+
+        # ③ 启动确认：running=True 直接通过；running 恒 False 超时失败；asOfSeq 推过也算启动
+        class ProbeApi:
+            def __init__(self, running, seqs):
+                self.running = running
+                self.seqs = list(seqs)
+                self.calls = 0
+            def sessions(self):
+                seq = self.seqs[min(self.calls, len(self.seqs) - 1)]
+                self.calls += 1
+                return [{"sessionId": "s-x", "running": self.running,
+                         "projections": {"asOfSeq": seq}}]
+
+        ok1, _ = module.confirm_session_started(ProbeApi(True, [1]), "s-x", timeout=1, interval=0.05)
+        assert ok1 is True, "running=True 应确认启动"
+        ok2, why2 = module.confirm_session_started(ProbeApi(False, [1]), "s-x", timeout=0.2, interval=0.05)
+        assert ok2 is False and "未启动" in why2, (ok2, why2)
+        ok3, _ = module.confirm_session_started(ProbeApi(False, [1, 2]), "s-x", timeout=1, interval=0.05)
+        assert ok3 is True, "asOfSeq 推进应视为已启动"
+
+        # ④ dispatch_session 级：坏会话未启动 → 隔离 + 归档 + 自动新建重发一次
+        class BadSessionApi:
+            def __init__(self):
+                self.rows = [row("s-old", updated=5)]
+                self.created = []
+                self.archived = []
+                self.prompts = []
+                self.renamed = []
+            def sessions(self):
+                return [dict(r) for r in self.rows]
+            def create_session(self, workspace_id):
+                sid = "s-new-%d" % (len(self.created) + 1)
+                self.created.append(sid)
+                self.rows.append(row(sid, running=False))
+                return {"sessionId": sid}
+            def rename(self, session_id, new_title):
+                self.renamed.append((session_id, new_title))
+            def prompt(self, session_id, text, request_id):
+                self.prompts.append(session_id)
+                if session_id.startswith("s-new"):  # 新建会话正常启动
+                    for item in self.rows:
+                        if item["sessionId"] == session_id:
+                            item["running"] = True
+            def archive_session(self, session_id):
+                self.archived.append(session_id)
+                self.rows = [r for r in self.rows if r["sessionId"] != session_id]
+            def rpc(self, method, params, timeout=30):
+                raise module.DispatchError("unknown rpc " + method)
+
+        api = BadSessionApi()
+        args = argparse.Namespace(
+            session="", reuse=True, module="", title="", wait=False, timeout=600,
+            idle_wait=300, queue_timeout=5, force=False, team=False, json=False,
+            headless=False, handoff=False, dry_run=False, add_workspace=False,
+            allow_dirty=False, allow_active=False, apply=False, prune=False, web_url="",
+            allow_legacy_reuse=False, sender="lead", new=False, allow_over_3=False,
+            cleanup=False, forget_archived=False, launch_timeout=1,
+            allow_dirty_scope="", check_role=False, allow_role_mismatch=False)
+        original = (module.preflight, module.append_log, module.emit)
+        module.preflight = lambda t, a, need_channel=True: {
+            "api": api, "workspace": {"title": "w", "workspaceId": "id"}, "sessions": api.sessions()}
+        module.append_log = lambda entry: pathlib.Path("/tmp/awf-dispatch-log.md")
+        module.emit = lambda message, json_mode=False: None
+        try:
+            rc = module.dispatch_session(
+                target, pathlib.Path("/tmp/TEST-230.md"),
+                "任务：TEST-230 冒烟\n\n- 目标项目：/tmp/dev230-proj\n- 模块：测试\n",
+                "TEST-230", "dev", args)
+        finally:
+            module.preflight, module.append_log, module.emit = original
+        assert rc == 0, rc
+        assert api.archived == ["s-old"], api.archived
+        assert "s-old" in module.load_quarantined_session_ids(), "坏会话应写入隔离台账"
+        assert api.created == ["s-new-1"], api.created
+        assert api.prompts == ["s-old", "s-new-1"], api.prompts
+    finally:
+        os.chdir(old_cwd)
+        if old_home is None:
+            os.environ.pop("DSH_HOME", None)
+        else:
+            os.environ["DSH_HOME"] = old_home
+PY
+then
+  ok "DEV-230：坏会话自动隔离重发 / 健康过滤 / 启动确认"
+else
+  bad "DEV-230 坏会话兜底与健康过滤失败"
+fi
+
 # 1.7 -- DEV-215：满池等待返回值同步 + 并发记账提示
 if grep -q 'session_id = row\["sessionId"\]' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch" \
    && grep -q '并发记账提示（DEV-215）' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch"; then

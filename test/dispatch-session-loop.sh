@@ -24,10 +24,12 @@ PROJ="${1:-/tmp/dsh-awf-e2e}"
 python3 - "$DISPATCH" "$PROJ" "$DSH_WEB_URL" "$GCDIR" <<'PY'
 import importlib.machinery
 import importlib.util
+import json
 import os
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 DISPATCH, PROJ, URL, GCDIR = sys.argv[1:5]
@@ -190,6 +192,72 @@ try:
     check("S6 --new 池满 3 → 拒绝（上限，不新建第 4 个）",
           r6.returncode != 0 and "上限" in (r6.stdout + r6.stderr) and len(pool()) == 3,
           (r6.stdout + r6.stderr)[-300:])
+
+    # S7 坏会话隔离（真实）：把一个真实池内会话写入隔离台账 → 派发必须跳过它
+    wait_for(lambda: len(pool()) == 3 and all(r.get("running") is False for r in pool()), timeout=120)
+    bad = pool()[0]["sessionId"]
+    m.quarantine_session(bad, "e2e 模拟坏会话（隔离过滤）", ttl=120)
+    r7 = dispatch("TEST-E2E-7", "只回复 OK-7。")
+    check("S7 真实坏会话（隔离台账）→ 派发不复用它",
+          r7.returncode == 0 and bad not in r7.stdout, (r7.stdout + r7.stderr)[-300:])
+    check("S7 被隔离会话标题未被本次任务改写",
+          "TEST-E2E-7" not in "".join(t for sid, t in
+                                     {r["sessionId"]: m.session_title(r) or "" for r in pool()}.items()
+                                     if sid == bad),
+          bad)
+    try:
+        qpath = m.quarantine_ledger_path()
+        if qpath.is_file():
+            qdata = json.loads(qpath.read_text(encoding="utf-8"))
+            qdata.get("sessions", {}).pop(bad, None)
+            if qdata.get("sessions"):
+                qpath.write_text(json.dumps(qdata, ensure_ascii=False, indent=2), encoding="utf-8")
+            else:
+                qpath.unlink()
+    except Exception as exc:
+        print("S7 清理隔离台账异常：", exc)
+
+    # S8 启动确认兜底（真实模拟）：archive→unarchive 制造"历史会话"，派发时若未启动 → 自动隔离重发
+    a_sid = None
+    try:
+        created = api.create_session(_ws.get("workspaceId"))
+        a_sid = created["sessionId"]
+        api.rename(a_sid, "[awf] [lead] [TEST-E2E-8 坏会话模拟]")
+        api.archive_session(a_sid)
+        try:
+            api.rpc("workspace/unarchiveSession", {"request": {"sessionId": a_sid}})
+        except Exception:
+            pass
+        try:
+            api.prompt(a_sid, "ping（自动化测试，勿执行）", str(uuid.uuid4()))
+        except Exception:
+            pass
+        started = False
+        for _ in range(8):
+            time.sleep(1)
+            ra = {r["sessionId"]: r for r in api.sessions()}.get(a_sid)
+            if ra and ra.get("running") is True:
+                started = True
+                break
+        if started:
+            print("SKIP S8：宿主未复现『历史会话入队不启动』（该会话正常启动）；"
+                  "兜底分支由 DEV-230 单元用例覆盖")
+        else:
+            r8 = dispatch("TEST-E2E-8", "只回复 OK-8。", extra=("--launch-timeout", "5"))
+            check("S8 真实坏会话（未启动）→ 自动隔离并新建重发",
+                  r8.returncode == 0 and ("未启动" in r8.stdout or "自动切换" in r8.stdout),
+                  (r8.stdout + r8.stderr)[-400:])
+            check("S8 坏会话已归档/隔离",
+                  a_sid not in {r["sessionId"] for r in pool()}
+                  or a_sid in m.load_quarantined_session_ids(), a_sid)
+    except Exception as exc:
+        print("SKIP S8：无法制造坏会话（", exc, "）")
+    finally:
+        if a_sid:
+            try:
+                api.archive_session(a_sid)
+            except Exception:
+                pass
 finally:
     try:
         cleanup()

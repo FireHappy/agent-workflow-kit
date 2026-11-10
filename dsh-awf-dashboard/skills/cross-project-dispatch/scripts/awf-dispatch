@@ -123,6 +123,9 @@ REPORT_INBOX_DIR = ".dispatch/reports/inbox"
 # DEV-214：本地归档台账（派发方 cwd 下的 .dispatch/ 目录，不入库）——记录被 --cleanup
 # 经 workspace/archiveSession 归档的会话 id；组装复用池/统计每项目 [awf] 会话数时排除。
 ARCHIVED_LEDGER_NAME = "archived-sessions.json"
+QUARANTINE_LEDGER_NAME = "quarantine-sessions.json"
+QUARANTINE_TTL = 3600  # 坏会话隔离有效期（秒）：超过后重新允许入池（宿主可能已恢复）
+DEFAULT_LAUNCH_TIMEOUT = 15  # 派发后确认会话「已启动」的等待秒数（DEV-230；0=关闭）
 # DEV-214：同项目新建决策互斥锁文件名前缀（.dispatch/.lock-<project>）。
 LOCK_FILE_PREFIX = ".lock-"
 
@@ -1168,15 +1171,17 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
 
     pool = [row for row in same if (session_title(row) or "").strip().startswith(AWF_TITLE_PREFIX)]
     if pool:
-        idle = [row for row in pool if row.get("running") is False]
+        # DEV-230：健康度过滤——agent 不可用 / 坏会话隔离期内的会话不作复用候选
+        quarantined = load_quarantined_session_ids()
+        usable = [row for row in pool if session_usable(row, quarantined)]
+        idle = [row for row in usable if row.get("running") is False]
         if idle:
+            # 上下文压力不参与筛选（上下文是开发资产，DEV-224 已定）：高压力仍复用，只提示
             return sorted(idle, key=_reuse_rank)[0]
-        # DEV-229：恢复用户「每项目 [awf] 会话 ≤3」硬上限——池未满（<3）都忙时
-        # 返回 None 让调用方新建扩充；池满（≥3）才返回忙碌候选排队等待，
-        # 不新建第 4 个（--force 才可突破）。
-        if len(pool) < MAX_SENDER_SESSIONS:
+        # DEV-229/230：池未满（<3 可用）都忙 → 返回 None 新建；池满才排队等待
+        if len(usable) < MAX_SENDER_SESSIONS:
             return None
-        return sorted(pool, key=_reuse_rank)[0]
+        return sorted(usable, key=_reuse_rank)[0]
     # [awf] 池为空时的 legacy 兜底：无 [awf] 前缀的旧格式（<项目> · xxx，DEV-126 前）
     # 只有 probe 确认（--allow-legacy-reuse / 消息含派发任务包标记）且唯一候选才迁移；
     # 多条不猜、运行中不迁移。带 [awf] 前缀的会话已在上方 [awf] 池处理，不进这里。
@@ -1275,6 +1280,33 @@ def wait_for_idle(api: DshApi, session_id: str, timeout: int, json_mode: bool = 
                 file=sys.stderr,
             )
         time.sleep(max(0.0, min(interval, deadline - time.time())))
+
+
+def confirm_session_started(api: DshApi, session_id: str, timeout: int,
+                            interval: float = 1.0):
+    """发送 prompt 后确认会话**真的启动**（DEV-230）：running=True 或 asOfSeq 推进即视为启动。
+
+    返回 (ok, detail)。复用历史会话时宿主可能入队但 agent 不启动（实测 2026-11-10
+    session-39afbde9），本函数把「发送成功」和「真的开始处理」分开，供调用方自动兜底。
+    """
+    deadline = time.time() + max(0, timeout)
+    row0 = find_session(api, session_id)
+    if row0 is not None and row0.get("running") is True:
+        return True, "running"
+    seq0 = None
+    if row0 is not None:
+        seq0 = (row0.get("projections") or {}).get("asOfSeq") or 0
+    while time.time() < deadline:
+        row = find_session(api, session_id)
+        if row is None:
+            return False, "会话消失"
+        if row.get("running") is True:
+            return True, "running"
+        seq = (row.get("projections") or {}).get("asOfSeq") or 0
+        if seq0 is not None and seq > seq0:
+            return True, "seq 推进"
+        time.sleep(max(0.0, min(interval, deadline - time.time())))
+    return False, f"等待 {timeout}s 未启动"
 
 
 def wait_for_idle_sessions(api: DshApi, session_ids: list, timeout: int, interval: float = 3.0):
@@ -2003,6 +2035,66 @@ def run_forget_archived(args) -> int:
     return 0
 
 
+def quarantine_ledger_path() -> Path:
+    """本地坏会话隔离台账路径：<cwd>/.dispatch/quarantine-sessions.json（不入库）。"""
+    return Path.cwd() / ".dispatch" / QUARANTINE_LEDGER_NAME
+
+
+def load_quarantined_session_ids() -> set:
+    """读坏会话隔离台账，返回仍在隔离期内的会话 id 集合；台账缺失/损坏返回空集。"""
+    path = quarantine_ledger_path()
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    sessions = data.get("sessions") if isinstance(data, dict) else None
+    if not isinstance(sessions, dict):
+        return set()
+    now = time.time()
+    ids = set()
+    for sid, meta in sessions.items():
+        until = (meta or {}).get("until") if isinstance(meta, dict) else None
+        if isinstance(until, (int, float)) and until > now:
+            ids.add(str(sid))
+    return ids
+
+
+def quarantine_session(session_id: str, reason: str, ttl: float = QUARANTINE_TTL) -> None:
+    """把「发送后确认未启动」的坏会话写入隔离台账，后续池筛选跳过它（DEV-230）。"""
+    path = quarantine_ledger_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"sessions": {}}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("sessions"), dict):
+                data = loaded
+        except (OSError, ValueError):
+            data = {"sessions": {}}
+    data.setdefault("sessions", {})[str(session_id)] = {
+        "reason": reason,
+        "since": time.time(),
+        "until": time.time() + ttl,
+    }
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def session_usable(row: dict, quarantined=None) -> bool:
+    """复用候选健康度：agent 可用（agentAvailable 明确为 False 时排除）+ 不在坏会话隔离期。
+
+    blank 仍可用（DEV-224：尚无消息的会话可承接）；agentAvailable 缺省视为可用（旧宿主字段缺失）。
+    """
+    if not isinstance(row, dict):
+        return False
+    if row.get("agentAvailable") is False:
+        return False
+    if quarantined is None:
+        quarantined = load_quarantined_session_ids()
+    return str(row.get("sessionId")) not in quarantined
+
+
 def project_lock_path(target: Path) -> Path:
     """同项目新建决策锁文件：$DSH_HOME/.awf-dispatch/locks/.lock-<project>。
     DEV-225：锁文件统一放全局目录，不再在项目 .dispatch/ 生成。"""
@@ -2171,14 +2263,20 @@ def pick_claim_session(api, target: Path, owner: str, timeout: int,
         pool = project_awf_pool(rows, target)
         if not pool:
             return None
+        # DEV-230：坏会话（agent 不可用 / 隔离期内）不作候选，且不占新建名额
+        quarantined = load_quarantined_session_ids()
+        usable = [row for row in pool if session_usable(row, quarantined)]
+        if not usable:
+            return None
         with registry_lock():
             data = prune_registry(load_registry())
             occupied = occupied_session_ids(data)
             idle = [
-                row for row in pool
+                row for row in usable
                 if row.get("running") is False and str(row.get("sessionId")) not in occupied
             ]
             if idle:
+                # 压力不参与筛选（只提示）；健康过滤已在 usable 层完成
                 cand = sorted(idle, key=_reuse_rank)[0]
                 sid = cand["sessionId"]
                 data.setdefault("sessions", {})[sid] = {
@@ -2189,8 +2287,8 @@ def pick_claim_session(api, target: Path, owner: str, timeout: int,
                 }
                 save_registry(data)
                 return cand
-        if len(pool) < MAX_SENDER_SESSIONS:
-            # DEV-229：池未满（<3）都忙 → 交回调用方新建扩充（不在这里等待）
+        if len(usable) < MAX_SENDER_SESSIONS:
+            # DEV-229/230：池未满（<3 可用）都忙 → 交回调用方新建扩充（不在这里等待）
             return None
         if time.time() >= deadline:
             raise DispatchError(
@@ -2827,21 +2925,59 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
             + (f"，账本登记/commit 请使用本票据任务编号「{tid}」" if tid else "")
             + "，勿与其他并行任务共用自排 ID（避免账本互相覆盖）。\n\n" + text
         )
-    try:
-        api.prompt(
-            session_id,
-            build_prompt(target, title, kind, send_text, team=args.team,
-                         dispatcher_session=dispatcher),
-            str(uuid.uuid4()),
-        )
-    except DispatchError as error:
+    prompt_text = build_prompt(target, title, kind, send_text, team=args.team,
+                               dispatcher_session=dispatcher)
+
+    def _send_and_confirm(sid: str):
+        """发送 prompt 并（可选）确认会话真的启动；返回 (ok, detail)。"""
+        try:
+            api.prompt(sid, prompt_text, str(uuid.uuid4()))
+        except DispatchError as error:
+            release_session(sid, owner)
+            if reused:
+                raise DispatchError(
+                    f"复用会话 {sid} 发送任务失败：{error}；"
+                    "建议加 --new 强制新建会话后重试（复用会话本身保留）"
+                )
+            raise
+        launch_timeout = getattr(args, "launch_timeout", 0) or 0
+        if launch_timeout <= 0:
+            return True, "skip"
+        return confirm_session_started(api, sid, launch_timeout)
+
+    # DEV-230：发送成功 ≠ 会话真的启动。复用历史会话时宿主可能入队但不跑（实测
+    # session-39afbde9）。确认未启动 → 标记坏会话（隔离台账 + 归档）并自动新建重发一次。
+    started, launch_why = _send_and_confirm(session_id)
+    if not started:
+        emit(f"警告：会话 {session_id} 发送后未启动（{launch_why}），判定为坏会话；"
+             "隔离并归档后自动新建会话重发…", args.json)
+        try:
+            quarantine_session(session_id, f"启动确认失败：{launch_why}")
+        except Exception as error:
+            emit(f"提示：坏会话隔离台账写入失败（继续兜底）：{error}", args.json)
+        try:
+            api.archive_session(session_id)
+        except Exception as error:
+            emit(f"提示：坏会话归档失败（继续兜底）：{error}", args.json)
         release_session(session_id, owner)
-        if reused:
+        created = api.create_session(workspace["workspaceId"])
+        session_id = created["sessionId"]
+        api.rename(session_id, session_name)
+        mark_session(session_id, "busy", owner, REGISTRY_BUSY_TTL)
+        reused = False
+        renamed = True
+        source = "新建（坏会话自动隔离重发）"
+        session_note = (session_note + "；" if session_note else "") + \
+            f"原复用会话未启动（{launch_why}）已隔离归档"
+        started2, launch_why2 = _send_and_confirm(session_id)
+        if not started2:
+            release_session(session_id, owner)
             raise DispatchError(
-                f"复用会话 {session_id} 发送任务失败：{error}；"
-                "建议加 --new 强制新建会话后重试（复用会话本身保留）"
-            )
-        raise
+                f"新建会话 {session_id} 发送后仍未启动（{launch_why2}）："
+                "宿主会话通道异常；请检查 GUI/宿主状态后重试")
+        emit(f"已自动切换到新会话：{session_id}（{launch_why2}）", args.json)
+    else:
+        emit(f"启动确认：会话 {session_id} 已开始处理（{launch_why}）", args.json)
     release_session(session_id, owner)
 
     emit("任务已派发（send ok）", args.json)
@@ -3477,6 +3613,12 @@ def main(argv=None) -> int:
         type=int,
         default=DEFAULT_IDLE_WAIT,
         help="兼容保留（DEV-126 起会话繁忙的队列等待由 --queue-timeout 控制，默认 180；本参数不再生效）",
+    )
+    parser.add_argument(
+        "--launch-timeout",
+        type=int,
+        default=DEFAULT_LAUNCH_TIMEOUT,
+        help="发送后确认会话已启动的等待秒数（DEV-230；0=关闭；默认 15）",
     )
     parser.add_argument(
         "--queue-timeout",

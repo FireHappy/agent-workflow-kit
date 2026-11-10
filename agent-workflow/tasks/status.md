@@ -17,13 +17,13 @@
 | 工作流 | 任务ID | 优先级 | 描述 | 完成日期 |
 |--------|--------|--------|------|----------|
 | dev | DEV-229 | P1 | 恢复每项目 [awf] 会话硬上限 ≤3（满 3 排队等空闲）+ 并发/忙碌/等待测试循环 | 2026-11-10 |
+| dev | DEV-230 | P1 | awf-dispatch 复用会话启动确认 + 坏会话自动隔离重发（含真实/单元测试） | 2026-11-10 |
 | debug | DEBUG-003 | P1 | awf-dispatch 锁屏探针 SIGSEGV：CFBooleanGetValue 句柄用错 → 指针截断（跨项目派发单 KIT-DEBUG-001 续） | 2026-11-08 |
 | dev | DEFAULT-20261108 | P1 | 派发默认行为改为「每次新建」（--reuse 显式） | 2026-11-08 |
 | dev | DEV-194 | P1 | 派发 v1.4.0 升级至全部登记项目（10 目标） | 2026-11-08 |
 | dev | DEV-196 | P1 | 打包 openxr-runtime（Rokid OpenXR Runtime inProcessStation3Release APK） | 2026-11-08 |
 | dev | DEV-216 | P1 | 借鉴 dsh-task-ledger 落地 5 项(执行记录/validate/纪律/插件单源化/派生指标) | 2026-11-08 |
 | dev | DEV-217 | P2 | 插件技能副本源收敛:copy 以仓库/发布 tag 为源(技能分发独立化) | 2026-11-08 |
-| dev | DEV-218 | P2 | 技能源迁入插件（唯一开发路径）+ 仓库去重 + dispatch 改名 | 2026-11-08 |
 
-*最后更新：2026-11-10 21:25*
+*最后更新：2026-11-10 22:30*
 <!-- awf:status:end -->
