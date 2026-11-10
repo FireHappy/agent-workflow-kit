@@ -82,7 +82,7 @@ DEFAULT_TIMEOUT = 300
 # 默认异步：只创建会话并发送任务，立即返回；显式 --wait 才等待回合结束。
 DEFAULT_WAIT = False
 # 默认复用目标工作区已有的常驻会话，避免每次派发都新建、会话数线性增长。
-DEFAULT_REUSE = False  # 新范式（用户定）：默认每次新建；--reuse 才复用旧会话
+DEFAULT_REUSE = True  # DEV-229（用户定）：默认复用语义——池空闲→复用；池<3 都忙→新建；池≥3 都忙→排队等空闲；--new 显式新建（池满 3 拒绝，--force 逃生）
 # 上下文压力只作提示：达到该值提醒可考虑 --new，但不自动切换会话。
 PRESSURE_HINT_LIMIT = 0.9
 # 兼容保留：DEV-126 起会话繁忙的队列等待由 DEFAULT_QUEUE_TIMEOUT 控制；本常量仅保留解析/校验。
@@ -91,8 +91,9 @@ DEFAULT_IDLE_WAIT = 300
 # 调度方项目名（DEV-136：默认 = 发起派发的会话所在项目，如 agent-workflow-kit））
 # + 当前任务摘要（ID + 短标题，随派发动态更新）；前缀保持 [awf]（DEV-126 澄清）。
 AWF_TITLE_PREFIX = "[awf]"
-# DEV-224：每项目 [awf] 会话数量上限已取消。此常量仅保留给 --cleanup（存量收敛：每项目保留
-# 最近更新的 3 个空闲会话）与旧监听逻辑的兼容阈值，不再参与新建/复用决策。
+# DEV-229：恢复用户「每项目 [awf] 会话 ≤3」硬上限（DEV-212 语义；DEV-224 曾取消）——
+# 新建/复用/等待决策统一使用：空闲复用、池<3 都忙新建、池≥3 都忙排队等空闲；
+# --new 池满 3 拒绝（--force 逃生）；--cleanup 仍用它做存量收敛（每项目保留最近 3 个）。
 MAX_SENDER_SESSIONS = 3
 # 会话繁忙时进入等待队列：默认最多排队等它空闲这么多秒（--queue-timeout 可调），
 # 超时按队列超时报错；不再立即失败，也不静默新建第二个会话。
@@ -1142,7 +1143,8 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
     派发者段/任务名/新旧格式**（`[awf] [派发者] [任务]` 新格式与
     `[awf] <项目> · <模块>` DEV-134 前旧常驻都算）：
     - 池里有空闲（running=False）→ 选最新空闲的复用（改名接新任务）；
-    - 池里都忙 → 返回一个忙碌候选，调用方轮询等待任一空闲（DEV-224：不再新建）。
+    - 池里都忙且池数 <3（MAX）→ 返回 None，调用方新建扩充（第 2/3 个）；
+    - 池里都忙且池数 ≥3 → 返回最新忙碌候选，调用方排队等待任一空闲（不新建第 4 个）。
     任务名段不参与判定，复用后由调用方改名覆盖。
     非 `[awf]` 前缀的会话（用户自建/普通）不进池；池为空时的无前缀旧格式
     （DEV-126 前 `<项目> · <任务>`）迁移由 legacy_probe 把关闭（RT-1）。
@@ -1169,8 +1171,11 @@ def select_reuse_session(rows, target: Path, module: str = MODULE_DEFAULT,
         idle = [row for row in pool if row.get("running") is False]
         if idle:
             return sorted(idle, key=_reuse_rank)[0]
-        # DEV-224：池内都忙 → 返回忙碌候选，由调用方排队等任一空闲（默认不新建；
-        # 只有池里没有任何 [awf] 会话时才允许新建 / 显式 --new）。
+        # DEV-229：恢复用户「每项目 [awf] 会话 ≤3」硬上限——池未满（<3）都忙时
+        # 返回 None 让调用方新建扩充；池满（≥3）才返回忙碌候选排队等待，
+        # 不新建第 4 个（--force 才可突破）。
+        if len(pool) < MAX_SENDER_SESSIONS:
+            return None
         return sorted(pool, key=_reuse_rank)[0]
     # [awf] 池为空时的 legacy 兜底：无 [awf] 前缀的旧格式（<项目> · xxx，DEV-126 前）
     # 只有 probe 确认（--allow-legacy-reuse / 消息含派发任务包标记）且唯一候选才迁移；
@@ -2156,8 +2161,9 @@ def release_session(sid: str, owner: str) -> None:
 
 def pick_claim_session(api, target: Path, owner: str, timeout: int,
                        legacy_probe=None, sender: str = ""):
-    """DEV-224：从目标项目 [awf] 池（同项目 + [awf] + 未归档）挑**未登记占用且 running=False**
-    的会话并原子占用；池内全忙/被占用则每 2s 重读等待，超时抛 DispatchError。
+    """从目标项目 [awf] 池（同项目 + [awf] + 未归档）挑**未登记占用且 running=False**
+    的会话并原子占用。DEV-229：池未满（<3）都忙 → 返回 None 交调用方新建扩充；
+    池满（≥3）都忙/被占用 → 每 2s 重读等待任一空闲，超时抛 DispatchError。
     返回会话行；池里没有任何 [awf] 会话时返回 None（调用方决定新建/legacy）。"""
     deadline = time.time() + max(0, int(timeout or 0))
     while True:
@@ -2183,6 +2189,9 @@ def pick_claim_session(api, target: Path, owner: str, timeout: int,
                 }
                 save_registry(data)
                 return cand
+        if len(pool) < MAX_SENDER_SESSIONS:
+            # DEV-229：池未满（<3）都忙 → 交回调用方新建扩充（不在这里等待）
+            return None
         if time.time() >= deadline:
             raise DispatchError(
                 f"等待空闲 [awf] 会话超时（{timeout}s）：池内 {len(pool)} 个会话均忙/被其他派发占用；"
@@ -2579,6 +2588,12 @@ def decide_new_session(api, fresh_rows, target, workspace_id, args, module, sess
                     renamed = True
                 except DispatchError:
                     renamed = False
+            if not running:
+                # DEV-229：锁内占用，防并发派发同时选中同一空闲会话
+                try:
+                    mark_session(sid, "busy", sender or "lead", REGISTRY_BUSY_TTL)
+                except Exception:
+                    pass
             return {"sessionId": sid, "reused": True, "source": "复用（并发重读）",
                     "renamed": renamed, "note": note, "running": running, "rows": fresh_rows}
         duplicate = [
@@ -2593,7 +2608,15 @@ def decide_new_session(api, fresh_rows, target, workspace_id, args, module, sess
                 + "；确认要再派发请加 --force"
             )
     else:
-        # DEV-224：--new 不再受每项目 3 个上限约束（无 over_limit_guard）。
+        # DEV-229：--new 显式新建同样受「每项目 [awf] 会话 ≤3」硬上限约束
+        # （用户要求：满 3 个就排队等空闲，不新建第 4 个）；--force 为逃生口。
+        fresh_pool = project_awf_pool(fresh_rows, target)
+        if len(fresh_pool) >= MAX_SENDER_SESSIONS and not args.force:
+            raise DispatchError(
+                f"目标项目已有 {len(fresh_pool)} 个 [awf] 会话（上限 {MAX_SENDER_SESSIONS}）："
+                "满 3 个不新建第 4 个——等待任一会话空闲后复用，"
+                "或先 --cleanup/--retire-session 归档旧会话；确需强制新建请加 --force"
+            )
         note = ""
     created = api.create_session(workspace_id)
     session_id = created["sessionId"]
@@ -2697,15 +2720,14 @@ def dispatch_session(target: Path, task: Path, text: str, title: str, kind: str,
         sender_now = resolve_sender(text, getattr(args, "sender", ""))
         if isinstance(api, DshApi):
             with project_new_lock(target):
-                # DEV-224：--new 显式新建不探测列表；复用模式锁内重读最新列表
-                fresh_rows = api.sessions() if args.reuse else []
+                # DEV-229：--new 也要校验每项目 ≤3（池满拒绝第 4 个），锁内重读最新列表
+                fresh_rows = api.sessions()
                 decided = decide_new_session(
                     api, fresh_rows, target, workspace["workspaceId"], args,
                     module, session_name, title, sender_now, _legacy_probe)
         else:
-            # DEV-224：复用模式的新建决策必须读最新会话列表（预检快照可能已过期）；
-            # --new 显式新建不需要 session/list（保持「--new 不探测列表」语义）。
-            fresh_rows = api.sessions() if args.reuse else []
+            # DEV-229：新建决策必须读最新会话列表（预检快照可能已过期；--new 也要校验上限）。
+            fresh_rows = api.sessions()
             decided = decide_new_session(
                 api, fresh_rows, target, workspace["workspaceId"], args,
                 module, session_name, title, sender_now, _legacy_probe)
@@ -3426,13 +3448,13 @@ def main(argv=None) -> int:
         dest="reuse",
         action="store_true",
         default=DEFAULT_REUSE,
-        help="显式复用已有常驻会话（默认已改为每次新建；仅特殊场景显式使用）",
+        help="（兼容别名）默认即复用语义：池空闲复用/池<3 新建/池满 3 排队等空闲",
     )
     reuse_group.add_argument(
         "--new",
         dest="reuse",
         action="store_false",
-        help="兼容/显式新建（默认行为：每次派发新建；完成后 --retire-session 归档 + dsh-session-gc 删文件）",
+        help="显式新建（池未满时新建；池满 3 拒绝第 4 个，--force 逃生）",
     )
     parser.add_argument(
         "--module",

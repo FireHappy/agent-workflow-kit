@@ -450,7 +450,7 @@ def row(session_id, cwd=str(target), running=False, blank=False, title="",
     }
 
 
-assert module.DEFAULT_REUSE is False, "默认必须新建（新范式：每次派发新建）"
+assert module.DEFAULT_REUSE is True, "DEV-229：默认复用语义（池空闲复用/池<3 新建/池满 3 排队等空闲）"
 assert module.ZOMBIE_TURN_SECONDS == 5.0, "僵尸判定阈值必须是 5s"
 assert module.LANDING_POLL_SECONDS == 10.0, "落地轮询间隔必须是 10s"
 assert (module.EXIT_OK, module.EXIT_FAIL, module.EXIT_TIMEOUT, module.EXIT_ZOMBIE,
@@ -505,11 +505,15 @@ member = row("s-member", title=module.awf_session_title("member", "TEST-003 任�
 assert module.select_reuse_session([member], target, "工作流", sender="lead")["sessionId"] == "s-member", \
     "不同派发者的 [awf] 闲置会话可复用（改名接新任务）"
 
-# 池未满时运行中会话不选中 → 新建扩充（DEV-134 并发上限内扩充；满了才等）
+# 池未满时运行中会话不选中 → 新建扩充（DEV-229：恢复每项目 ≤3 硬上限）
 running_same = row("s-running", title=title, running=True, updated=99)
 busy_sel = module.select_reuse_session([running_same], target, "工作流", sender="lead")
-assert busy_sel is not None and busy_sel["sessionId"] == "s-running" and busy_sel.get("running") is True, \
-    "DEV-224：池内都忙 → 返回候选等待（不再新建）"
+assert busy_sel is None, \
+    "DEV-229：池未满（1<3）都忙 → 返回 None，交给调用方新建扩充（不等待）"
+busy_two = module.select_reuse_session(
+    [running_same, row("s-running2", title=title, running=True, updated=98)],
+    target, "工作流", sender="lead")
+assert busy_two is None, "DEV-229：池未满（2<3）都忙 → 新建第 3 个（不等待）"
 
 # 同项目多个空闲：选 updatedAt 最新
 older = row("s-old", title=title, updated=10)
@@ -520,7 +524,7 @@ assert module.select_reuse_session([older, running_same], target, "工作流", s
 # 并发上限：同派发者同项目 3 个都忙 → 返回候选等待（不新建第 4 个）
 pool_full = [row(f"s-r{i}", title=title, running=True, updated=i) for i in (1, 2, 3)]
 assert module.select_reuse_session(pool_full, target, "工作流", sender="lead")["sessionId"] == "s-r3", \
-    "池满（3 个都忙）→ 选择等待（不新建第 4 个）"
+    "DEV-229：池满（3 个都忙）→ 返回最新忙候选等待（不新建第 4 个）"
 
 # 旧格式标题（无 [awf]）：默认不再自动迁移（RT-1，防误吞用户自建会话）；
 # 只有 legacy_probe 确认（显式放行 / 消息含派发任务包标记）才复用；多条不猜；运行中不迁移
@@ -1051,13 +1055,22 @@ assert pool3_api.created == [], "已有 3 个 [awf] 会话时应优先复用闲�
 assert pool3_api.prompts and pool3_api.prompts[0][0] == "s-p3", pool3_api.prompts
 assert "会话来源：复用" in logs[0], logs
 
-# --new 不碰 session/list：mock sessions() 抛错也应成功（不应报 G4 / 复用检查失败）
-new_api = NoListApi([row("s-same", title=title)])
-logs, _ = run_dispatch(new_api, "工作流", reuse=False, sessions_in_preflight=False)
+# DEV-229：--new 也读 session/list 校验「每项目 [awf] ≤3」——池未满可新建
+new_api = FakeDispatchApi([row("s-same", title=title, running=True)])
+logs, _ = run_dispatch(new_api, "工作流", reuse=False)
 assert new_api.created == ["s-created-1"], new_api.created
 assert new_api.prompts and new_api.prompts[0][0] == "s-created-1", new_api.prompts
-assert new_api.calls == 0, "显式 --new 不应调用 session/list"
+assert new_api.calls >= 1, "DEV-229：--new 需读会话列表校验池上限"
 assert "会话来源：新建" in logs[0]
+# 池满 3 个 [awf] → --new 拒绝第 4 个（--force 逃生）
+full_new_api = FakeDispatchApi(
+    [row(f"s-f{i}", title=title, running=True) for i in (1, 2, 3)])
+full_new_msg = run_dispatch(full_new_api, "工作流", reuse=False, expect_error=True)
+assert "上限" in full_new_msg and full_new_api.created == [], (full_new_msg, full_new_api.created)
+forced_full_api = FakeDispatchApi(
+    [row(f"s-g{i}", title=title, running=True) for i in (1, 2, 3)])
+run_dispatch(forced_full_api, "工作流", reuse=False, force=True)
+assert forced_full_api.created == ["s-created-1"], "DEV-229：--force 可突破池满限制"
 
 # 自动路径的同名保护仍按原逻辑 gated：自动新建遇同名会话要 --force；--new 跳过
 dup_rows = [
@@ -1416,19 +1429,19 @@ with _tf224.TemporaryDirectory() as _reg_tmp:
         _once = _PickApi([row("s-free", title=title)])
         _picked = module.pick_claim_session(_once, target, "a|T", 5)
         assert _picked and _picked["sessionId"] == "s-free", _picked
-        try:
-            module.pick_claim_session(_once, target, "b|T", 0)
-            raise AssertionError("被占用会话不应再被选中")
-        except module.DispatchError as _e:
-            assert "等待空闲" in str(_e), str(_e)
+        assert module.pick_claim_session(_once, target, "b|T", 0) is None, \
+            "DEV-229：被占用会话不应再被选中（池未满 → 交调用方新建）" 
         # 池内没有 [awf] 会话 → None（调用方新建）
         assert module.pick_claim_session(
             _PickApi([row("s-user", title="用户会话")]), target, "a|T", 5) is None
-        # 全部忙 → 超时报错（不静默新建）
+        # DEV-229：池未满（1<3）都忙 → 返回 None，交调用方新建扩充（不在这里等）
+        assert module.pick_claim_session(
+            _PickApi([row("s-busy", title=title, running=True)]), target, "a|T", 0) is None
+        # DEV-229：池满（3 个都忙）→ 等待超时报错（不新建第 4 个）
+        _full = [row(f"s-f{i}", title=title, running=True) for i in (1, 2, 3)]
         try:
-            module.pick_claim_session(_PickApi([row("s-busy", title=title, running=True)]),
-                                      target, "a|T", 0)
-            raise AssertionError("全忙应超时报错")
+            module.pick_claim_session(_PickApi(_full), target, "a|T", 0)
+            raise AssertionError("池满全忙应等待超时")
         except module.DispatchError as _e:
             assert "等待空闲" in str(_e)
     finally:
@@ -1626,7 +1639,7 @@ class FakeDispatchApi:
 
 
 def run_dispatch(api, task_module, reuse=True, new=False, expect_error=False,
-                 allow_over_3=False, json_mode=False):
+                 allow_over_3=False, json_mode=False, force=False):
     logs = []
     output = io.StringIO()
     original = (module.preflight, module.append_log, module.emit)
@@ -1642,7 +1655,7 @@ def run_dispatch(api, task_module, reuse=True, new=False, expect_error=False,
     text = (f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n- 模块：{task_module}\n")
     args = argparse.Namespace(
         session="", reuse=reuse and not new, module="", title="", wait=False, timeout=600,
-        idle_wait=300, queue_timeout=5, force=False, team=False, json=json_mode, headless=False,
+        idle_wait=300, queue_timeout=5, force=force, team=False, json=json_mode, headless=False,
         handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
         allow_active=False, apply=False, prune=False, web_url="",
         allow_legacy_reuse=False, sender="lead", new=new, allow_over_3=allow_over_3,
@@ -1663,10 +1676,16 @@ def run_dispatch(api, task_module, reuse=True, new=False, expect_error=False,
     return logs, output.getvalue()
 
 
-# 派发主流程（DEV-224）：--new 不再受池满限制，直接新建
+# 派发主流程（DEV-229）：--new 池满 3 拒绝（--force 逃生），池未满才新建
 over_api = FakeDispatchApi(pool3_busy)
-logs, _ = run_dispatch(over_api, "工作流", reuse=False, new=True)
-assert over_api.created == ["s-created-1"], over_api.created
+_error = run_dispatch(over_api, "工作流", reuse=False, new=True, expect_error=True)
+assert "上限" in _error and over_api.created == [], (over_api.created, _error)
+under_api = FakeDispatchApi([row("s-b1", running=True, updated=1)])
+logs, _ = run_dispatch(under_api, "工作流", reuse=False, new=True)
+assert under_api.created == ["s-created-1"], under_api.created
+force_api = FakeDispatchApi(pool3_busy)
+logs, _ = run_dispatch(force_api, "工作流", reuse=False, new=True, force=True)
+assert force_api.created == ["s-created-1"], "DEV-229：--force 可突破池满限制"
 
 # ---- ③ 并发新建互斥：文件锁串行化 + 锁后重读池再决策 ----
 lock_path = module.project_lock_path(target)
@@ -1700,7 +1719,7 @@ class CreateApi:
         self.created = []
         self.renamed = []
     def create_session(self, workspace_id):
-        created = row("s-concurrent-1")
+        created = row("s-concurrent-%d" % (len(self.created) + 1))
         self.created.append(created["sessionId"])
         return {"sessionId": created["sessionId"]}
     def rename(self, session_id, new_title):
@@ -1724,18 +1743,27 @@ busy_decided = module.decide_new_session(
     target, "ws", args_reuse, "工作流", title, title, "lead", lambda r: False)
 assert busy_decided["reused"] is True and busy_decided["running"] is True, busy_decided
 assert busy_decided["sessionId"] == "s-concurrent-1", busy_decided
-# DEV-224：重读同项目 [awf] 会话（即使运行中）→ 复用候选（running=True 等待），不触发同名保护新建
-dup = [row("s-dup", title_value=title, running=True, updated=5)]
-dup_decided = module.decide_new_session(api_concurrent, dup, target, "ws", args_reuse,
+# DEV-229：池未满（1<3）都忙但不同名 → 新建扩充（不触发同名保护）
+other = [row("s-dup", title_value=module.awf_session_title("lead", "TEST-999 其他"),
+             running=True, updated=5)]
+new_decided = module.decide_new_session(api_concurrent, other, target, "ws", args_reuse,
                                         "工作流", title, title, "lead", lambda r: False)
-assert dup_decided["reused"] is True and dup_decided["running"] is True, dup_decided
-assert dup_decided["sessionId"] == "s-dup", dup_decided
+assert new_decided["reused"] is False and new_decided["source"] == "新建", new_decided
+assert api_concurrent.created == ["s-concurrent-1"], api_concurrent.created
+# 同名忙会话（池未满）→ 同名保护拒绝（防止重复派发；--force 放行）
+same = [row("s-dup", title_value=title, running=True, updated=5)]
+try:
+    module.decide_new_session(api_concurrent, same, target, "ws", args_reuse,
+                              "工作流", title, title, "lead", lambda r: False)
+    raise AssertionError("同名忙会话应被同名保护拒绝")
+except module.DispatchError as _e:
+    assert "同名会话" in str(_e), str(_e)
 created = module.decide_new_session(
     api_concurrent, [], target, "ws",
     argparse.Namespace(reuse=True, force=True, allow_over_3=True, json=False),
     "工作流", title, title, "lead", lambda r: False)
 assert created["reused"] is False and created["source"] == "新建", created
-assert created["sessionId"] == "s-concurrent-1" and api_concurrent.renamed, created
+assert created["sessionId"] == "s-concurrent-2" and api_concurrent.renamed, created
 
 # ---- ④ --cleanup：列出每项目超 3 的空闲 [awf] 会话；--apply 归档 + 写台账 ----
 clean_rows = [row("s1", updated=1), row("s2", updated=2), row("s3", running=True, updated=3),
