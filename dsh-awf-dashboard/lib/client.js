@@ -2926,27 +2926,40 @@ window.__ModuleLoader__.load({
           return r.width > 0 && r.height > 0
         } catch { return false }
       }
+      // 元素是否真正可见：宿主会在 DOM 里保留大量 w/h=0 的隐藏占位按钮
+      // （例如每个会话各自的「收起右侧边栏」），按选择器顺序取第一个会命中隐藏按钮，
+      // 点击无效 → 表现为「切换会话后工作流按钮失效」。
+      const isVisibleEl = (el) => {
+        if (!el || !el.isConnected) return false
+        try {
+          const r = el.getBoundingClientRect()
+          if (r.width <= 0 || r.height <= 0) return false
+          const cs = getComputedStyle(el)
+          return cs.visibility !== 'hidden' && cs.display !== 'none' && cs.opacity !== '0'
+        } catch { return false }
+      }
       const awfTab = () => {
         const root = rightbarRoot()
         if (!root) return null
         try {
           const btn = Array.from(root.querySelectorAll('[role="tab"],button')).find((el) => {
-            return (el.textContent || '').trim().indexOf('Agent Workflow') >= 0
+            return (el.textContent || '').trim().indexOf('Agent Workflow') >= 0 && isVisibleEl(el)
           })
           if (btn) return btn
           // 页签可能是普通 DIV（无 role/aria-selected），取文本精确匹配的叶子节点
           const leaf = Array.from(root.querySelectorAll('div,span')).find((el) => {
-            return el.children.length === 0 && (el.textContent || '').trim() === 'Agent Workflow'
+            return el.children.length === 0 && (el.textContent || '').trim() === 'Agent Workflow' && isVisibleEl(el)
           })
           return leaf ? (leaf.closest('button,[role="tab"]') || leaf.parentElement || leaf) : null
         } catch { return null }
       }
       const findBtn = (kw) => {
         try {
-          return Array.from(document.querySelectorAll('button')).find((b) => {
+          const all = Array.from(document.querySelectorAll('button')).filter((b) => {
             const t = (b.getAttribute('title') || b.getAttribute('aria-label') || '')
             return t.indexOf(kw) >= 0
-          }) || null
+          })
+          return all.find(isVisibleEl) || null
         } catch { return null }
       }
       // 真实点击序列：宿主部分按钮只响应 pointer/mouse down-up，element.click() 不生效
@@ -3003,6 +3016,13 @@ window.__ModuleLoader__.load({
         } catch { /* 忽略 */ }
       }
 
+      // 会话/项目切换时，宿主可能复用 header action 组件但重建右侧栏；
+      // 清掉旧会话的按钮状态，避免把新项目的面板误判为已打开。
+      useEffect(() => {
+        savedRef.current = null
+        setActive(false)
+      }, [props.sessionId])
+
       useEffect(() => {
         let raf = 0
         const update = () => {
@@ -3049,10 +3069,18 @@ window.__ModuleLoader__.load({
               setTimeout(() => setActive(isWorkflowVisible()), 350)
               return
             }
-            try { sr.openTab('awf-dashboard') } catch { /* 忽略 */ }
+            let opened = false
+             try { sr.openTab('awf-dashboard'); opened = true } catch { /* 继续走 DOM 兜底 */ }
             try { if (layout && typeof layout.openRightbar === 'function') layout.openRightbar(true, false) } catch { /* 忽略 */ }
             setActive(true)
-            setTimeout(() => setActive(isWorkflowVisible()), 400)
+            setTimeout(() => {
+              if (isWorkflowVisible()) { setActive(true); return }
+              const tab = awfTab()
+              if (tab) { realClick(tab); setTimeout(() => setActive(isWorkflowVisible()), 250); return }
+              const item = menuItem()
+              if (item) { realClick(item.closest('button')); setTimeout(() => setActive(isWorkflowVisible()), 350); return }
+              if (!opened) setActive(false)
+            }, 400)
             return
           }
           if (isWorkflowVisible()) {
@@ -3221,7 +3249,13 @@ window.__ModuleLoader__.load({
               title: 'Agent Workflow',
               description: 'agent-workflow 账本看板：当前任务 / todo 进度 / 最近完成 / 初始化引导 / 开始任务 / 归档查看',
               single: true,
-              component: (tabProps) => h(Dashboard, tabProps || {}),
+              component: (tabProps) => {
+                 const tp = tabProps || {}
+                 // 原生右栏会 keepMounted 复用 tab body；给每个会话独立 React identity，
+                 // 避免切换会话后沿用旧项目的 selected/ledger 状态。
+                 const sid = tp.sessionId || (tp.scope && tp.scope.sessionId) || 'default'
+                 return h(Dashboard, { ...tp, key: 'awf-dashboard:' + sid })
+               },
             })
             ends.push(end1)
             return () => { ends.forEach((end) => { try { end() } catch { /* 忽略 */ } }) }
