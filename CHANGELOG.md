@@ -1,3 +1,8 @@
+## [1.8.1] - 2026-11-13
+
+### Fixed
+- **侧边框 tab kind 重复注册（DEV-232）**：dsh-better-sidebar 0.28+ 会把 `registerTab()` 注册的外部页签自动镜像为原生 `sidebarRightTabs` kind（id/kind 同值、`priority: extension`，body 直接渲染插件 component），本插件 DEV-226 又自注册同名 kind → 启动报 `sidebarRight: tab kind "awf-dashboard" is already registered (extension)`。原生 kind 自注册改为**仅在无 better-sidebar 的宿主原生右栏环境**执行（延迟一拍判定 + `tabs.get` 存在性兜底）；有 better-sidebar 时由其镜像负责，`openTab('awf-dashboard')` 照常可用。
+
 ## [1.8.0] - 2026-11-08
 
 ### Added

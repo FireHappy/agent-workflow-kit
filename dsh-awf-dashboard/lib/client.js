@@ -3264,20 +3264,36 @@ window.__ModuleLoader__.load({
 
         // DEV-226：对话右上角「工作流」按钮——actions 是 list 槽（corner 是 single，注册不进去），
         // 放在所有核心注册之后 + 异常隔离，按钮注册失败不影响工作流页签。
-        // DEV-226：注册右侧栏 tab 类型（stage 1）——使 sidebarRight.openTab(kind) 能直接打开工作流页签
-        disposers.push(ctx.inject(['sidebarRightTabs'], (injected) => {
-          const tabs = injected.get('sidebarRightTabs')
-          if (!tabs || typeof tabs.register !== 'function') return () => {}
-          try {
-            const end = tabs.register({
-              id: 'awf-dashboard',
-              kind: 'awf-dashboard',
-              title: () => 'Agent Workflow',
-              priority: 'extension',
-            })
-            return () => { try { end() } catch { /* 忽略 */ } }
-          } catch { return () => {} }
-        }))
+        // DEV-232：better-sidebar（0.28+）会把 registerTab 注册的外部页签自动镜像为原生
+        // kind（id/kind 同值、priority extension，body 直接渲染我们传入的 component），
+        // 此时我们再调 sidebarRightTabs.register 会撞车：
+        //   [dsh-better-sidebar] native register awf-dashboard error:
+        //   sidebarRight: tab kind "awf-dashboard" is already registered (extension)
+        // 因此只在「没有 better-sidebar 的宿主原生右栏环境」自注册 kind；
+        // 判定延迟一拍——better-sidebar 的服务在 apply 期可能还没 provide（激活顺序不定）。
+        let disposedNow = false
+        const armNativeKind = setTimeout(() => {
+          if (disposedNow) return
+          let hasBetter = false
+          try { hasBetter = ctx.get('betterSidebar') !== undefined && ctx.get('betterSidebar') !== null } catch { hasBetter = false }
+          if (hasBetter) return // better-sidebar 的 native surface 负责注册该 kind
+          disposers.push(ctx.inject(['sidebarRightTabs'], (injected) => {
+            const tabs = injected.get('sidebarRightTabs')
+            if (!tabs || typeof tabs.register !== 'function') return () => {}
+            try {
+              // 仍可能被别的插件抢先注册同 kind：已存在就不重复注册
+              if (typeof tabs.get === 'function' && tabs.get('awf-dashboard') !== undefined) return () => {}
+              const end = tabs.register({
+                id: 'awf-dashboard',
+                kind: 'awf-dashboard',
+                title: () => 'Agent Workflow',
+                priority: 'extension',
+              })
+              return () => { try { end() } catch { /* 忽略 */ } }
+            } catch { return () => {} }
+          }))
+        }, 0)
+        disposers.push(() => { disposedNow = true; clearTimeout(armNativeKind) })
 
         try {
           disposers.push(ctx.slots.inject('conversation.session.header.utilities', () => {

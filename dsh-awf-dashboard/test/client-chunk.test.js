@@ -251,3 +251,45 @@ test('DEV-216 renderLedgerBody：当前任务行内联停滞/逾期徽章（单�
   assert.equal(mod.agingBadge(null), null)
   assert.equal(mod.agingBadge({}), null)
 })
+
+// ---- DEV-232：better-sidebar 在场时不重复注册原生 tab kind（撞车回归） ----
+
+function makeApplyCtx({ hasBetter }) {
+  const sidebarTabs = []
+  const registry = {
+    register(def) { sidebarTabs.push(def); return () => {} },
+    get() { return undefined },
+  }
+  const injects = []
+  const ctx = {
+    effect(fn) { const d = fn(); return () => { try { d && d() } catch { /* 忽略 */ } } },
+    slots: { inject: () => () => {}, register: () => () => {} },
+    get: (key) => (key === 'betterSidebar' ? (hasBetter ? {} : undefined) : undefined),
+    inject(keys, cb) { injects.push({ keys, cb }); return () => {} },
+    _fire(serviceKey, value) {
+      for (const { keys, cb } of injects) if (keys.includes(serviceKey)) cb({ get: (k) => (k === serviceKey ? value : undefined) })
+    },
+  }
+  return { ctx, sidebarTabs, registry }
+}
+
+test('DEV-232 better-sidebar 在场 → 不注册原生 tab kind', async () => {
+  const mod = loadClient()
+  const { ctx, sidebarTabs } = makeApplyCtx({ hasBetter: true })
+  mod.apply(ctx)
+  await new Promise((r) => setTimeout(r, 10))
+  ctx._fire('sidebarRightTabs', { register: (d) => { sidebarTabs.push(d); return () => {} }, get: () => undefined })
+  assert.equal(sidebarTabs.length, 0, 'better-sidebar 镜像负责注册，插件不应自注册')
+})
+
+test('DEV-232 无 better-sidebar → 自注册 kind 一次（宿主原生右栏兜底）', async () => {
+  const mod = loadClient()
+  const { ctx, sidebarTabs } = makeApplyCtx({ hasBetter: false })
+  mod.apply(ctx)
+  await new Promise((r) => setTimeout(r, 10))
+  ctx._fire('sidebarRightTabs', { register: (d) => { sidebarTabs.push(d); return () => {} }, get: () => undefined })
+  assert.equal(sidebarTabs.length, 1)
+  assert.equal(sidebarTabs[0].id, 'awf-dashboard')
+  assert.equal(sidebarTabs[0].kind, 'awf-dashboard')
+  assert.equal(sidebarTabs[0].priority, 'extension')
+})
