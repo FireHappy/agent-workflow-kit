@@ -34,7 +34,7 @@ agent-workflow 工作流看板（DSH 客户端插件）：在处理需求时，�
 - `skills/agent-workflow-scaffold/` ← 框架：`SKILL.md` + `bin/awf`（CLI）+ `templates/`（含 `FRAMEWORK_VERSION`）+ `test/`
 - `skills/<name>/` ← 流程技能（dev/debug/docs/review/release/upgrade/team-flow/cross-project-dispatch），与框架技能同级平铺
 - `package.json` 的 `files` 含 `"skills"`，随插件分发；**装插件即装工作流**。
-- 仓库根不再保留 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本；`install.sh` 将 `dsh-awf-dashboard/skills/` 作为唯一源，以软链接输出到 `~/.agents/skills/`（其他 agent 主入口）和 `~/.dsh/skills/`（DSH 兼容入口），不再复制两份技能实体。
+- 仓库根不再保留 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本；`install.sh` 将 `dsh-awf-dashboard/skills/` 作为唯一源，以软链接输出到 `~/.agents/skills/`（其他 agent 与 DSH 的唯一技能入口），不再写入 `~/.dsh/skills/`。
 
 **版本契约（DEV-217）**：插件/分发版本 = 本插件 `package.json` version（唯一信号，不再读技能实体 VERSION）；骨架版本 = `templates/FRAMEWORK_VERSION`（模板变更才 bump，流程技能更新不触发项目升级）。
 

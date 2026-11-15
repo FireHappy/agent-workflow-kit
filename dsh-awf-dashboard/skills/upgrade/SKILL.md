@@ -38,8 +38,8 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 2. **预览**：`/path/to/kit/bin/awf upgrade <项目目录> --dry-run` —— 只打印将变更/保留的文件，不改写任何文件。骨架已最新时 dry-run 直接打印「骨架已最新」并退出（不列变更）。
 3. **执行**：`/path/to/kit/bin/awf upgrade <项目目录>` —— 骨架差量（不同/缺失/`--force`）时依次自动完成：
    - 复制框架文件（见下「变更清单」）+ 登记目标骨架版（写 `agent-workflow/FRAMEWORK_VERSION`）；
-   - `~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap` 刷新 `AGENTS.md` 受控区块（区块外内容保留）；
-   - `~/.dsh/skills/agent-workflow-scaffold/bin/awf check` 校验（退出码 = 失败项数量）。
+   - `~/.agents/skills/agent-workflow-scaffold/bin/awf bootstrap` 刷新 `AGENTS.md` 受控区块（区块外内容保留）；
+   - `~/.agents/skills/agent-workflow-scaffold/bin/awf check` 校验（退出码 = 失败项数量）。
    - 骨架相同（非 `--force`）时跳过上述全部，打印「骨架已最新」后退出。
 4. **修复**：`check` 的 FAIL 按输出自解释处理；旧账本迁移问题见「旧账本迁移」节。
 5. **提交**：目标项目只本地 commit（消息含任务 ID），**禁止 push**。
@@ -48,8 +48,8 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 
 | 文件 | 说明 |
 |---|---|
-| `~/.dsh/skills/agent-workflow-scaffold/bin/awf` | 生成/校验工具（新增 `upgrade`、check 迁移修复指引随版本生效） |
-| `~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch` | 跨项目派发器 |
+| `~/.agents/skills/agent-workflow-scaffold/bin/awf` | 生成/校验工具（新增 `upgrade`、check 迁移修复指引随版本生效） |
+| `~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch` | 跨项目派发器 |
 | `agent-workflow/templates/AGENTS.md.tmpl` | 入口模板（任务路由等规则随之更新） |
 | `agent-workflow/templates/pre-commit` | git pre-commit 钩子模板 |
 | `agent-workflow/README.md` | 规范正文 |
@@ -74,7 +74,7 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 
 - 若确认旧 shim 就是标准入口（非真自定义门禁）→ **必须加 `--force`** 覆盖为新技能路径 shim；否则 `--slim` 删掉项目内 `bin/awf` 后 check 断链（`exec: No such file or directory`）。
 - 判断标准：看它是否只做 `exec .../bin/awf check "$@"` 这一件事；是 → 标准入口，`--force` 安全；含额外逻辑 → 真自定义门禁，按上段处理。
-- 技能化形态标准 shim 内容应为：`exec "$HOME/.dsh/skills/agent-workflow-scaffold/bin/awf" check "$@"`。
+- 技能化形态标准 shim 内容应为：`exec "$HOME/.agents/skills/agent-workflow-scaffold/bin/awf" check "$@"`。
 
 ## 旧账本迁移（check 自带修复指引）
 
@@ -94,7 +94,7 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 - **其他畸形行** → 以最接近字段推断转换；无法推断的保留原文并回执 note
 - 同时确认 `current.md`/`done.md` 任务块格式：`## [ID] 标题` + 字段表（含 `状态`）+ `### 下一步`
 
-升级完成后用 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要，确认待办行能正常解析（面板自动轮询账本，格式修复后立即可见）。
+升级完成后用 `~/.agents/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要，确认待办行能正常解析（面板自动轮询账本，格式修复后立即可见）。
 
 ## 验证命令（必须实际执行）
 
@@ -102,7 +102,7 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 /path/to/kit/bin/awf upgrade <项目目录> --dry-run      # 预览
 /path/to/kit/bin/awf upgrade <项目目录>                # 执行（rc=check 失败项数量）
 cd <项目目录> && ./agent-workflow/check_workflow.sh    # 退出码 0
-cd <项目目录> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf status       # 刷新摘要
+cd <项目目录> && ~/.agents/skills/agent-workflow-scaffold/bin/awf status       # 刷新摘要
 ```
 
 ## 派发票据生命周期（用完即删，不保留存根）
@@ -119,7 +119,7 @@ cd <项目目录> && ~/.dsh/skills/agent-workflow-scaffold/bin/awf status       
 
 - [ ] `upgrade --dry-run` 与实际执行打印的变更/保留清单一致；骨架相同（非 `--force`）时 dry-run 与执行均打印「骨架已最新」且不触碰目标
 - [ ] 升级后目标 `agent-workflow/FRAMEWORK_VERSION` = 源骨架版（落后/缺失迁移补写）；`version_file` 锚点未被改写
-- [ ] 升级后技能路径 `~/.dsh/skills/agent-workflow-scaffold/bin/awf` 可用、`templates/AGENTS.md.tmpl` 与 kit 一致
+- [ ] 升级后技能路径 `~/.agents/skills/agent-workflow-scaffold/bin/awf` 可用、`templates/AGENTS.md.tmpl` 与 kit 一致
 - [ ] `project.yaml` / `tasks/**` / `memory/**` / `tools/**` 逐字节保留
 - [ ] `check` 退出码 0；旧账本格式问题输出含可直接执行的修复指引
 - [ ] 只本地 commit（消息含任务 ID），未 push

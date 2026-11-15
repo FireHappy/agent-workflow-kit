@@ -1,6 +1,6 @@
 ---
 name: cross-project-dispatch
-description: agent-workflow 跨项目派发流程（G1-G4 门→派发→回执→核验→归档）：四道前置门、派发三规则、必报点总表与回执规范。
+description: agent-workflow 跨项目派发流程（Codex 本地项目原生线程优先，DSH 回退）：G1-G4 门→派发→回执→核验→归档。
 whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、目标仓库≠当前工作区、或需 awf-dispatch 派发与回执管理时——自动加载本技能。
 ---
 
@@ -21,11 +21,17 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、目标
 | 门 | 检查内容 | 不满足时 |
 |---|---|---|
 | G1 工作流 | 目标有 `AGENTS.md`、`agent-workflow/project.yaml`、`check_workflow.sh` | 先 `awf init`（需用户确认）；绝不向无流程仓库派发。仅「status.md 已过期」这类瞬态问题可 warning 放行 |
-| G2 工作区 | 目标路径已登记为当前 harness 工作区（GUI 工作区列表 / `workspace.json`） | 在 GUI「添加工作区」，或 `awf-dispatch --add-workspace`；否则走 handoff |
+| G2 工作区 | 目标路径已登记为当前运行环境的本地项目（Codex `list_projects` 或 DSH 工作区列表 / `workspace.json`） | Codex 无精确项目匹配时回退 DSH；DSH 未登记则 GUI 添加、`--add-workspace` 或 handoff |
 | G3 可写 | 目标无已跟踪改动、无其他 active 任务 | `--allow-dirty=tasks` 只豁免账本自我生成物（status / README / log）。active 冲突三选一：等它完 / `--allow-active` / `--new` |
-| G4 通道 | 目标工作区能创建会话（GUI 在线、认证有效、模型可用） | 回退 `--headless`（需用户同意）或 `--handoff` |
+| G4 通道 | Codex 可创建本地项目线程，或 DSH GUI 在线、认证有效、模型可用 | Codex 创建失败回退 DSH；DSH 再回退 `--headless`（需用户同意）或 `--handoff` |
 
 只读任务可放宽 G3，但仍建议在目标会话里执行，留下可追问的记录。
+
+## Codex 原生通道（同一 Codex 本地主机优先）
+
+当前会话运行在 Codex 桌面端时，若票据目标路径能被 `mcp__codex_app__list_projects` 精确匹配为本地 Git 项目，优先用 Codex 原生线程派发。具体参数、线程状态、回执和失败边界见 [references/codex-native.md](references/codex-native.md)。该通道不调用 `awf-dispatch`，也不进入 DSH 会话池。
+
+目标路径没有精确 Codex 项目匹配、当前运行环境没有 Codex App 工具、或用户明确指定 DSH 时，才走下文的 DSH GUI/headless/handoff 路由。不得用项目名模糊匹配、当前 shell 的 `cwd` 或临时目录代替项目登记。
 
 ## 派发三规则
 
@@ -47,17 +53,19 @@ router 只写：**用户意图 / 硬约束 / 验收标准 / 路由裁决**。
 
 ## 调度方最小操作序列
 
-1. 预检（不建会话）：`awf-dispatch <目标> <票据> --dry-run`，确认 G1–G4
-2. 写票据：`.dispatch/tasks/<项目>-<ID>-<slug>.md`（只含四类信息，见「任务包」节）
-3. 派发：`awf-dispatch <目标> <票据>` — 默认异步，立即返回会话 ID，主会话继续做其他事
-4. 需要落地确认：加 `--wait --timeout 900`；不加则稍后回 GUI 会话查看目标 agent 的五项回执
-5. 收尾：写 `.dispatch/log.md` → 更新本仓库账本 → `--prune` 归档票据 → 本地 commit
-6. 有依赖的目标：等上游回执「成功 + commit 已落地」后再派；失败/超时按 `--wait` 退出码决定重试、改派或降级
-7. worker 报「阻塞：需用户确认 X」：由你转述用户 → 拿到决策 → `awf-dispatch <目标> <票据> --session <会话ID>` 续发。worker 不在目标会话内提问，决策送达前不擅自行事
+1. 写票据：`.dispatch/tasks/<项目>-<ID>-<slug>.md`（只含四类信息，见「任务包」节）
+2. 判断通道：Codex 桌面端且 `list_projects` 精确匹配目标路径 → 按 [Codex 原生通道](references/codex-native.md) 创建本地线程；否则执行 `awf-dispatch <目标> <票据> --dry-run` 确认 DSH G1–G4
+3. 派发：Codex 原生通道默认异步创建线程；DSH 路由执行 `awf-dispatch <目标> <票据>`，默认异步并返回会话信息
+4. 需要落地确认：Codex 调用 `wait_threads`；DSH 加 `--wait --timeout 900`；不等待则保留线程/会话标识并按必报点收回执
+5. 收尾：写 `.dispatch/log.md`（记录 `codex-native` 或 DSH 通道）→ 更新本仓库账本 → `--prune` 归档票据 → 本地 commit
+6. 有依赖的目标：等上游回执「成功 + commit 已落地」后再派；失败/超时按对应通道的结果决定重试、改派或降级
+7. worker 报「阻塞：需用户确认 X」：由你转述用户 → 拿到决策 → 在原 Codex 线程续发，或 DSH 用 `awf-dispatch <目标> <票据> --session <会话ID>` 续发。worker 不在目标会话内提问，决策送达前不擅自行事
 
 ## 脚本行为：每项目 [awf] ≤3（空闲复用 / 池<3 新建 / 池满排队等空闲）
 
 `awf-dispatch` 默认异步执行（`--wait` 是显式开关）：
+
+> 本节的 `[awf]` 会话池、DSH 复用、坏会话隔离和 DSH 去重只适用于 DSH 路由；Codex 原生线程按 [references/codex-native.md](references/codex-native.md) 的线程标识和状态管理。
 
 1. 跑 G1–G4，打印前置检查结果
 2. **每项目 [awf] 会话硬上限 ≤3（DEV-229 恢复，用户定）**：读取目标项目 cwd 下**全部未归档** `[awf]` 会话（归档台账记录的 id 除外）组成池：
@@ -328,10 +336,10 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 
 | 错误 | 处理 |
 |---|---|
-| `workspace-missing` | GUI 添加工作区，或 `--add-workspace`；不要用 `cwd` 绕过 |
+| `workspace-missing` | Codex 先确认 `list_projects` 是否有目标绝对路径；没有则 DSH GUI 添加工作区或 `--add-workspace`；不要用 `cwd` 绕过 |
 | `workflow-missing` | 先 `awf init` / 补齐 `agent-workflow/` |
 | `writer-held` / `session/conflict` | 目标会话被 GUI 占用或写者冲突；切走/等待后重试 |
-| `auth-required` / `connection refused` | 重开 GUI URL；或 `--headless` |
+| `auth-required` / `connection refused` | Codex 原生通道先检查目标项目匹配和 `create_thread` 结果；否则重开 DSH GUI URL，或 `--headless` |
 
 ## 回退方案
 
@@ -339,6 +347,7 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 
 | 情况 | 回退 | 代价 |
 |---|---|---|
+| Codex 没有目标本地项目、原生线程创建失败或当前环境无 Codex App 工具 | DSH GUI → `--headless` → `--handoff` | 跨运行时切换；必须在 `.dispatch/log.md` 记录失败原因，不得把 Codex `threadId` 当 DSH `sessionId` |
 | GUI 未运行 / 认证失效 | `--headless`（需用户同意） | 后台启动并立即返回输出路径；会话不在 GUI 工作区，用户不能直接续聊 |
 | 无法创建会话 | `--handoff` | 只生成交接单，需用户手工在目标会话执行 |
 | 目标未登记工作区 | `--add-workspace` 或 GUI 添加 | 否则会话落在 Ungrouped |
@@ -437,10 +446,10 @@ dsh-session-gc trash --apply                   # 确认后永久清空回收区
 
 ## 验收与收尾清单
 
-1. `--wait` 回合结束后，检查目标 agent 回执是否含五项：状态 / 变更文件 / 验证结果 / commit / 阻塞
+1. Codex 原生通道用 `wait_threads`，DSH 通道用 `--wait`；回合结束后检查目标 agent 回执是否含五项：状态 / 变更文件 / 验证结果 / commit / 阻塞
 2. 在目标仓库独立核对（关键命令不只看目标 agent 自述）：`git log -1`、`git status`、`./agent-workflow/check_workflow.sh`
-3. 记录：会话 ID、任务文件、状态、目标 HEAD、时间
-4. 用户后续细节优先回到同一会话；只有新目标或新任务才重新派发
+3. 记录：通道、Codex 的 `threadId/hostId/projectId` 或 DSH 的会话 ID、任务文件、状态、目标 HEAD、时间
+4. 用户后续细节优先回到同一线程/会话；只有新目标或新任务才重新派发
 
 ## 禁止事项
 

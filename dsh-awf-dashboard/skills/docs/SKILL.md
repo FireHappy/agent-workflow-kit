@@ -95,7 +95,7 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 1. 归档：把 `current/DOCS-xxx.md` 移到 `done/DOCS-xxx.md`，状态改 `done` 并补 `| 完成日期 |`；索引 `README.md` 由 `awf status` 重生成
 2. 文档本身是长期知识时，不必再复制到 `memory/history/`
 3. 运行 `./agent-workflow/check_workflow.sh` 通过
-4. 运行 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要
+4. 运行 `~/.agents/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要
 5. 提交一次本地 git commit（**禁止 push**）
 6. 由其他任务触发时，完成后回到来源任务继续
 

@@ -54,7 +54,7 @@ whenToUse: 用户要求开发/重构/优化功能、启动 DEV-xxx 任务、或�
 2. **记一条**：
 
    ```sh
-   ~/.dsh/skills/agent-workflow-scaffold/bin/awf log <ID> --note "改了什么/结论" --type <claim|implement|verify|review|archive>
+   ~/.agents/skills/agent-workflow-scaffold/bin/awf log <ID> --note "改了什么/结论" --type <claim|implement|verify|review|archive>
    ```
 
 3. **回读末行**：读回该任务 `### Execution Log` 节的最后一行，确认已追加且格式为 `- YYYY-MM-DD HH:MM · 类型 · @谁 · 说明`：
@@ -139,7 +139,7 @@ whenToUse: 用户要求开发/重构/优化功能、启动 DEV-xxx 任务、或�
 2. 有**可复用结论**（根因/修法/决策/踩坑）→ 追加或新建 `../memory/history/<主题>_<YYYY-MM-DD>.md`（标准见 `../memory/README.md`）；有**新写的可复用脚本/命令** → 按 `../tools/README.md` 晋升三要素收录进 `tools/`
 3. 清理对应 `../memory/cache/`
 4. 运行 `./agent-workflow/check_workflow.sh` 通过
-5. 运行 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要
+5. 运行 `~/.agents/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要
 6. 提交一次本地 git commit（**禁止 push**）
 
 ---

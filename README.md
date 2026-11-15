@@ -18,7 +18,7 @@ agent-workflow-kit/
 │   └── skills/              # 框架技能 agent-workflow-scaffold（SKILL.md / bin/awf / templates/ / test/）+ 8 个流程技能（同级平铺）
 ├── test/                    # 冒烟 / 升级回归 / 全局索引并发测试
 ├── docs/design.md           # 设计取舍（含激活式 Router 协议）
-├── install.sh               # 单源软链安装：~/.agents/skills/ 主入口 + ~/.dsh/skills/ DSH 兼容入口
+├── install.sh               # 单源软链安装到 ~/.agents/skills/（唯一技能入口）
 └── agent-workflow/          # kit 自身工作流账本与骨架（发布版本锚点 = dsh-awf-dashboard/package.json，DEV-219）
 ```
 
@@ -27,11 +27,11 @@ agent-workflow-kit/
 ```bash
 git clone <repo-url> ~/Documents/GitHub/agent-workflow-kit
 cd ~/Documents/GitHub/agent-workflow-kit
-./install.sh            # 默认单源软链接：~/.agents/skills/ 主入口 + ~/.dsh/skills/ DSH 兼容入口
+./install.sh            # 默认单源软链接：唯一技能入口 ~/.agents/skills/
 # 旧参数仍兼容：./install.sh copy  # 现在也按单源软链接处理，不再产生副本
 ```
 
-install 后 DSH 在下一次请求前把所有技能加入技能目录：`agent-workflow-scaffold`（脚手架）+ 8 个流程技能（dev / debug / docs / review / cross-project-dispatch / release / team-flow / upgrade）各为顶层技能；唯一源是插件内 `dsh-awf-dashboard/skills/`，`~/.agents/skills/<name>` 与 `~/.dsh/skills/<name>` 都是指向它的软链接。凭 frontmatter 的 `whenToUse` 自动匹配加载——`AGENTS.md` 只需按任务类型加载对应技能，不列举清单。
+install 后 DSH 会从 `~/.agents/skills/` 发现所有顶层技能：`agent-workflow-scaffold`（脚手架）+ 8 个流程技能（dev / debug / docs / review / cross-project-dispatch / release / team-flow / upgrade）。唯一源是插件内 `dsh-awf-dashboard/skills/`，凭 frontmatter 的 `whenToUse` 自动匹配加载——`AGENTS.md` 只需按任务类型加载对应技能，不列举清单。
 
 ## 在项目里使用
 
@@ -40,14 +40,14 @@ install 后 DSH 在下一次请求前把所有技能加入技能目录：`agent-
 ~/Documents/GitHub/agent-workflow-kit/dsh-awf-dashboard/skills/agent-workflow-scaffold/bin/awf init . --name "我的项目" --purpose "一句话定位"
 
 # 改完项目事实后刷新入口
-~/.dsh/skills/agent-workflow-scaffold/bin/awf bootstrap
+~/.agents/skills/agent-workflow-scaffold/bin/awf bootstrap
 
 # 校验 / 状态
 ./agent-workflow/check_workflow.sh
-~/.dsh/skills/agent-workflow-scaffold/bin/awf status
+~/.agents/skills/agent-workflow-scaffold/bin/awf status
 
 # 跨项目派发（目标有工作流且已登记工作区；默认只发送不等待，--wait 才等待回合结束）
-~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md
+~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md
 ```
 
 生成结果：
@@ -79,7 +79,7 @@ skills/ 各流程技能，AGENTS.md 路由内联状态机 + 强制加载技能�
 ~/Documents/GitHub/agent-workflow-kit/dsh-awf-dashboard/skills/agent-workflow-scaffold/bin/awf init . --name "我的项目" --gitignore
 
 # 存量项目补忽略
-~/.dsh/skills/agent-workflow-scaffold/bin/awf gitignore
+~/.agents/skills/agent-workflow-scaffold/bin/awf gitignore
 ```
 
 忽略范围：`/agent-workflow/`、`/AGENTS.md`、`/CLAUDE.md`（根锚定，写入项目根 `.gitignore`，带固定标记行、不重复追加）。之后 `check` / `status` / `bootstrap` 等仍是本地常用命令，只是不再入库。
@@ -93,11 +93,11 @@ skills/ 各流程技能，AGENTS.md 路由内联状态机 + 强制加载技能�
 派发遵循**激活式 router** 协议：路由能力只在直接面对**用户原始请求**的节点临时激活（任务票据头部带「来源：用户 | 工作流」标记，缺省=用户，向后兼容）；「来源：工作流」票据允许按需继续转派（深度不限），转派时在票据头部更新「路由裁决」，来源=工作流的再次派发只提示核对转派理由、不拦截。每个 worker 可在项目 `project.yaml` 填 `role` 作**名牌**（一句话自述，`awf find` / `awf projects` 检索时带出；缺省回退 name），router 检索工作群时可见。设计权衡与「激活派发 / 转派被拒」两段示意见 [docs/design.md](docs/design.md)「激活式 Router」，名牌说明见同文「worker 名牌（role）」，票据来源字段与派发器校验见 [skills/cross-project-dispatch/SKILL.md](skills/cross-project-dispatch/SKILL.md)「任务票据来源」。`templates/AGENTS.md.tmpl` 任务路由段与`skills/cross-project-dispatch/SKILL.md` 已内置同一规则。
 
 ```bash
-~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
-~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
-~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless # GUI 不可用时
-~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff  # 只生成交接单
-~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team     # 任务包附团队执行建议
+~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
+~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --dry-run   # 只做前置检查
+~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless # GUI 不可用时
+~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff  # 只生成交接单
+~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team     # 任务包附团队执行建议
 ```
 
 四道前置门、回退矩阵与任务包格式见技能 `skills/cross-project-dispatch/SKILL.md`（DSH 顶层技能）。

@@ -27,21 +27,21 @@
 并发占用由全局登记表（$DSH_HOME/.awf-dispatch/）+ 文件锁协调；无每项目数量上限。
 
 用法：
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --wait
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --dry-run
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --new
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --module 工作流
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --sender agent-workflow-kit
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --session session-xxx
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --wait
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --dry-run
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --new
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --module 工作流
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --sender agent-workflow-kit
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 .dispatch/tasks/DEV-003.md --session session-xxx
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --headless
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --handoff
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch demo02 task.md --team
 
 票据清理（用完即删；默认为 dry-run，只打印计划）：
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune --apply
-  ~/.dsh/skills/cross-project-dispatch/scripts/awf-dispatch --prune --json
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch --prune
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch --prune --apply
+  ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch --prune --json
 
 票据来源（激活式 router）：派发前读取任务文件头部的「来源：用户 | 工作流」标记。
 缺省视为用户来源（旧票据无该字段仍可用，向后兼容）；DEV-128 起**允许**标记

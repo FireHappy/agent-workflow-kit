@@ -2,7 +2,7 @@
 # awf-kit 冒烟测试：在临时目录验证 init / check / status / bootstrap / --force
 # 两种形态共用一套测试：
 #   - 仓库形态（KIT_DIR=仓库根）：有 AGENTS.md/README.md，全量断言
-#   - 技能形态（KIT_DIR=skill/ 或 ~/.dsh/skills/agent-workflow-scaffold/）：无项目入口文件，
+#   - 技能形态（KIT_DIR=skill/ 或 ~/.agents/skills/agent-workflow-scaffold/）：无项目入口文件，
 #     仓库级文档断言跳过（SKILL_ONLY=1 标记）
 set -eu
 

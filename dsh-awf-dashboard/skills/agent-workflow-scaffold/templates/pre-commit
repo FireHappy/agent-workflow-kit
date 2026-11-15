@@ -18,7 +18,7 @@ if ./agent-workflow/check_workflow.sh >/dev/null 2>&1; then
 fi
 
 echo "== awf pre-commit：check_workflow.sh 未通过，已拒绝本次提交 ==" >&2
-echo "   查看 FAIL：./agent-workflow/check_workflow.sh（或 ~/.dsh/skills/agent-workflow-scaffold/bin/awf check）" >&2
+echo "   查看 FAIL：./agent-workflow/check_workflow.sh（或 ~/.agents/skills/agent-workflow-scaffold/bin/awf check）" >&2
 echo "   修复后重试 git commit；确需跳过（不推荐）：git commit --no-verify" >&2
-echo "   卸载本钩子：~/.dsh/skills/agent-workflow-scaffold/bin/awf install-hooks --uninstall" >&2
+echo "   卸载本钩子：~/.agents/skills/agent-workflow-scaffold/bin/awf install-hooks --uninstall" >&2
 exit 1

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Isolated installation tests: dispatch belongs to its skill, no legacy shim.
-# Both ~/.agents/skills and ~/.dsh/skills are single-source symlink views.
+# ~/.agents/skills is the only installed skill root.
 set -euo pipefail
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -8,13 +8,11 @@ trap 'test -n "$TMP" && test -d "$TMP" && rm -rf "$TMP"' EXIT
 export DSH_HOME="$TMP/copy home"
 export AGENTS_HOME="$TMP/agents home"
 bash "$KIT_DIR/install.sh" copy >"$TMP/install.log" 2>&1
-SKILL="$DSH_HOME/skills/cross-project-dispatch"
-PRIMARY_SKILL="$AGENTS_HOME/skills/cross-project-dispatch"
+SKILL="$AGENTS_HOME/skills/cross-project-dispatch"
 [ -L "$SKILL" ]
-[ -L "$PRIMARY_SKILL" ]
-[ "$(readlink "$SKILL")" = "$PRIMARY_SKILL" ]
+[ ! -e "$DSH_HOME/skills/cross-project-dispatch" ]
 [ -x "$SKILL/scripts/awf-dispatch" ]
-[ ! -e "$DSH_HOME/skills/agent-workflow-scaffold/bin/awf-dispatch" ]
+[ ! -e "$DSH_HOME/skills/agent-workflow-scaffold" ]
 "$SKILL/scripts/awf-dispatch" --help >"$TMP/help"
 "$SKILL/scripts/awf-dispatch" --report --dry-run --from isolated --text test >"$TMP/report"
 # A skill copied alone must work without scaffold, repository or global installs.
@@ -23,7 +21,7 @@ cp -R "$SKILL" "$TMP/standalone/cross-project-dispatch"
 DSH_HOME="$TMP/not-installed" "$TMP/standalone/cross-project-dispatch/scripts/awf-dispatch" --report --dry-run --text standalone >"$TMP/standalone-report"
 # Repeat install and link installation (including paths with spaces).
 bash "$KIT_DIR/install.sh" copy >"$TMP/reinstall.log" 2>&1
-DSH_HOME="$TMP/link home" bash "$KIT_DIR/install.sh" link >"$TMP/link.log" 2>&1
+AGENTS_HOME="$TMP/link home" bash "$KIT_DIR/install.sh" link >"$TMP/link.log" 2>&1
 [ -L "$TMP/link home/skills/cross-project-dispatch" ]
 "$TMP/link home/skills/cross-project-dispatch/scripts/awf-dispatch" --help >"$TMP/link-help"
 python3 - "$SKILL/scripts/awf-dispatch" <<'PY'
