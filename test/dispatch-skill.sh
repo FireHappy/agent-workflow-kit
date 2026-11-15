@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Isolated installation tests: dispatch belongs to its skill, no legacy shim.
+# Both ~/.agents/skills and ~/.dsh/skills are single-source symlink views.
 set -euo pipefail
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'test -n "$TMP" && test -d "$TMP" && rm -rf "$TMP"' EXIT
 export DSH_HOME="$TMP/copy home"
+export AGENTS_HOME="$TMP/agents home"
 bash "$KIT_DIR/install.sh" copy >"$TMP/install.log" 2>&1
 SKILL="$DSH_HOME/skills/cross-project-dispatch"
+PRIMARY_SKILL="$AGENTS_HOME/skills/cross-project-dispatch"
+[ -L "$SKILL" ]
+[ -L "$PRIMARY_SKILL" ]
+[ "$(readlink "$SKILL")" = "$PRIMARY_SKILL" ]
 [ -x "$SKILL/scripts/awf-dispatch" ]
 [ ! -e "$DSH_HOME/skills/agent-workflow-scaffold/bin/awf-dispatch" ]
 "$SKILL/scripts/awf-dispatch" --help >"$TMP/help"

@@ -1,63 +1,67 @@
 #!/usr/bin/env bash
-# 把本仓库安装为 DSH 技能。默认 link：~/.dsh/skills/<name> 直接引用插件内技能路径（改插件即改技能，无需重装）；copy 用于与仓库解耦的独立实体。
-# DEV-186 技能实体化：技能 = ~/.dsh/skills/agent-workflow-scaffold/ 实体文件（SKILL.md + skills/ + bin/），
-# 不指向项目仓库；更新技能重跑 ./install.sh 即可。
+# 单源技能安装：~/.agents/skills/ 与 ~/.dsh/skills/<name> 都只做软链接，实际源是插件仓库。
+# 保留 copy 参数仅为兼容旧命令；现在 copy 也按 link 处理，不再生成技能副本。
+# 其他 agent 与 DSH 共享插件内同一份技能内容，更新技能重跑 ./install.sh 即可。
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-link}"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
-SKILLS="$DSH_HOME/skills"
+AGENTS_HOME="${AGENTS_HOME:-$HOME/.agents}"
+PRIMARY="$AGENTS_HOME/skills"
+DSH_SKILLS="$DSH_HOME/skills"
 
 case "$MODE" in
   link|--link) MODE="link" ;;
-  copy|--copy) MODE="copy" ;;
+  copy|--copy)
+    MODE="link"
+    echo "提示：copy 参数已兼容为单源 link，不再生成技能副本。" >&2
+    ;;
   *) echo "用法: ./install.sh [copy|link]" >&2; exit 1 ;;
 esac
 
-mkdir -p "$SKILLS"
+mkdir -p "$PRIMARY" "$DSH_SKILLS"
 
 install_skill() {
-  local name="$1" src="$2" dest="$SKILLS/$1"
+  local name="$1" src="$2" primary="$PRIMARY/$1" dsh="$DSH_SKILLS/$1"
   if [ ! -e "$src" ]; then
     echo "缺少技能源：$src" >&2
     exit 1
   fi
-  if [ -e "$dest" ] && [ ! -L "$dest" ]; then
-    local backup_dir="$DSH_HOME/skill-backups"
+  # .agents/skills 是唯一内容目录；旧的实体副本先备份，再替换。
+  if [ -e "$primary" ] && [ ! -L "$primary" ]; then
+    local backup_dir="$AGENTS_HOME/skill-backups"
     mkdir -p "$backup_dir"
     local bak="$backup_dir/$name.$(date +%Y%m%d%H%M%S)"
-    mv "$dest" "$bak"
+    mv "$primary" "$bak"
     echo "已备份旧技能目录：$bak"
   fi
-  rm -rf "$dest"
+  rm -rf "$primary"
   if [ "$MODE" = "link" ]; then
-    ln -s "$src" "$dest"
-    echo "已安装（link）：${dest}"
+    ln -s "$src" "$primary"
+    echo "已安装（link）：${primary}"
   else
-    # 实体化：只复制技能内容。主技能复制 SKILL.md + skills/ + bin/ + templates/ + test/；
-    # 各流程技能（skills/*/）携带自己的 scripts；其余资源子目录存在才复制。
-    # kit 的 docs/ 是项目文档（design/arch-review），不进技能（DEV-191）。
-    mkdir -p "$dest"
-    cp "$src/SKILL.md" "$dest/SKILL.md"
-    # DEV-217 版本契约（清理版号）：实体不再写 VERSION / 根 FRAMEWORK_VERSION——
-    #   · 插件/分发版本 = 插件 dsh-awf-dashboard/package.json（插件唯一信号）；
-    #   · 骨架版本 = templates/FRAMEWORK_VERSION（模板内，随 templates/ 整体拷贝，见下方循环）。
-    # 清理旧版淘汰文件（幂等）：旧实体的版本文件不再被任何读点消费。
-    rm -f "$dest/VERSION" "$dest/FRAMEWORK_VERSION"
+    # .agents 主目录持有唯一实体副本；.dsh 只链接到它，不再复制第二份。
+    mkdir -p "$primary"
+    cp "$src/SKILL.md" "$primary/SKILL.md"
+    rm -f "$primary/VERSION" "$primary/FRAMEWORK_VERSION"
     for sub in skills bin templates test scripts; do
-      [ -d "$src/$sub" ] && cp -R "$src/$sub" "$dest/$sub"
+      [ -d "$src/$sub" ] && cp -R "$src/$sub" "$primary/$sub"
     done
-    echo "已安装（copy）：${dest}"
+    echo "已安装（copy）：${primary}"
   fi
+  # DSH 兼容入口始终是软链接，避免 ~/.dsh/skills 与 ~/.agents/skills 漂移。
+  rm -rf "$dsh"
+  ln -s "$primary" "$dsh"
+  echo "已链接（compat）：${dsh} -> ${primary}"
 }
 
 SKILL_SRC="$REPO/dsh-awf-dashboard/skills"
 install_skill "agent-workflow-scaffold" "$SKILL_SRC/agent-workflow-scaffold"
 
 # DEV-192 技能库顶层化：把 skills/*/ 每个流程技能同时安装为 DSH 顶层技能
-# （~/.dsh/skills/<name>/，DSH 启动注入 frontmatter，凭 whenToUse 自动匹配）——
-# 这样 AGENTS.md 不必列举技能清单，DSH 原生语义匹配即完成路由。
+# （~/.agents/skills/<name>/ 为唯一实体/链接，~/.dsh/skills/<name>/ 为兼容软链，
+# DSH 启动注入 frontmatter，凭 whenToUse 自动匹配）——这样 AGENTS.md 不必列举清单。
 for sk in "$SKILL_SRC"/*/; do
   [ -d "$sk" ] || continue
   sk_name="$(basename "$sk")"
@@ -68,8 +72,8 @@ done
 
 # awf 属脚手架技能；派发实现由 cross-project-dispatch 技能自带。
 # 唯一派发入口：${DSH_HOME}/skills/cross-project-dispatch/scripts/awf-dispatch
-chmod +x "$SKILLS/agent-workflow-scaffold/bin/awf" \
-         "$SKILLS/agent-workflow-scaffold/test/smoke.sh" \
-         "$SKILLS/cross-project-dispatch/scripts/awf-dispatch" 2>/dev/null || true
+chmod +x "$PRIMARY/agent-workflow-scaffold/bin/awf" \
+         "$PRIMARY/agent-workflow-scaffold/test/smoke.sh" \
+         "$PRIMARY/cross-project-dispatch/scripts/awf-dispatch" 2>/dev/null || true
 
-echo "验证：bash \"$SKILLS/agent-workflow-scaffold/test/smoke.sh\""
+echo "验证：bash \"$PRIMARY/agent-workflow-scaffold/test/smoke.sh\""
