@@ -7,7 +7,7 @@
 | Owner | lead |
 | 协作模式 | single |
 | 来源 | 用户报「其他的库我看到了需要升级的提示」→ 指定排查 uxrsample（2026-11-16） |
-| 修改范围 | 仅 `dsh-awf-dashboard/lib/index.js`（版本信号路径解析 + 判定链守卫）、`dsh-awf-dashboard/test/ledger.test.js`（回归用例）、`dsh-awf-dashboard/package.json`（版本号）、`dsh-awf-dashboard/README.md`（变更记录） |
+| 修改范围 | `dsh-awf-dashboard/lib/index.js`（版本信号路径解析 + 判定链守卫）、`dsh-awf-dashboard/test/ledger.test.js`（回归用例 + 夹具对齐真实 kit 布局）、`dsh-awf-dashboard/package.json`（版本号）、`dsh-awf-dashboard/README.md`（变更记录）；同类迁移残留 `test/upgrade.sh`（全局技能实体路径仍硬编码 `~/.dsh/skills`，DEV-235 后该测试直接 FAIL，随本单修复为 `$AGENTS_HOME/skills` 优先 + 旧路径回退） |
 | 依赖 | 无（纯文件路径 + 纯函数判定）；验证需已登记项目真实数据 |
 | 最近更新 | 2026-11-16 |
 | 完成日期 | 2026-11-16 |

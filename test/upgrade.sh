@@ -30,7 +30,7 @@ else
   SKILL_ROOT="$KIT"
 fi
 AWF="$SKILL_ROOT/bin/awf"
-# 派发技能源（仓库形态在插件 skills/ 下；技能形态在 ~/.dsh/skills/ 并列）
+# 派发技能源（仓库形态在插件 skills/ 下；技能形态在 $AGENTS_HOME/skills 并列，DEV-235）
 if [ -d "$KIT/dsh-awf-dashboard/skills/cross-project-dispatch" ]; then
   DISPATCH_SKILL="$KIT/dsh-awf-dashboard/skills/cross-project-dispatch"
 else
@@ -46,10 +46,13 @@ mkdir -p "$WORK/skills/agent-workflow-scaffold/bin"
 cp "$AWF" "$SKILL_BIN"
 chmod +x "$SKILL_BIN"
 chk() { ( cd "$1" && "$SKILL_BIN" "${@:2}" ); }
-# 隔离守卫（DEV-203/DEV-217）：upgrade 内部 bootstrap/check 硬编码 $HOME/.dsh/skills，不随
-# DSH_AGENTS_HOME 重定向——全局技能实体必须与 checkout 一致，否则测试会静默测旧技能假绿。
+# 隔离守卫（DEV-203/DEV-217）：upgrade 内部 bootstrap/check 走全局技能实体，不随 DSH_AGENTS_HOME
+# 重定向——全局技能实体必须与 checkout 一致，否则测试会静默测旧技能假绿。
 # DEV-217 版本契约：实体根 VERSION/FRAMEWORK_VERSION 已退役，骨架版 = templates/FRAMEWORK_VERSION。
-GLOBAL_SKILL="$HOME/.dsh/skills/agent-workflow-scaffold"
+# DEBUG-004：技能落点已统一到 $AGENTS_HOME/skills（DEV-235，默认 ~/.agents/skills）；
+# 旧 ~/.dsh/skills 仅作存量兼容回退，不再作为唯一断言路径。
+GLOBAL_SKILL="${AGENTS_HOME:-$HOME/.agents}/skills/agent-workflow-scaffold"
+[ -f "$GLOBAL_SKILL/bin/awf" ] || GLOBAL_SKILL="$HOME/.dsh/skills/agent-workflow-scaffold"
 GLOBAL_AWF="$GLOBAL_SKILL/bin/awf"
 if [ ! -f "$GLOBAL_AWF" ] || ! cmp -s "$GLOBAL_AWF" "$AWF"; then
   echo "FAIL  全局技能实体与 checkout 不一致（${GLOBAL_AWF}）；请先运行 ./install.sh 再跑本测试" >&2
