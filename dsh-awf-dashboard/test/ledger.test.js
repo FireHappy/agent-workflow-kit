@@ -726,11 +726,13 @@ async function writeKitFixture(kitPath) {
   const { mkdir, writeFile } = await import('node:fs/promises')
   const { join } = await import('node:path')
   await mkdir(join(kitPath, 'agent-workflow', 'bin'), { recursive: true })
-  await mkdir(join(kitPath, 'templates'), { recursive: true })
+  // DEBUG-004：夹具对齐真实 kit 布局——骨架版在 `agent-workflow/templates/FRAMEWORK_VERSION`
+  // （根 `templates/` 在真实 kit 中不存在，旧夹具的根层路径掩盖了回退路径错层缺陷）。
+  await mkdir(join(kitPath, 'agent-workflow', 'templates'), { recursive: true })
   await writeFile(join(kitPath, 'agent-workflow', 'project.yaml'),
     'id: agent-workflow-kit\nname: agent-workflow-kit\nversion_file: agent-workflow/VERSION\n')
   await writeFile(join(kitPath, 'agent-workflow', 'VERSION'), '1.4.1\n')
-  await writeFile(join(kitPath, 'templates', 'FRAMEWORK_VERSION'), '1.0.0\n')
+  await writeFile(join(kitPath, 'agent-workflow', 'templates', 'FRAMEWORK_VERSION'), '1.0.0\n')
   await writeFile(join(kitPath, 'agent-workflow', 'bin', 'awf'), '#!/usr/bin/env bash\nAWF_VERSION=2\n')
 }
 
@@ -846,6 +848,65 @@ test('DEV-217 kitVersions：插件版本=package.json；骨架版=模板（实�
   assert.equal(vs.upgradeTo, 'v2.0.0（骨架升级）')
   assert.equal(vs.skillVersion, 'v' + pkgVersion)
   assert.equal(vs.latestFramework, 'v2.0.0')
+})
+
+test('DEBUG-004 kitVersions：主入口 $AGENTS_HOME/skills 实体优先于旧 $DSH_HOME/skills 与 kit 回退', async () => {
+  const { mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { kitVersions } = await import('../lib/index.js')
+  // 主入口实体 3.0.0/4；旧入口实体（DEV-217 用例已写入 2.0.0/3）→ 主入口必须胜出
+  const agentsHome = join(awfAgentsHome, 'agents-primary')
+  const entityDir = join(agentsHome, 'skills', 'agent-workflow-scaffold')
+  await mkdir(join(entityDir, 'templates'), { recursive: true })
+  await mkdir(join(entityDir, 'bin'), { recursive: true })
+  await writeFile(join(entityDir, 'templates', 'FRAMEWORK_VERSION'), '3.0.0\n')
+  await writeFile(join(entityDir, 'bin', 'awf'), '#!/usr/bin/env bash\nAWF_VERSION=4\n')
+  const prev = process.env.AGENTS_HOME
+  process.env.AGENTS_HOME = agentsHome
+  try {
+    const k = await kitVersions()
+    assert.equal(k.latestFramework, '3.0.0') // DEV-235 主入口优先（不是旧入口 2.0.0，也不是 kit 1.0.0）
+    assert.equal(k.latestAWF, 4)
+  } finally {
+    if (prev === undefined) delete process.env.AGENTS_HOME
+    else process.env.AGENTS_HOME = prev
+    await rm(agentsHome, { recursive: true, force: true })
+  }
+})
+
+test('DEBUG-004 versionStatus：kit 侧骨架版不可读（实体/kit 路径异常）→ unknown，不误报可升级', async () => {
+  const { rm, writeFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+  const { versionStatus } = await import('../lib/index.js')
+  // kit 夹具骨架版临时移除：项目骨架版 1.5.0 可读、kit 侧不可读 → 不可判 → unknown
+  // 守卫存在时不会下滑到「项目发布版 vs 插件版本」，否则会把 0.1.0 判成 outdated。
+  const kitFw = join(awfKitPath, 'agent-workflow', 'templates', 'FRAMEWORK_VERSION')
+  const { readFile, mkdtemp } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const backup = await readFile(kitFw, 'utf8')
+  await rm(kitFw)
+  // 同时把技能实体候选指向空目录（DEV-217 用例在 awfDshHome 留下实体 2.0.0 → 会掩盖本用例）
+  const emptyHome = await mkdtemp(join(tmpdir(), 'awf-empty-'))
+  const prevAgents = process.env.AGENTS_HOME
+  const prevDsh = process.env.DSH_HOME
+  process.env.AGENTS_HOME = emptyHome
+  process.env.DSH_HOME = emptyHome
+  try {
+    const projPath = join(awfAgentsHome, 'proj-no-kit-fw')
+    await writeProjectFixture(projPath, { framework: '1.5.0', release: '0.1.0' })
+    const vs = await versionStatus(projPath)
+    assert.equal(vs.status, 'unknown')
+    assert.equal(vs.upgradeTo, null)
+    assert.equal(vs.installedFramework, 'v1.5.0')
+    assert.equal(vs.latestFramework, null)
+  } finally {
+    if (prevAgents === undefined) delete process.env.AGENTS_HOME
+    else process.env.AGENTS_HOME = prevAgents
+    if (prevDsh === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = prevDsh
+    await rm(emptyHome, { recursive: true, force: true })
+    await writeFile(kitFw, backup)
+  }
 })
 
 test('DEV-206 夹具清理', async () => {

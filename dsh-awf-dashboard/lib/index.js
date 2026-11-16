@@ -288,21 +288,30 @@ async function findKitProject() {
 }
 
 /**
- * 技能实体目录（install.sh 安装落点；路径 = $DSH_HOME/skills/agent-workflow-scaffold，
- * install.sh 默认 DSH_HOME=$HOME/.dsh）。
- * DEV-217 版本契约：实体含 bin/awf + templates/FRAMEWORK_VERSION（骨架版随模板）；
- * 实体根 VERSION / FRAMEWORK_VERSION 已退役，插件/分发版本改读本包 package.json。
+ * 技能实体候选目录（DEV-235 起技能落点统一为 `$AGENTS_HOME/skills`，默认 `$HOME/.agents/skills`；
+ * 旧落点 `$DSH_HOME/skills`，默认 `$HOME/.dsh/skills`，仅作存量兼容）。
+ * DEBUG-004：原实现硬编码 `$DSH_HOME/skills/agent-workflow-scaffold`，DEV-235 移除 `~/.dsh/skills`
+ * 后读不到实体 → `latestFramework` 变 null → 判定链下滑到「项目发布版 vs 插件版本」误报可升级。
+ * 返回按优先级排列的候选目录（调用方逐个探测，取第一个可读）。
  */
-function skillEntityDir() {
-  return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skills', 'agent-workflow-scaffold')
+function skillEntityDirs() {
+  const dirs = []
+  const agentsHome = process.env.AGENTS_HOME || process.env.DSH_AGENTS_HOME || join(homedir(), '.agents')
+  dirs.push(join(agentsHome, 'skills', 'agent-workflow-scaffold'))
+  const legacy = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'skills', 'agent-workflow-scaffold')
+  if (!dirs.includes(legacy)) dirs.push(legacy)
+  return dirs
 }
 
-/** 读技能实体根版本文件（相对实体根的路径）；不存在/空 → null。 */
-async function readEntityVersionFile(name) {
-  try {
-    const v = String(await readFile(join(skillEntityDir(), name), 'utf8')).trim()
-    return v || null
-  } catch { return null }
+/** 读第一个非空版本文件（绝对路径候选列表）；都不存在/空 → null。 */
+async function readFirstVersionFile(paths) {
+  for (const p of paths) {
+    try {
+      const v = String(await readFile(p, 'utf8')).trim()
+      if (v) return v
+    } catch { /* 下一候选 */ }
+  }
+  return null
 }
 
 /** 插件/分发版本（DEV-217 唯一信号）：读本插件 package.json 的 version。 */
@@ -314,29 +323,36 @@ async function readPluginVersion() {
 }
 
 /**
- * kit 侧最新版本信号（DEV-205 双版本模型 / DEV-217 版本契约）：
+ * kit 侧最新版本信号（DEV-205 双版本模型 / DEV-217 版本契约 / DEBUG-004 路径修正）：
  *   - skillVersion    = 插件/分发版本——读插件 package.json，唯一信号（不再读技能实体 VERSION）
  *   - latestFramework = 骨架版本（upgrade/outdated 判定依据）——技能实体 templates/FRAMEWORK_VERSION 优先，
- *                       回退 kit templates/FRAMEWORK_VERSION（与模板同源：模板变更才 bump）
+ *                       回退 kit 仓库的 `agent-workflow/templates/FRAMEWORK_VERSION`（真实布局）
+ *                       与历史根 `templates/FRAMEWORK_VERSION`（与模板同源：模板变更才 bump）
  *   - latestRelease   = 最新发布版（旧 client 兼容字段）——取 skillVersion
- *   - latestAWF       = 骨架契约代次（旧信号，回退链兼容）——技能实体 bin/awf 优先，回退 kit agent-workflow/bin/awf
+ *   - latestAWF       = 骨架契约代次（旧信号，回退链兼容）——技能实体 bin/awf 优先，
+ *                       回退 kit 内置技能实体 / kit agent-workflow/bin/awf
  * 技能实体未安装/不可读时骨架版回退 kit 仓库；两者都不可读时为 null。
+ * DEBUG-004：原回退读 `kit/templates/FRAMEWORK_VERSION`（kit 无此层，真实在 `kit/agent-workflow/templates/`），
+ * 与实体落点迁移叠加导致最新骨架版恒为 null → 误报可升级。
  */
 async function kitVersions() {
   const kit = await findKitProject()
   // DEV-217：插件版本 = package.json（唯一分发信号），骨架版 = 模板内
   const skillVersion = await readPluginVersion()
-  let latestFramework = await readEntityVersionFile('templates/FRAMEWORK_VERSION')
-  let latestAWF = null
-  try {
-    latestAWF = parseAWFVersion(String(await readFile(join(skillEntityDir(), 'bin', 'awf'), 'utf8')))
-  } catch { /* 实体无 bin/awf → 走 kit 回退 */ }
-  if (latestFramework === null && kit) {
-    try {
-      latestFramework = String(await readFile(join(kit.path, 'templates', 'FRAMEWORK_VERSION'), 'utf8')).trim() || null
-    } catch { /* 读不到 → null */ }
+  const frameworkCandidates = skillEntityDirs().map((d) => join(d, 'templates', 'FRAMEWORK_VERSION'))
+  const awfCandidates = skillEntityDirs().map((d) => join(d, 'bin', 'awf'))
+  if (kit) {
+    // kit 内置技能实体（开发仓库形态）优先于 kit 骨架目录
+    const bundledEntity = join(kit.path, 'dsh-awf-dashboard', 'skills', 'agent-workflow-scaffold')
+    frameworkCandidates.push(join(bundledEntity, 'templates', 'FRAMEWORK_VERSION'))
+    frameworkCandidates.push(join(kit.path, 'agent-workflow', 'templates', 'FRAMEWORK_VERSION'))
+    frameworkCandidates.push(join(kit.path, 'templates', 'FRAMEWORK_VERSION')) // 历史布局
+    awfCandidates.push(join(bundledEntity, 'bin', 'awf'))
+    awfCandidates.push(join(kit.path, 'agent-workflow', 'bin', 'awf'))
   }
-  if (latestAWF === null && kit) latestAWF = await readProjectAWFVersion(kit.path)
+  const latestFramework = await readFirstVersionFile(frameworkCandidates)
+  const awfScript = await readFirstVersionFile(awfCandidates)
+  const latestAWF = awfScript === null ? null : parseAWFVersion(awfScript)
   const latestRelease = skillVersion
   return { kitPath: (kit && kit.path) || null, latestAWF, latestRelease, latestFramework, skillVersion }
 }
@@ -357,6 +373,8 @@ async function projectVersions(projectPath) {
  * 判定链：
  *   1) 双方骨架版（installedFramework/latestFramework）均可读 → 骨架 semver 差量判定
  *      （semverLt 解析失败视为不可比 → 走下一链）；
+ *   0) 守卫（DEBUG-004）：项目骨架版可读但 kit 侧骨架版不可读 → 判 unknown，
+ *      **不得**下滑到「项目发布版 vs 插件版本」的错误比较（两者不同口径，必然误报可升级）；
  *   2) 回退链（存量/未迁移项目，无 FRAMEWORK_VERSION）：AWF 代次 → 发布版 semver → scaffold_version。
  * 返回字段只加不减（client 兼容）：新增 latestFramework / installedFramework / skillVersion。
  */
@@ -369,7 +387,10 @@ async function versionStatus(projectPath) {
   const fwLt = (p.installedFramework !== null && k.latestFramework !== null)
     ? semverLt(p.installedFramework, k.latestFramework)
     : null
-  if (fwLt !== null) {
+  if (p.installedFramework !== null && k.latestFramework === null) {
+    // DEBUG-004 守卫：kit 侧骨架版不可读（实体/kit 路径异常）≠ 项目落后；不可判 → unknown
+    status = 'unknown'
+  } else if (fwLt !== null) {
     status = fwLt === true ? 'outdated' : 'latest'
   } else if (p.installedAWF !== null && k.latestAWF !== null) {
     // 回退链 1（存量项目无骨架版）：骨架契约代次（DEV-184 语义保留）

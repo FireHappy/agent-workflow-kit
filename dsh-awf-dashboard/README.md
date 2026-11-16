@@ -124,6 +124,8 @@ pnpm remove dsh-awf-dashboard        # 若 CLI 装的：dsh plugin --profile des
 
 ## 变更记录
 
+- **1.8.2（DEBUG-004）**：修复看板误报「工作流可升级」（DSH 右侧版本条对全部已登记项目显示 outdated，例如 uxrsample `v1.1.6 → 1.8.1`）。根因两条叠加：①DEV-235 技能落点从 `~/.dsh/skills` 迁到 `~/.agents/skills` 后，插件 `skillEntityDirs()` 仍只读旧路径 → 技能实体骨架版读不到；②kit 回退路径错层（读 `<kit>/templates/FRAMEWORK_VERSION`，真实在 `<kit>/agent-workflow/templates/`）。两者使 `latestFramework` 恒为 null，判定链下滑到「项目发布版 vs 插件版本」的错误比较 → 全量误报。修复：技能实体改多候选探测（`$AGENTS_HOME/skills` 主入口 → 旧 `$DSH_HOME/skills` → kit 内置实体），kit 骨架版/AWF 脚本候选补 `agent-workflow/` 层与 kit 内置实体；新增判定守卫——项目骨架版可读而 kit 侧不可读时判 `unknown`（不可判），不再下滑误报。单测 60/60（新增 2 组），真实数据 10 个项目全部恢复 `latest`。
+
 - **1.7.1（DEV-218）**：`dsh-awf-dashboard/skills/` 升格为**技能唯一源**（唯一开发路径）——仓库根 `skills/`、`bin/`、`templates/`、`SKILL.md` 副本全部移除；copy 脚本/测试/manifest 退役；`install.sh`、`test/`、AGENTS 模板、project.yaml 引用改指插件路径；`dispatch/` 改名 `.dispatch/`（派发任务记录，默认忽略）并同步派发技能逻辑。
 
 - **1.7.0（DEV-217）**：内嵌技能副本**平铺布局** + 源收敛 + 版本契约（清理版号）
