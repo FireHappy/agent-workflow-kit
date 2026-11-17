@@ -134,5 +134,6 @@
 | DEV-233 | P1 | 技能安装主输出切换到 ~/.agents/skills 并保留 DSH 镜像 | 2026-11-15 |
 | DEV-234 | P1 | Codex 本地项目原生派发通道 | 2026-11-15 |
 | DEV-235 | P1 | 移除 ~/.dsh/skills，统一 ~/.agents/skills 单一技能入口 | 2026-11-15 |
+| DEV-236 | P1 | cross-project-dispatch Codex 路由文档与技能入口收敛 | 2026-11-15 |
 | PURGE-20261108 | P1 | DSH 会话文件清理工具（外部移除，可恢复优先） | 2026-11-08 |
 | SESSION-20261108 | P1 | 给 awf-dispatch 增加「任务完成后物理删除会话」支持（含宿主能力排查 + --session 锁定） | 2026-11-08 |

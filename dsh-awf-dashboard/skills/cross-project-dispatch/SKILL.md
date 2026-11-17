@@ -14,7 +14,7 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、目标
 
 ## 随技能提供的工具
 
-本技能自带 `scripts/awf-dispatch`（Python 3 标准库），不依赖脚手架技能。下文 `awf-dispatch` 均指本技能目录下的脚本；已安装时可调用 `${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch`。不提供脚手架下的旧派发入口。
+本技能自带 `scripts/awf-dispatch`（Python 3 标准库），不依赖脚手架技能。下文 `awf-dispatch` 均指本技能目录下的脚本；已安装时可调用 `${AGENTS_HOME:-$HOME/.agents}/skills/cross-project-dispatch/scripts/awf-dispatch`。不提供脚手架下的旧派发入口。`DSH_HOME` 只用于 DSH 运行时状态，不用于定位技能文件。
 
 ## 四道前置门（G1–G4，缺一不可）
 
@@ -23,7 +23,7 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、目标
 | G1 工作流 | 目标有 `AGENTS.md`、`agent-workflow/project.yaml`、`check_workflow.sh` | 先 `awf init`（需用户确认）；绝不向无流程仓库派发。仅「status.md 已过期」这类瞬态问题可 warning 放行 |
 | G2 工作区 | 目标路径已登记为当前运行环境的本地项目（Codex `list_projects` 或 DSH 工作区列表 / `workspace.json`） | Codex 无精确项目匹配时回退 DSH；DSH 未登记则 GUI 添加、`--add-workspace` 或 handoff |
 | G3 可写 | 目标无已跟踪改动、无其他 active 任务 | `--allow-dirty=tasks` 只豁免账本自我生成物（status / README / log）。active 冲突三选一：等它完 / `--allow-active` / `--new` |
-| G4 通道 | Codex 可创建本地项目线程，或 DSH GUI 在线、认证有效、模型可用 | Codex 创建失败回退 DSH；DSH 再回退 `--headless`（需用户同意）或 `--handoff` |
+| G4 通道 | Codex 可创建本地项目线程，或 DSH GUI 在线、认证有效、模型可用 | Codex 创建失败先保留原始错误；只有用户明确允许回退时才转 DSH，随后再按需回退 `--headless`（需用户同意）或 `--handoff` |
 
 只读任务可放宽 G3，但仍建议在目标会话里执行，留下可追问的记录。
 
@@ -31,7 +31,7 @@ whenToUse: 用户要求把任务交给另一个项目、跨仓库协作、目标
 
 当前会话运行在 Codex 桌面端时，若票据目标路径能被 `mcp__codex_app__list_projects` 精确匹配为本地 Git 项目，优先用 Codex 原生线程派发。具体参数、线程状态、回执和失败边界见 [references/codex-native.md](references/codex-native.md)。该通道不调用 `awf-dispatch`，也不进入 DSH 会话池。
 
-目标路径没有精确 Codex 项目匹配、当前运行环境没有 Codex App 工具、或用户明确指定 DSH 时，才走下文的 DSH GUI/headless/handoff 路由。不得用项目名模糊匹配、当前 shell 的 `cwd` 或临时目录代替项目登记。
+目标路径没有精确 Codex 项目匹配、当前运行环境没有 Codex App 工具、或用户明确指定 DSH 时，才走下文的 DSH GUI/headless/handoff 路由。若已选 Codex 原生通道但 `create_thread` 失败，必须记录原始错误、禁止静默重试或重复建线程；只有拿到用户允许的 DSH 回退决定后才能切换。不得用项目名模糊匹配、当前 shell 的 `cwd` 或临时目录代替项目登记。
 
 ## 派发三规则
 
@@ -54,7 +54,7 @@ router 只写：**用户意图 / 硬约束 / 验收标准 / 路由裁决**。
 ## 调度方最小操作序列
 
 1. 写票据：`.dispatch/tasks/<项目>-<ID>-<slug>.md`（只含四类信息，见「任务包」节）
-2. 判断通道：Codex 桌面端且 `list_projects` 精确匹配目标路径 → 按 [Codex 原生通道](references/codex-native.md) 创建本地线程；否则执行 `awf-dispatch <目标> <票据> --dry-run` 确认 DSH G1–G4
+2. 判断通道：Codex 桌面端且 `list_projects` 精确匹配目标路径 → 按 [Codex 原生通道](references/codex-native.md) 创建本地线程；否则执行 `awf-dispatch <目标> <票据> --dry-run` 确认 DSH G1–G4。Codex 创建失败时先记录原始错误，不自动重复创建；只有用户授权后才走 DSH 回退。
 3. 派发：Codex 原生通道默认异步创建线程；DSH 路由执行 `awf-dispatch <目标> <票据>`，默认异步并返回会话信息
 4. 需要落地确认：Codex 调用 `wait_threads`；DSH 加 `--wait --timeout 900`；不等待则保留线程/会话标识并按必报点收回执
 5. 收尾：写 `.dispatch/log.md`（记录 `codex-native` 或 DSH 通道）→ 更新本仓库账本 → `--prune` 归档票据 → 本地 commit
@@ -339,7 +339,7 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 | `workspace-missing` | Codex 先确认 `list_projects` 是否有目标绝对路径；没有则 DSH GUI 添加工作区或 `--add-workspace`；不要用 `cwd` 绕过 |
 | `workflow-missing` | 先 `awf init` / 补齐 `agent-workflow/` |
 | `writer-held` / `session/conflict` | 目标会话被 GUI 占用或写者冲突；切走/等待后重试 |
-| `auth-required` / `connection refused` | Codex 原生通道先检查目标项目匹配和 `create_thread` 结果；否则重开 DSH GUI URL，或 `--headless` |
+| `auth-required` / `connection refused` | Codex 原生通道先检查目标项目匹配和 `create_thread` 结果；保留原始错误并取得用户回退授权后，再重开 DSH GUI URL，或 `--headless` |
 
 ## 回退方案
 
@@ -347,7 +347,7 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 
 | 情况 | 回退 | 代价 |
 |---|---|---|
-| Codex 没有目标本地项目、原生线程创建失败或当前环境无 Codex App 工具 | DSH GUI → `--headless` → `--handoff` | 跨运行时切换；必须在 `.dispatch/log.md` 记录失败原因，不得把 Codex `threadId` 当 DSH `sessionId` |
+| Codex 没有目标本地项目、当前环境无 Codex App 工具，或用户已明确允许原生线程失败后回退 | DSH GUI → `--headless` → `--handoff` | 跨运行时切换；必须在 `.dispatch/log.md` 记录失败原因，不得把 Codex `threadId` 当 DSH `sessionId` |
 | GUI 未运行 / 认证失效 | `--headless`（需用户同意） | 后台启动并立即返回输出路径；会话不在 GUI 工作区，用户不能直接续聊 |
 | 无法创建会话 | `--handoff` | 只生成交接单，需用户手工在目标会话执行 |
 | 目标未登记工作区 | `--add-workspace` 或 GUI 添加 | 否则会话落在 Ungrouped |
@@ -374,8 +374,8 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 - 特殊情况：目标门禁不通过（G1-G4 拦截）→ 票据保留至用户决策（补 init / 清理工作区 / 豁免），决策后重派或删除
 
 ```sh
-"${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --prune           # dry-run：只打印计划
-"${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --prune --apply   # 确认后真正删除（用完即删，不留存根）
+"${AGENTS_HOME:-$HOME/.agents}/skills/cross-project-dispatch/scripts/awf-dispatch" --prune           # dry-run：只打印计划
+"${AGENTS_HOME:-$HOME/.agents}/skills/cross-project-dispatch/scripts/awf-dispatch" --prune --apply   # 确认后真正删除（用完即删，不留存根）
 ```
 
 ## 满池治理（DEV-214 四件套 / DEV-229 恢复硬上限）
@@ -388,9 +388,9 @@ awf-dispatch --report --to <派发方会话ID> "<回执文本>"
 4. **`--cleanup`**：列出每项目超 3 的空闲 `[awf]` 会话（保留最近更新 3 个，运行中的超限会话跳过）；`--apply` 逐个经 `workspace/archiveSession` 归档并写入台账
 
 ```sh
-"${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --cleanup            # dry-run：只列出计划
-"${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --cleanup --apply    # 确认后归档超限空闲会话并写台账
-"${DSH_HOME:-$HOME/.dsh}/skills/cross-project-dispatch/scripts/awf-dispatch" --forget-archived    # 误归档/要恢复时重置台账
+"${AGENTS_HOME:-$HOME/.agents}/skills/cross-project-dispatch/scripts/awf-dispatch" --cleanup            # dry-run：只列出计划
+"${AGENTS_HOME:-$HOME/.agents}/skills/cross-project-dispatch/scripts/awf-dispatch" --cleanup --apply    # 确认后归档超限空闲会话并写台账
+"${AGENTS_HOME:-$HOME/.agents}/skills/cross-project-dispatch/scripts/awf-dispatch" --forget-archived    # 误归档/要恢复时重置台账
 ```
 
 **DEV-215 补充**（满池实测暴露的两处修正）：

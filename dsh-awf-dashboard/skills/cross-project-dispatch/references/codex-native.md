@@ -27,7 +27,7 @@
 - `startingState` 不要臆造；只有用户明确要求从某个分支或工作树启动时才设置。
 - `prompt` 必须包含完整票据，不要在路由方重写目标项目的执行步骤。
 - 默认异步返回；记录 `threadId`、`hostId`、`projectId`、标题、目标 HEAD 和 `status=sent`。
-- 返回 `clientThreadId` 表示仍在创建，不代表线程已经启动；记录 `status=queued`，待得到正式 `threadId` 或 Codex 状态确认后再报“已启动”。
+- 返回 `clientThreadId` 表示仍在创建，不代表线程已经启动；记录 `status=queued`，待得到正式 `threadId` 或 Codex 状态确认后再报“已启动”。创建状态不明确时不要重复调用 `create_thread`。
 - 只在用户要求等待或票据明确要求本回合落地确认时调用 `mcp__codex_app__wait_threads`；超时保留线程，不重复创建。
 
 ## 回执和收尾
@@ -40,5 +40,5 @@
 ## 失败边界
 
 - `list_projects` 无精确路径匹配：不要创建项目外线程，改走 DSH 或 handoff。
-- `create_thread` 返回失败、需要用户输入或项目状态不明确：记录原始结果为阻塞，不静默改派、不重复创建。
+- `create_thread` 返回失败、需要用户输入或项目状态不明确：记录原始结果为阻塞，不静默重试、不重复创建；若用户明确允许 DSH 回退，再把原始错误和授权记录到 `.dispatch/log.md` 后进入 DSH 路由，否则保持阻塞等待决定。
 - Codex 原生路由不绕过 G1/G3；目标工作流缺失、业务改动冲突或 active 任务冲突仍按主技能要求处理，并在票据中明确豁免理由。

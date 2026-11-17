@@ -36,3 +36,15 @@ loader.exec_module(module)
 assert module.MAX_SENDER_SESSIONS == 3, module.MAX_SENDER_SESSIONS
 PY
 printf '通过：copy/link 安装、独立复制、CLI、回执 dry-run、Python 导入；无旧派发入口。\n'
+
+# DEV-236：技能入口与 Codex 原生失败边界必须和安装器一致。
+SKILL_DOC="$KIT_DIR/dsh-awf-dashboard/skills/cross-project-dispatch/SKILL.md"
+CODEX_NATIVE_DOC="$KIT_DIR/dsh-awf-dashboard/skills/cross-project-dispatch/references/codex-native.md"
+if grep -q '\${DSH_HOME:-\$HOME/.dsh}/skills' "$SKILL_DOC"; then
+  echo 'FAIL: cross-project-dispatch 技能文档仍引用旧的 ~/.dsh/skills 入口' >&2
+  exit 1
+fi
+grep -q '\${AGENTS_HOME:-\$HOME/.agents}/skills/cross-project-dispatch' "$SKILL_DOC"
+grep -q '不静默重试、不重复创建' "$CODEX_NATIVE_DOC"
+grep -q '用户明确允许 DSH 回退' "$CODEX_NATIVE_DOC"
+printf '通过：技能入口统一为 ~/.agents/skills，Codex 原生失败边界已覆盖。\n'

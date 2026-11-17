@@ -23,8 +23,8 @@
 会话标题统一为 `[awf] [派发者] [任务名]`（DEV-134）：派发者 = `--sender` > 票据
 「派发者：」行 > 调度方项目名（默认）；任务名 = 当次票据的 `ID 短标题`（动态）。会话复用（DEV-224）：
 目标项目全部未归档 [awf] 会话入池，池内未占用且 running=False 的空闲会话优先复用（取 updatedAt 最新）；
-都忙则轮询等待任一空闲（--queue-timeout，默认 180s）；默认不新建，池空或显式 --new 才新建；
-并发占用由全局登记表（$DSH_HOME/.awf-dispatch/）+ 文件锁协调；无每项目数量上限。
+都忙则在每项目最多 3 个会话内轮询等待任一空闲（--queue-timeout，默认 180s）；池空或池未满时才新建，池满时不创建第 4 个；
+并发占用由全局登记表（$DSH_HOME/.awf-dispatch/）+ 文件锁协调。
 
 用法：
   ~/.agents/skills/cross-project-dispatch/scripts/awf-dispatch <别名|目录> <任务文件>
