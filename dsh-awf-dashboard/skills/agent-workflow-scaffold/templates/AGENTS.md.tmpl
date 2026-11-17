@@ -24,6 +24,12 @@
 - 建任务不主动：用户点名才建；「删除」只认用户原话 + 二次确认；暂停 / 取消 / 结案不互相替代，含糊先反问
 - 结案 = 完成归档（`done/` + 状态 `done` + 完成日期）；取消 = 作废归档（同样进 `done/`，结论写明取消原因，不写完成）
 
+## 本地个性化技能
+
+- 本工程专属流程（打包、装机、联调、发布等）放 `agent-workflow/skills/<name>/SKILL.md`，frontmatter 写 `name` / `description` / `whenToUse`，与全局技能同格式。
+- 全局技能（如 `unity-build-install`、`release`）第 0 步会先读本目录：命中本地技能就按本地技能执行，**不再走全局默认通道**；本地技能不存在时才回退默认流程。
+- 本地技能与代码不一致时以代码为准，并把差异写回本地技能（工具方法名、菜单路径、产物路径、已知坑）。
+
 ## 任务路由
 
 路由决策（激活式路由 / 单会话 / 团队 / 派发四通道选择）在对应技能内（激活式路由见 `dsh-awf-dashboard/skills/cross-project-dispatch/SKILL.md` / 团队见 `dsh-awf-dashboard/skills/team-flow/SKILL.md`），按 `whenToUse` 自动匹配加载后逐条决策，本入口不重复。
