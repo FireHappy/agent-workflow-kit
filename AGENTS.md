@@ -1,4 +1,4 @@
-<!-- awf:begin v1 digest:9b563bb8 -->
+<!-- awf:begin v1 digest:39284408 -->
 # agent-workflow-kit
 
 生成、安装与校验 agent 工作流框架的脚手架（任务账本 / 流程规范 / 根入口）
@@ -10,7 +10,7 @@
 3. 开始前先读 `agent-workflow/memory/history/` 中**同类主题的过往结论**（修复类先读过去修法、生成类先读上次教训、排查类先读已知坑）；有 INDEX.md 则先读索引
 4. 有自己名下 `active/verify/review/blocked` 的任务先恢复；没有则从 `tasks/<type>/todo/` 认领（目录式：每个任务一个 `<ID>.md`，`todo/README.md` 为检索索引，由 `awf status` 生成）
 5. 动手前把任务写入 `tasks/<type>/current/<ID>.md`（从 `todo/` 移入 `current/` 并改状态为 active）：优先级、状态、Owner、验收标准、下一步；认领/归档只移动文件 + 同步状态字段，索引 `README.md` 由 `awf status` 自动重生成
-6. 收尾：归档（`current/` → `done/` 移动文件 + 状态改 `done` + 补 `完成日期`）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → `./agent-workflow/check_workflow.sh` 通过 → `~/.agents/skills/agent-workflow-scaffold/bin/awf status` → 本地 commit
+6. 收尾：归档（`current/` → `done/` 移动文件 + 状态改 `done` + 补 `完成日期`）→ 沉淀可复用结论到 memory/history、可复用脚本收敛到项目本地技能 `agent-workflow/skills/<name>/` → `./agent-workflow/check_workflow.sh` 通过 → `~/.agents/skills/agent-workflow-scaffold/bin/awf status` → 本地 commit
 
 ## 铁律
 
@@ -23,6 +23,15 @@
 - 改任务正文必配一条 `awf log`（收工三步：改正文 → awf log → 回读末行）；`### Execution Log` 只由 awf 追加，禁止手改
 - 建任务不主动：用户点名才建；「删除」只认用户原话 + 二次确认；暂停 / 取消 / 结案不互相替代，含糊先反问
 - 结案 = 完成归档（`done/` + 状态 `done` + 完成日期）；取消 = 作废归档（同样进 `done/`，结论写明取消原因，不写完成）
+
+## 本地个性化技能
+
+- 本工程专属流程放 `agent-workflow/skills/<name>/SKILL.md`，frontmatter 写 `name` / `description` / `whenToUse`，与全局技能同格式。
+- **本地技能目录名与它覆盖的全局技能同名**：`build`（打包，覆盖 `unity-build-install`）、`release`（发版，覆盖 `release`）、其他全局技能同理；不要另造 `build-android`、`release-tagging` 这类名字。
+- 标准路径：`agent-workflow/skills/<name>/SKILL.md`，frontmatter `name: <name>`；全局技能第 0 步按此路径读取，命中即走本地流程、不回退默认。
+- 一个流程只留一个本地技能：多目标/多产物时主入口不变，用参数或步骤区分。
+- 全局技能（如 `unity-build-install`、`release`）第 0 步会先读本目录：命中本地技能就按本地技能执行，**不再走全局默认通道**；本地技能不存在时才回退默认流程。
+- 本地技能与代码不一致时以代码为准，并把差异写回本地技能（工具方法名、菜单路径、产物路径、已知坑）。
 
 ## 任务路由
 

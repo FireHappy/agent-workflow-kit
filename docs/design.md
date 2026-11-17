@@ -74,7 +74,7 @@
 
 1. **默认异步**：`awf-dispatch` 默认只发送任务并返回会话 ID，主会话不被钉住；`--wait` 是显式开关，需要本回合结果/落地确认时才加。
 2. **派发即启动子代理**：派发动作的实质是在目标工作区启动一个子代理会话，由目标 agent 独立完成并回执；**不启用智能体团队承载派发**——并行/汇总需求直接多次派发（异步互不阻塞）或回到会话查看，无 captain/dispatcher 成员层。
-3. **票据瘦身 + 分析归 worker**：router 只落盘 用户意图 / 硬约束 / 验收标准 / 路由裁决，不写执行步骤；前置分析（工具手册 / 历史产物 / 场景清单）由目标 worker 在自己的会话内用目标仓库 `tools/` 手册与 `memory/history` 完成，有疑问返回 router / 用户决策。
+3. **票据瘦身 + 分析归 worker**：router 只落盘 用户意图 / 硬约束 / 验收标准 / 路由裁决，不写执行步骤；前置分析（技能手册 / 历史产物 / 场景清单）由目标 worker 在自己的会话内用目标仓库 `skills/` 与 `memory/history` 完成，有疑问返回 router / 用户决策。
 
 ## 激活式 Router（任务派发边界）
 
@@ -160,7 +160,7 @@ worker/router 对偶模型下，每个已登记项目是网络中的一个 worke
 
 ## 经验/工具积累闭环（worker 记忆）
 
-每个 worker 有 `agent-workflow/memory/{cache,history}/`（短期证据 / 长期结论）与 `agent-workflow/tools/`（可复用脚本手册）。DEV-124 把它串成闭环（**流程引导，非硬门禁**）：
+每个 worker 有 `agent-workflow/memory/{cache,history}/`（短期证据 / 长期结论）与 `agent-workflow/skills/`（项目本地技能，可复用流程与脚本）。DEV-124 把它串成闭环（**流程引导，非硬门禁**）：
 
 ```text
 开工：先读 history 同类经验（修复类读修法、生成类读教训）
@@ -170,15 +170,15 @@ worker/router 对偶模型下，每个已登记项目是网络中的一个 worke
   │
   ▼
 收尾：可复用结论（根因/修法/决策/坑）→ history/<主题>_<日期>.md
-      可复用脚本 → tools/（晋升三要素：可执行 + 用法注释 + 归属）
+      可复用流程/脚本 → 项目本地技能 skills/<name>/（构建/调试等；同名覆盖全局流程）
   ▼
 check 软提示（只提示不 FAIL）：归档 ≥3 但 history 空 → 建议沉淀
 ```
 
 - **沉淀时机**：任务归档时、问题解决后、发现反直觉行为时；**可复用 = 根因与修法 / 技术决策 / 踩坑与规避 / 可复用命令**四类，一次性琐事不存（存 cache 或删除），标准见 `memory/README.md`。
-- **tools 晋升三要素**：① 可执行文件（shebang/入口）② 用法注释（用途/参数/示例）③ 归属明确（该 worker 的重复性操作）；`awf upgrade` 保留 memory/tools 不覆盖（DEV-116 既定）。
-- **软校验**：`awf check` 在归档 ≥3 且 history 无沉淀 / tools 无脚本时输出「提示」（say，不计入 FAIL）；有沉淀后提示消失。**明确不做**：强制门禁、跨 worker 经验共享（写全局索引属后续 r/w 边界议题）、自动升级脚本为工具。
+- **技能沉淀**：可复用手册/脚本收敛为项目本地技能 `agent-workflow/skills/<name>/SKILL.md`（构建/调试/发版等流程；同名覆盖全局技能），统一技能目录、不再新建 `tools/`；`awf upgrade` 保留 memory 与 skills 不覆盖。
+- **软校验**：`awf check` 在归档 ≥3 且 history 无沉淀 / 无项目本地技能时输出「提示」（say，不计入 FAIL）；有沉淀后提示消失。**明确不做**：强制门禁、跨 worker 经验共享（写全局索引属后续 r/w 边界议题）、自动升级脚本为工具。
 
 ## 版本
 
-`VERSION` 是技能版本；入口区块记录 `v<version>`。升级项目是一等操作：`awf upgrade <目录>` 复制框架文件 → `bootstrap` 刷新入口 → `check` 校验，保留 `project.yaml` / `tasks/**` / `memory/**` / `tools/**`；步骤与验收见 `docs/upgrade.md`。
+`VERSION` 是技能版本；入口区块记录 `v<version>`。升级项目是一等操作：`awf upgrade <目录>` 复制框架文件 → `bootstrap` 刷新入口 → `check` 校验，保留 `project.yaml` / `tasks/**` / `memory/**` / `agent-workflow/skills/**`；步骤与验收见 `docs/upgrade.md`。

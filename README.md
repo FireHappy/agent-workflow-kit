@@ -61,7 +61,7 @@ install 后 DSH 会从 `~/.agents/skills/` 发现所有顶层技能：`agent-wor
     ├── README.md             规范正文
     ├── tasks/                status + todo/current/done
     ├── memory/               cache / history
-    ├── tools/                操作手册
+    ├── skills/               项目本地技能（可选，同名覆盖全局流程）
     ├── templates/            入口模板
     ├── bin/awf               bootstrap / check / status / register / projects / find
     └── check_workflow.sh     兼容入口
@@ -138,7 +138,7 @@ CI（GitHub Actions）在每次 push 时运行同一套测试。
 ```
 
 - **变更清单**：`agent-workflow/templates/AGENTS.md.tmpl`、`README.md`、`check_workflow.sh` 等骨架契约 + 登记目标骨架版 `agent-workflow/FRAMEWORK_VERSION`（v1.2.0+ 技能化：流程细节在技能，项目只随骨架版本差量同步骨架）；
-- **保留清单**：`agent-workflow/project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 `AGENTS.md` 区块外内容；
+- **保留清单**：`agent-workflow/project.yaml`、`tasks/**`（账本历史）、`memory/**`、`agent-workflow/skills/**` 与 `AGENTS.md` 区块外内容；
 - **升级判定 = 骨架版本差量**：目标骨架版与源相同 → 默认跳过（`--force` 强刷）；不同/缺失 → 复制骨架 + 写目标 `FRAMEWORK_VERSION`。技能更新只在技能实体（重跑 `./install.sh`），不需升级项目；upgrade 不再把 kit 技能版写项目版本锚点。
 - 升级后跑 `./agent-workflow/check_workflow.sh`；旧账本格式问题（归档块缺「状态」字段、旧英文表头 `| Status |`）会得到**可直接执行的修复指引**，无需推断；
 - 升级流程细节（变更清单/保留清单/旧账本迁移/双版本模型）见技能 `skills/upgrade/SKILL.md`（DSH 顶层技能）。

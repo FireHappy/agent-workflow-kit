@@ -1,6 +1,6 @@
 ---
 name: release
-description: agent-workflow 发版流程（探测→bump→CHANGELOG→tag→收尾）：版本号策略、版本落点探测、CHANGELOG 与 tag 规范。
+description: agent-workflow 发版流程（探测→bump→CHANGELOG→tag→收尾）：先读项目本地发版技能 agent-workflow/skills/release（有则按项目定制流程，不回退默认）；版本号策略、版本落点探测、CHANGELOG 与 tag 规范。
 whenToUse: 用户要求发版/升级版本号/打 tag/更新 CHANGELOG、或需 release 工作流（先探测版本方案再 bump）时——自动加载本技能。
 ---
 
@@ -8,7 +8,15 @@ whenToUse: 用户要求发版/升级版本号/打 tag/更新 CHANGELOG、或需 
 
 > 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
 > 项目内无 workflow 副本：本技能是实体目录（install.sh copy 安装），更新重跑 `./install.sh`。
-> 路径约定：以下 `tasks/`、`memory/`、`tools/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
+> 路径约定：以下 `tasks/`、`memory/`、`skills/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
+
+## 第 0 步（强制）：先读项目本地发版技能
+
+项目可有本地发版技能 `<工程根>/agent-workflow/skills/release/SKILL.md`（frontmatter `name: release`），放本工程专属事实：版本落点、tag 前缀与目标仓库、CHANGELOG 文件与章节规范、关联仓库/配套版本、预编译制品同步与装机验收、已知坑。
+
+- 存在即优先：按本地技能执行；本技能只补它没写的通用步骤，不另起一套流程。
+- 不存在则按本技能默认流程，并在报告里说明“该项目还没有本地 release 技能”，必要时提议沉淀。
+- 本地技能与仓库现状冲突（版本文件换了、tag 前缀变了、仓库迁了）时：以仓库现状为准，并把修正写回本地技能。
 
 ## 适用场景
 
@@ -306,7 +314,7 @@ git push origin vX.Y.Z
 
 - [ ] 按状态机推进，每步更新任务块「状态 / 最近更新 / 下一步」
 - [ ] 验证命令实际执行（compile/test），命令不可用写明 `验证阻塞：<原因>` 并置 blocked
-- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
+- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、可复用脚本收敛到项目本地技能 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
 
 ## 禁止事项
 
@@ -317,4 +325,4 @@ git push origin vX.Y.Z
 
 ## 无技能环境兜底
 
-本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `tools/` 手册与 `memory/history`。
+本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `skills/` 与 `memory/history`。

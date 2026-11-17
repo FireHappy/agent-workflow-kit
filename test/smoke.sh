@@ -3320,7 +3320,7 @@ else
   bad "DEV-123 领域词场景退出码非 0"
 fi
 
-# 26. DEV-124：经验/工具积累闭环（开工读取 + 收尾沉淀 + tools 标准 + check 软提示）
+# 26. DEV-124：经验积累闭环（开工读取 + 收尾沉淀 + 项目本地技能 + check 软提示）
 # 26.1 开工顺序含「读同类经验」
 if grep -q '过往结论' "$SKILLS_TPL/AGENTS.md.tmpl" \
    && grep -q 'memory/history' "$SKILLS_TPL/AGENTS.md.tmpl"; then
@@ -3328,12 +3328,12 @@ if grep -q '过往结论' "$SKILLS_TPL/AGENTS.md.tmpl" \
 else
   bad "DEV-124 开工顺序缺读同类经验步骤"
 fi
-# 26.2 dev/debug 收尾含沉淀到 memory/history 与 tools 收录
+# 26.2 dev/debug 收尾含沉淀到 memory/history 与项目本地技能
 if grep -q 'memory/history' "$SKILLS_DIR/dev/SKILL.md" \
    && grep -q 'memory/history' "$SKILLS_DIR/debug/SKILL.md" \
-   && grep -q 'tools/README.md' "$SKILLS_DIR/dev/SKILL.md" \
-   && grep -q 'tools/README.md' "$SKILLS_DIR/debug/SKILL.md"; then
-  ok "DEV-124 dev/debug 收尾含沉淀 memory/history + tools 收录（技能手册）"
+   && grep -q '项目本地技能' "$SKILLS_DIR/dev/SKILL.md" \
+   && grep -q '项目本地技能' "$SKILLS_DIR/debug/SKILL.md"; then
+  ok "DEV-124 dev/debug 收尾含沉淀 memory/history + 项目本地技能"
 else
   bad "DEV-124 dev/debug 收尾缺沉淀步骤"
 fi
@@ -3345,12 +3345,12 @@ if grep -q '可复用' "$TMP/proj9/agent-workflow/memory/README.md" \
 else
   bad "DEV-124 memory/README 缺可复用定义"
 fi
-# 26.4 init 项目 tools/README 含晋升三要素（可执行/用法注释/归属）
-if grep -q 'shebang' "$TMP/proj9/agent-workflow/tools/README.md" \
-   && grep -q '用法注释' "$TMP/proj9/agent-workflow/tools/README.md"; then
-  ok "DEV-124 tools/README 含晋升三要素"
+# 26.4 init 不再生成 tools/ 目录（统一技能目录，可复用手册收敛为项目本地技能）
+if [ ! -e "$TMP/proj9/agent-workflow/tools" ] \
+   && grep -q '项目本地技能' "$TMP/proj9/agent-workflow/README.md"; then
+  ok "DEV-124 init 不再生成 tools/（统一到项目本地技能）"
 else
-  bad "DEV-124 tools/README 缺晋升三要素"
+  bad "DEV-124 init 仍生成 tools/ 或 README 未提项目本地技能"
 fi
 # 26.5 check 软提示：无沉淀+≥3 归档 → 提示但 rc=0；补沉淀 → 无提示
 cat >> "$TMP/proj9/agent-workflow/tasks/dev/done.md" <<'PROJ9EOF'

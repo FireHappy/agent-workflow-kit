@@ -24,7 +24,7 @@
 | `memory/cache/` | 临时证据与中间结论 | 手工 |
 | `memory/history/` | 长期归档 | 手工 |
 | `docs/` | 架构与设计文档（按需创建） | 手工 |
-| `tools/` | 操作手册（构建、测试、调试） | 手工 |
+| `skills/` | 项目本地技能（同名覆盖全局流程；可选） | 手工 |
 | `project.yaml` | 项目事实（唯一输入） | 手工 |
 | `bin/awf` | 生成与校验工具 | 工具 |
 | `../AGENTS.md` | 仓库根入口 | `awf bootstrap` 生成 |
@@ -211,4 +211,4 @@
 /path/to/awf-kit/bin/awf upgrade <项目目录> --dry-run   # 只预览变更/保留
 ```
 
-`awf upgrade` 覆盖框架文件（templates/AGENTS.md.tmpl、README.md、check_workflow.sh 入口等骨架文件；派发实现只在 cross-project-dispatch 技能），**保留** `project.yaml`、`tasks/**`（账本历史）、`memory/**`、`tools/**` 与 AGENTS.md 区块外内容；旧账本格式问题（归档块缺「状态」、旧英文表头 `| Status |`）由 `check` 输出修复指引。步骤与验收见 kit 的 `skills/release/UPGRADE.md`。
+`awf upgrade` 覆盖框架文件（templates/AGENTS.md.tmpl、README.md、check_workflow.sh 入口等骨架文件；派发实现只在 cross-project-dispatch 技能），**保留** `project.yaml`、`tasks/**`（账本历史）、`memory/**`、`agent-workflow/skills/**` 与 AGENTS.md 区块外内容；旧账本格式问题（归档块缺「状态」、旧英文表头 `| Status |`）由 `check` 输出修复指引。步骤与验收见 kit 的 `skills/release/UPGRADE.md`。

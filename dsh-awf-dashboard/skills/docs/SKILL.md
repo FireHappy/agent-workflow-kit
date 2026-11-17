@@ -8,7 +8,7 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 
 > 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
 > 项目内无 workflow 副本：本技能是实体目录（install.sh copy 安装），更新重跑 `./install.sh`。
-> 路径约定：以下 `tasks/`、`memory/`、`tools/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
+> 路径约定：以下 `tasks/`、`memory/`、`skills/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
 
 ## 适用场景
 
@@ -38,7 +38,7 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 | 类型 | 放置位置 |
 |------|----------|
 | 技术背景 / 架构分析 | `../docs/` |
-| 操作手册 / 命令说明 | `../tools/` |
+| 操作手册 / 命令说明 | `../skills/`（项目本地技能） |
 | 迭代结论 / 事件复盘 | `../memory/history/` |
 
 ---
@@ -114,7 +114,7 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 - [ ] 按状态机推进，每步更新任务块「状态 / 最近更新 / 下一步」
 - [ ] 收工三步：改正文 → `awf log` 记一条 → 回读末行；归档前完成最后一条记录（归档后只读）
 - [ ] 验证命令实际执行（compile/test），命令不可用写明 `验证阻塞：<原因>` 并置 blocked
-- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
+- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、可复用脚本收敛到项目本地技能 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
 
 ## 禁止事项
 
@@ -126,4 +126,4 @@ whenToUse: 用户要求撰写/更新文档、启动 DOCS-xxx 文档任务、或�
 
 ## 无技能环境兜底
 
-本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `tools/` 手册与 `memory/history`。
+本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `skills/` 与 `memory/history`。

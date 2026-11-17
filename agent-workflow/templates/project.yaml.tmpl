@@ -35,6 +35,14 @@ serialized: {{SERIALIZED}}
 #               agent-workflow/VERSION 后设本键）；纯脚本/文档项目可保持默认。
 # changelog:    变更记录文件；默认 CHANGELOG.md。
 # tag_prefix:   发版 tag 前缀；默认 v（tag 形如 v1.2.3）。
+# 双版本模型（DEV-205）：技能版 = version_file 锚点（每次发版 bump，插件显示、技能实体安装消费）；
+# 骨架版 = 固定 agent-workflow/FRAMEWORK_VERSION（仅骨架契约 bin/awf、AGENTS.md.tmpl、账本结构、
+# check 门禁等变化时 bump；awf upgrade 判定与插件 outdated 消费）。FRAMEWORK_VERSION 勿放项目根
+# （与锚点铁律同位置规范），由 init/upgrade 自动登记，不进 project.yaml 键、不走 version_file。
 version_file: VERSION
 changelog: CHANGELOG.md
 tag_prefix: v
+
+# 项目本地技能目录：每个技能一个 <name>/SKILL.md（打包技能固定命名 build），全局技能优先读取这里
+# （有本地技能时不走全局技能默认流程）。改目录位置时同步本键。
+local_skills: agent-workflow/skills/

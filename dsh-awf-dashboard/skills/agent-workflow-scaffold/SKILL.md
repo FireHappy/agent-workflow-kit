@@ -59,10 +59,9 @@ CLAUDE.md                       Claude Code 指针（已存在则不动）
 agent-workflow/
 ├── project.yaml                项目事实（唯一输入）
 ├── README.md                   规范正文
-├── (无 skills/ —— 流程技能在技能库/插件，不进项目)   dev / debug / docs / review / release / cross-project
+├── skills/                     项目本地技能（可选，按需创建；同名覆盖全局技能，见 AGENTS.md「项目级技能」）
 ├── tasks/                      status + dev|debug|docs 的 todo/current/done
 ├── memory/                     cache / history
-├── tools/                      操作手册
 ├── templates/AGENTS.md.tmpl    入口模板（供 bootstrap 重渲染）
 ├── bin/awf                     init / bootstrap / check / status
 └── check_workflow.sh           兼容入口

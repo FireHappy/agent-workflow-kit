@@ -63,12 +63,12 @@ whenToUse: 项目仍用旧版 agent-workflow 框架、需升级/整理工作流�
 
 - `agent-workflow/project.yaml`（项目事实，唯一输入）
 - `agent-workflow/tasks/**`（账本：todo / current / done / status；status.md 由 `awf status` 刷新）
-- `agent-workflow/memory/**`、`agent-workflow/tools/**`
+- `agent-workflow/memory/**`、`agent-workflow/skills/**`
 - `AGENTS.md` 受控区块外内容（团队约定等）
 
 ## 自定义 check_workflow.sh 怎么办
 
-标准 `check_workflow.sh` 只有 3 行（等价 `bin/awf check`）。若目标项目把它扩展成自定义门禁（例如 12.5KB 脚本），**默认保留原文件**，`awf upgrade` 会告警不覆盖；确认可替换时加 `--force`。建议升级前把自定义逻辑迁移到 `tools/` 或独立脚本，再使用标准入口——不要静默丢失项目门禁（2026-11-01 教训）。
+标准 `check_workflow.sh` 只有 3 行（等价 `bin/awf check`）。若目标项目把它扩展成自定义门禁（例如 12.5KB 脚本），**默认保留原文件**，`awf upgrade` 会告警不覆盖；确认可替换时加 `--force`。建议升级前把自定义逻辑迁移到项目本地技能 `agent-workflow/skills/<name>/` 或独立脚本，再使用标准入口——不要静默丢失项目门禁（2026-11-01 教训）。
 
 **⚠️ 已知误判：旧版标准 shim 会被当成「自定义门禁」**。项目内旧 `check_workflow.sh` 虽然只是标准 3 行等价物，但内容指向旧路径（如 `exec "$(dirname "$0")/bin/awf" check`），与 kit 当前标准入口**字节不同**，`awf upgrade` 会判为自定义门禁并保留、告警不覆盖。此时：
 
@@ -120,7 +120,7 @@ cd <项目目录> && ~/.agents/skills/agent-workflow-scaffold/bin/awf status    
 - [ ] `upgrade --dry-run` 与实际执行打印的变更/保留清单一致；骨架相同（非 `--force`）时 dry-run 与执行均打印「骨架已最新」且不触碰目标
 - [ ] 升级后目标 `agent-workflow/FRAMEWORK_VERSION` = 源骨架版（落后/缺失迁移补写）；`version_file` 锚点未被改写
 - [ ] 升级后技能路径 `~/.agents/skills/agent-workflow-scaffold/bin/awf` 可用、`templates/AGENTS.md.tmpl` 与 kit 一致
-- [ ] `project.yaml` / `tasks/**` / `memory/**` / `tools/**` 逐字节保留
+- [ ] `project.yaml` / `tasks/**` / `memory/**` / `agent-workflow/skills/**` 逐字节保留
 - [ ] `check` 退出码 0；旧账本格式问题输出含可直接执行的修复指引
 - [ ] 只本地 commit（消息含任务 ID），未 push
 ## 技能化迁移（v1.2.0 起）

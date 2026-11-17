@@ -8,7 +8,7 @@ whenToUse: 用户报告崩溃/报错/行为异常、启动 DEBUG-xxx 排查任�
 
 > 由 agent-workflow-scaffold 主技能路由加载（AGENTS.md 开工顺序按任务类型强制加载本技能）。
 > 项目内无 workflow 副本：本技能是实体目录（install.sh copy 安装），更新重跑 `./install.sh`。
-> 路径约定：以下 `tasks/`、`memory/`、`tools/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
+> 路径约定：以下 `tasks/`、`memory/`、`skills/`、`project.yaml` 均为目标项目 `agent-workflow/` 下的相对路径。
 
 ## 适用场景
 
@@ -92,7 +92,7 @@ whenToUse: 用户报告崩溃/报错/行为异常、启动 DEBUG-xxx 排查任�
 ## Step 6：归档
 
 1. 归档：把 `current/DEBUG-xxx.md` 移到 `done/DEBUG-xxx.md`，状态改 `done` 并补 `| 完成日期 |`；索引 `README.md` 由 `awf status` 重生成
-2. 有**可复用结论**（根因/修法/复现/规避）→ 追加或新建 `../memory/history/<主题>_<YYYY-MM-DD>.md`（标准见 `../memory/README.md`）；有**新写的可复用诊断/修复脚本** → 按 `../tools/README.md` 晋升三要素收录进 `tools/`
+2. 有**可复用结论**（根因/修法/复现/规避）→ 追加或新建 `../memory/history/<主题>_<YYYY-MM-DD>.md`（标准见 `../memory/README.md`）；有**新写的可复用诊断/修复脚本** → 收敛为项目本地技能 `../skills/debug/`（脚本放 `scripts/`）
 3. 清理对应 `../memory/cache/`
 4. 运行 `./agent-workflow/check_workflow.sh` 通过
 5. 运行 `~/.agents/skills/agent-workflow-scaffold/bin/awf status` 刷新摘要
@@ -116,7 +116,7 @@ whenToUse: 用户报告崩溃/报错/行为异常、启动 DEBUG-xxx 排查任�
 - [ ] 按状态机推进，每步更新任务块「状态 / 最近更新 / 下一步」
 - [ ] 收工三步：改正文 → `awf log` 记一条 → 回读末行；归档前完成最后一条记录（归档后只读）
 - [ ] 验证命令实际执行（compile/test），命令不可用写明 `验证阻塞：<原因>` 并置 blocked
-- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、脚本按 tools 标准收录 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
+- [ ] 收尾：归档（补完成日期）→ 沉淀可复用结论到 memory/history、可复用脚本收敛到项目本地技能 → check_workflow.sh 通过 → awf status → 本地 commit（禁 push）
 
 ## 禁止事项
 
@@ -128,4 +128,4 @@ whenToUse: 用户报告崩溃/报错/行为异常、启动 DEBUG-xxx 排查任�
 
 ## 无技能环境兜底
 
-本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `tools/` 手册与 `memory/history`。
+本技能不可用时，按「执行步骤」的状态机自行推进，参照目标项目 `skills/` 与 `memory/history`。

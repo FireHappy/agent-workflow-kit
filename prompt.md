@@ -19,7 +19,7 @@
    - `agent-workflow/workflows/{dev,debug,docs,review,cross-project}.md` ← `templates/workflows/`
    - `agent-workflow/project.yaml` ← 渲染 `templates/project.yaml.tmpl`
    - `agent-workflow/tasks/`：`status.md` 由任务摘要生成；`dev|debug|docs` 各含 `todo.md`、`current.md`、`done.md`
-   - `agent-workflow/memory/{cache,history}/`、`agent-workflow/tools/README.md`
+   - `agent-workflow/memory/{cache,history}/`、`agent-workflow/skills/`（项目本地技能，可选）
    - `agent-workflow/templates/AGENTS.md.tmpl`（复制原文）
    - `agent-workflow/bin/awf`（复制 `bin/awf`，加可执行权限）
    - 派发工具不写入项目，由 `cross-project-dispatch` 技能自带 `scripts/awf-dispatch`
