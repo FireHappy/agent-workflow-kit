@@ -2,12 +2,21 @@
 # awf-kit 冒烟测试：在临时目录验证 init / check / status / bootstrap / --force
 # 两种形态共用一套测试：
 #   - 仓库形态（KIT_DIR=仓库根）：有 AGENTS.md/README.md，全量断言
-#   - 技能形态（KIT_DIR=skill/ 或 ~/.agents/skills/agent-workflow-scaffold/）：无项目入口文件，
+#   - 技能形态（KIT_DIR=skill/ 或 ~/.dsh/skills/agent-workflow-scaffold/）：无项目入口文件，
 #     仓库级文档断言跳过（SKILL_ONLY=1 标记）
 set -eu
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DISPATCH_IMPL="$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch"
+# DEV-218：技能/CLI/模板唯一源 = 插件 dsh-awf-dashboard/skills/（根 skills/bin/templates 已移除）
+# 技能形态（安装后 ~/.agents/skills/agent-workflow-scaffold/）：插件层不存在，同级目录即技能库
+if [ -d "$KIT_DIR/dsh-awf-dashboard/skills" ]; then
+  SKILLS_DIR="$KIT_DIR/dsh-awf-dashboard/skills"
+else
+  SKILLS_DIR="$(cd "$KIT_DIR/.." && pwd)"
+fi
+SKILLS_BIN="$SKILLS_DIR/agent-workflow-scaffold/bin/awf"
+SKILLS_TPL="$SKILLS_DIR/agent-workflow-scaffold/templates"
+DISPATCH_IMPL="$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch"
 DISPATCH_CLI="$DISPATCH_IMPL"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -30,7 +39,7 @@ ok() { pass=$((pass + 1)); printf 'ok    %s\n' "$*"; }
 bad() {
   # DEV-186 技能形态：仓库级断言（$KIT_DIR/docs/AGENTS.md/README.md 不在技能里）失败 = 不适用，
   # 不计数；功能断言（bin/templates/skills 均在）仍正常判失败。
-  if [ "${SKILL_ONLY:-0}" = "1" ] && { [ ! -f "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" ] || [ ! -f "$KIT_DIR/AGENTS.md" ]; }; then
+  if [ "${SKILL_ONLY:-0}" = "1" ] && { [ ! -f "$SKILLS_DIR/cross-project-dispatch/SKILL.md" ] || [ ! -f "$KIT_DIR/AGENTS.md" ]; }; then
     printf 'skip  %s（技能形态不适用）\n' "$*"
     return 0
   fi
@@ -41,10 +50,10 @@ assert_file() { [ -f "$1" ] && ok "存在 $2" || bad "缺少 $2"; }
 assert_grep() { grep -q "$1" "$2" && ok "$3" || bad "$3"; }
 
 # 1. init
-"$KIT_DIR/bin/awf" init "$PROJ" --name "冒烟项目" --purpose "验证脚手架" >/dev/null
+"$SKILLS_BIN" init "$PROJ" --name "冒烟项目" --purpose "验证脚手架" >/dev/null
 assert_file "$PROJ/AGENTS.md" "AGENTS.md"
 assert_file "$PROJ/agent-workflow/project.yaml" "project.yaml"
-assert_file "$KIT_DIR/bin/awf" "bin/awf"
+assert_file "$SKILLS_BIN" "bin/awf"
 assert_file "$PROJ/agent-workflow/tasks/status.md" "status.md"
 assert_grep 'awf:begin v1 digest:' "$PROJ/AGENTS.md" "入口含 digest"
 assert_grep '（未配置' "$PROJ/AGENTS.md" "空校验命令有回退提示"
@@ -56,17 +65,17 @@ assert_grep '跨项目' "$PROJ/AGENTS.md" "入口含跨项目路由"
 
 # 1.4 gitignore：init --gitignore 写 .gitignore（根锚定+幂等）；awf gitignore 为存量项目补写
 GI_PROJ="$TMP/gi-proj"
-"$KIT_DIR/bin/awf" init "$GI_PROJ" --name "忽略项目" --no-register --gitignore >/dev/null
+"$SKILLS_BIN" init "$GI_PROJ" --name "忽略项目" --no-register --gitignore >/dev/null
 assert_grep '^/agent-workflow/$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 agent-workflow/（根锚定）"
 assert_grep '^/AGENTS.md$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 AGENTS.md"
 assert_grep '^/CLAUDE.md$' "$GI_PROJ/.gitignore" "init --gitignore 忽略 CLAUDE.md"
 GI_MARK="# agent-workflow（本机私有工作流，不入库）"
 [ "$(grep -cF "$GI_MARK" "$GI_PROJ/.gitignore")" = "1" ] && ok "gitignore 块含唯一标记行" || bad "gitignore 块标记行数量异常"
-( cd "$GI_PROJ" && "$KIT_DIR/bin/awf" gitignore ) >/dev/null
+( cd "$GI_PROJ" && "$SKILLS_BIN" gitignore ) >/dev/null
 [ "$(grep -cF "$GI_MARK" "$GI_PROJ/.gitignore")" = "1" ] && ok "awf gitignore 幂等（不重复追加）" || bad "awf gitignore 重复追加"
 
 NOGI_PROJ="$TMP/nogi-proj"
-"$KIT_DIR/bin/awf" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
+"$SKILLS_BIN" init "$NOGI_PROJ" --name "补写项目" --no-register >/dev/null
 # DEV-183：init 缺省写「本机派发产物」忽略段（dispatch 流水/回执/运行时状态，任何项目都不入库）；
 # 但缺省不写「工作流私有」段（--gitignore 才写 agent-workflow/ 整体）。
 assert_grep '^/.dispatch/log.md$' "$NOGI_PROJ/.gitignore" "init 缺省写派发流水忽略"
@@ -74,7 +83,7 @@ DISP_MARK="# agent-workflow（本机派发产物，不入库）"
 [ "$(grep -cF "$DISP_MARK" "$NOGI_PROJ/.gitignore")" = "1" ] && ok "init 缺省写派发产物标记（唯一）" || bad "init 缺省派发产物标记异常"
 [ "$(grep -cF "$GI_MARK" "$NOGI_PROJ/.gitignore")" = "0" ] && ok "init 缺省不写工作流私有段（--gitignore 专属）" || bad "init 缺省不应写工作流私有段"
 printf '/node_modules/' > "$NOGI_PROJ/.gitignore"
-( cd "$NOGI_PROJ" && "$KIT_DIR/bin/awf" gitignore ) >/dev/null
+( cd "$NOGI_PROJ" && "$SKILLS_BIN" gitignore ) >/dev/null
 assert_grep '^/node_modules/$' "$NOGI_PROJ/.gitignore" "既有内容不被粘连（无换行先补行）"
 assert_grep '^/agent-workflow/$' "$NOGI_PROJ/.gitignore" "awf gitignore 为存量项目补写忽略"
 assert_grep '^/CLAUDE.md$' "$NOGI_PROJ/.gitignore" "无换行 .gitignore 追加块完整落行"
@@ -156,7 +165,7 @@ else
   bad "--help 未说明落地检查"
 fi
 # 1.4 release-prep：help / 参数校验 / dry-run / 临时目录装配（不碰真实仓库）
-rp_help="$("$KIT_DIR/bin/awf" release-prep --help 2>&1)"
+rp_help="$("$SKILLS_BIN" release-prep --help 2>&1)"
 if printf '%s\n' "$rp_help" | grep -q 'release-prep <X.Y.Z>'; then
   ok "release-prep --help 打印用法"
 else
@@ -174,7 +183,7 @@ else
 fi
 
 bad_ver_out=""
-if bad_ver_out="$("$KIT_DIR/bin/awf" release-prep 1.2 2>&1)"; then
+if bad_ver_out="$("$SKILLS_BIN" release-prep 1.2 2>&1)"; then
   bad "release-prep 接受了非法版本号 1.2"
 else
   ok "release-prep 拒绝非法版本号"
@@ -184,7 +193,7 @@ if printf '%s\n' "$bad_ver_out" | grep -q 'X.Y.Z'; then
 else
   bad "release-prep 非法版本号未打印用法"
 fi
-if "$KIT_DIR/bin/awf" release-prep >/dev/null 2>&1; then
+if "$SKILLS_BIN" release-prep >/dev/null 2>&1; then
   bad "release-prep 缺少版本号仍成功"
 else
   ok "release-prep 缺少版本号退出非 0"
@@ -218,7 +227,7 @@ make_release_fixture() {
 
 REL_DRY="$TMP/release-dry"
 make_release_fixture "$REL_DRY"
-dry_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL_DRY" 0.4.2 --dry-run 2>&1)"
+dry_out="$("$SKILLS_BIN" release-prep --root "$REL_DRY" 0.4.2 --dry-run 2>&1)"
 if printf '%s\n' "$dry_out" | grep -q 'init . --force --no-register'; then
   ok "release-prep --dry-run 打印 init 动作"
 else
@@ -239,7 +248,7 @@ fi
 
 REL="$TMP/release-real"
 make_release_fixture "$REL"
-if rel_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL" 0.4.2 2>&1)"; then
+if rel_out="$("$SKILLS_BIN" release-prep --root "$REL" 0.4.2 2>&1)"; then
   ok "release-prep 临时目录装配成功"
 else
   bad "release-prep 临时目录装配失败：$rel_out"
@@ -273,7 +282,7 @@ if printf '%s\n' "$rel_out" | grep -q 'git tag -a v0.4.2' \
 else
   bad "release-prep 下一步提示不完整"
 fi
-idem_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL" 0.4.2 2>&1)"
+idem_out="$("$SKILLS_BIN" release-prep --root "$REL" 0.4.2 2>&1)"
 if [ "$(ls "$REL/agent-workflow/tasks/dev/done/"DEV-008.md 2>/dev/null | wc -l | tr -d ' ')" = "1" ] \
   && printf '%s\n' "$idem_out" | grep -q '幂等'; then
   ok "release-prep 重复执行幂等"
@@ -285,13 +294,13 @@ fi
 REL_VF="$TMP/release-vf"
 make_release_fixture "$REL_VF"
 printf 'id: release-vf\nversion_file: agent-workflow/VERSION\n' > "$REL_VF/agent-workflow/project.yaml"
-vf_dry="$("$KIT_DIR/bin/awf" release-prep --root "$REL_VF" 0.6.0 --dry-run 2>&1)"
+vf_dry="$("$SKILLS_BIN" release-prep --root "$REL_VF" 0.6.0 --dry-run 2>&1)"
 if printf '%s\n' "$vf_dry" | grep -q '版本锚点' && printf '%s\n' "$vf_dry" | grep -q 'agent-workflow/VERSION'; then
   ok "release-prep --dry-run 显示 version_file 锚点路径"
 else
   bad "release-prep --dry-run 未显示 version_file 锚点路径：$vf_dry"
 fi
-if "$KIT_DIR/bin/awf" release-prep --root "$REL_VF" 0.6.0 >/dev/null 2>&1 \
+if "$SKILLS_BIN" release-prep --root "$REL_VF" 0.6.0 >/dev/null 2>&1 \
   && [ "$(cat "$REL_VF/agent-workflow/VERSION" 2>/dev/null)" = "0.6.0" ] \
   && [ "$(cat "$REL_VF/VERSION")" = "0.0.1" ]; then
   ok "release-prep 写 version_file 指向的锚点（根 VERSION 不动）"
@@ -300,19 +309,79 @@ else
 fi
 
 # DEV-198：check 对根目录 VERSION 给防踩坑软提示（迁移建议；软提示不阻塞，fails 不增）
-chk_vf_out="$(cd "$REL_VF" && "$KIT_DIR/bin/awf" check 2>&1 || true)"
+chk_vf_out="$(cd "$REL_VF" && "$SKILLS_BIN" check 2>&1 || true)"
 if printf '%s\n' "$chk_vf_out" | grep -q 'git mv VERSION agent-workflow/VERSION' \
   && printf '%s\n' "$chk_vf_out" | grep -q '残留 VERSION'; then
   ok "DEV-198 check 对根 VERSION 给迁移软提示（version_file 已指 agent-workflow/VERSION）"
 else
   bad "DEV-198 check 未给根 VERSION 迁移软提示：$(printf '%s\n' "$chk_vf_out" | grep -i 'VERSION' | head -3)"
 fi
-chk_vf_def_out="$(cd "$REL" && "$KIT_DIR/bin/awf" check 2>&1 || true)"
+chk_vf_def_out="$(cd "$REL" && "$SKILLS_BIN" check 2>&1 || true)"
 if printf '%s\n' "$chk_vf_def_out" | grep -q '默认根 VERSION' \
   && printf '%s\n' "$chk_vf_def_out" | grep -q 'git mv VERSION agent-workflow/VERSION'; then
   ok "DEV-198 check 对默认根 VERSION 项目给迁移软提示（不阻塞）"
 else
   bad "DEV-198 check 未对默认根 VERSION 项目给软提示：$(printf '%s\n' "$chk_vf_def_out" | grep -i 'VERSION' | head -3)"
+fi
+
+# DEV-219：JSON 版本锚点（version_file → package.json）只替换 version 字段，保留其余内容
+REL_JSON="$TMP/release-json"
+make_release_fixture "$REL_JSON"
+printf 'id: release-json\nversion_file: package.json\n' > "$REL_JSON/agent-workflow/project.yaml"
+printf '{\n  "name": "demo",\n  "version": "0.0.1",\n  "private": true,\n  "scripts": {\n    "version": "node scripts/bump.js && git add package.json"\n  }\n}\n' > "$REL_JSON/package.json"
+rm -f "$REL_JSON/VERSION"
+if json_out="$("$SKILLS_BIN" release-prep --root "$REL_JSON" 0.4.2 2>&1)"; then
+  ok "DEV-219 release-prep JSON 锚点装配成功"
+else
+  bad "DEV-219 release-prep JSON 锚点装配失败：$json_out"
+fi
+if python3 - "$REL_JSON/package.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("version") == "0.4.2", d.get("version")
+assert d.get("name") == "demo" and d.get("private") is True
+assert d.get("scripts", {}).get("version") == "node scripts/bump.js && git add package.json", "scripts.version 不应被改"
+PY
+then
+  ok "DEV-219 JSON 锚点：version 字段更新且其他字段保留"
+else
+  bad "DEV-219 JSON 锚点写入错误"
+fi
+
+# DEV-219：非字符串 version（"version": 1）→ release-prep 拒绝改写且原文件不变
+REL_JSON_BAD="$TMP/release-json-bad"
+make_release_fixture "$REL_JSON_BAD"
+printf 'id: release-json-bad\nversion_file: package.json\n' > "$REL_JSON_BAD/agent-workflow/project.yaml"
+printf '{\n  "name": "demo",\n  "version": 1\n}\n' > "$REL_JSON_BAD/package.json"
+rm -f "$REL_JSON_BAD/VERSION"
+json_bad_before="$(cat "$REL_JSON_BAD/package.json")"
+if "$SKILLS_BIN" release-prep --root "$REL_JSON_BAD" 0.4.2 >/dev/null 2>&1; then
+  bad "DEV-219 非字符串 version 应拒绝改写（实际成功）"
+else
+  ok "DEV-219 非字符串 version 拒绝改写（非零退出）"
+fi
+if [ "$(cat "$REL_JSON_BAD/package.json")" = "$json_bad_before" ]; then
+  ok "DEV-219 拒绝改写时原文件保持不变"
+else
+  bad "DEV-219 拒绝改写时原文件被修改"
+fi
+
+# DEV-219：JSON 锚点缺顶层 version 键 → 拒绝改写（不得落入文本分支覆盖 JSON）
+REL_JSON_NOV="$TMP/release-json-nov"
+make_release_fixture "$REL_JSON_NOV"
+printf 'id: release-json-nov\nversion_file: package.json\n' > "$REL_JSON_NOV/agent-workflow/project.yaml"
+printf '{\n  "name": "demo",\n  "private": true\n}\n' > "$REL_JSON_NOV/package.json"
+rm -f "$REL_JSON_NOV/VERSION"
+json_nov_before="$(cat "$REL_JSON_NOV/package.json")"
+if "$SKILLS_BIN" release-prep --root "$REL_JSON_NOV" 0.4.2 >/dev/null 2>&1; then
+  bad "DEV-219 缺 version 键的 JSON 锚点应拒绝（实际成功）"
+else
+  ok "DEV-219 缺 version 键的 JSON 锚点拒绝改写（非零退出）"
+fi
+if [ "$(cat "$REL_JSON_NOV/package.json")" = "$json_nov_before" ]; then
+  ok "DEV-219 缺 version 键时原 JSON 保持不变"
+else
+  bad "DEV-219 缺 version 键时原 JSON 被改写"
 fi
 
 # DEV-205 双版本模型：源持骨架版本 FRAMEWORK_VERSION（单行 semver，无 v 前缀）
@@ -328,9 +397,9 @@ fi
 
 # DEV-205：项目缺 agent-workflow/FRAMEWORK_VERSION → check 软提示「未登记骨架版本」（不阻塞、不增 FAIL）
 HINT_PROJ="$TMP/hint-proj"
-"$KIT_DIR/bin/awf" init "$HINT_PROJ" --name "软提示" --no-register >/dev/null
+"$SKILLS_BIN" init "$HINT_PROJ" --name "软提示" --no-register >/dev/null
 rm -f "$HINT_PROJ/agent-workflow/FRAMEWORK_VERSION"
-if hint_out="$(cd "$HINT_PROJ" && "$KIT_DIR/bin/awf" check 2>&1)"; then
+if hint_out="$(cd "$HINT_PROJ" && "$SKILLS_BIN" check 2>&1)"; then
   if printf '%s\n' "$hint_out" | grep -q '未登记骨架版本'; then
     ok "DEV-205 check 对缺骨架版本项目给软提示（不阻塞）"
   else
@@ -342,7 +411,7 @@ fi
 
 # 没有 Unreleased 且没有目标版本：提示手动，不报错
 printf '# Changelog\n' > "$REL/CHANGELOG.md"
-manual_out="$("$KIT_DIR/bin/awf" release-prep --root "$REL" 0.4.3 2>&1)"
+manual_out="$("$SKILLS_BIN" release-prep --root "$REL" 0.4.3 2>&1)"
 if printf '%s\n' "$manual_out" | grep -q '手动'; then
   ok "release-prep 无 Unreleased 时提示手动"
 else
@@ -386,7 +455,7 @@ def row(session_id, cwd=str(target), running=False, blank=False, title="",
     }
 
 
-assert module.DEFAULT_REUSE is True, "默认必须复用"
+assert module.DEFAULT_REUSE is True, "DEV-229：默认复用语义（池空闲复用/池<3 新建/池满 3 排队等空闲）"
 assert module.ZOMBIE_TURN_SECONDS == 5.0, "僵尸判定阈值必须是 5s"
 assert module.LANDING_POLL_SECONDS == 10.0, "落地轮询间隔必须是 10s"
 assert (module.EXIT_OK, module.EXIT_FAIL, module.EXIT_TIMEOUT, module.EXIT_ZOMBIE,
@@ -441,10 +510,15 @@ member = row("s-member", title=module.awf_session_title("member", "TEST-003 任�
 assert module.select_reuse_session([member], target, "工作流", sender="lead")["sessionId"] == "s-member", \
     "不同派发者的 [awf] 闲置会话可复用（改名接新任务）"
 
-# 池未满时运行中会话不选中 → 新建扩充（DEV-134 并发上限内扩充；满了才等）
+# 池未满时运行中会话不选中 → 新建扩充（DEV-229：恢复每项目 ≤3 硬上限）
 running_same = row("s-running", title=title, running=True, updated=99)
-assert module.select_reuse_session([running_same], target, "工作流", sender="lead") is None, \
-    "池未满且都忙 → 新建（不静默等）"
+busy_sel = module.select_reuse_session([running_same], target, "工作流", sender="lead")
+assert busy_sel is None, \
+    "DEV-229：池未满（1<3）都忙 → 返回 None，交给调用方新建扩充（不等待）"
+busy_two = module.select_reuse_session(
+    [running_same, row("s-running2", title=title, running=True, updated=98)],
+    target, "工作流", sender="lead")
+assert busy_two is None, "DEV-229：池未满（2<3）都忙 → 新建第 3 个（不等待）"
 
 # 同项目多个空闲：选 updatedAt 最新
 older = row("s-old", title=title, updated=10)
@@ -455,7 +529,7 @@ assert module.select_reuse_session([older, running_same], target, "工作流", s
 # 并发上限：同派发者同项目 3 个都忙 → 返回候选等待（不新建第 4 个）
 pool_full = [row(f"s-r{i}", title=title, running=True, updated=i) for i in (1, 2, 3)]
 assert module.select_reuse_session(pool_full, target, "工作流", sender="lead")["sessionId"] == "s-r3", \
-    "池满（3 个都忙）→ 选择等待（不新建第 4 个）"
+    "DEV-229：池满（3 个都忙）→ 返回最新忙候选等待（不新建第 4 个）"
 
 # 旧格式标题（无 [awf]）：默认不再自动迁移（RT-1，防误吞用户自建会话）；
 # 只有 legacy_probe 确认（显式放行 / 消息含派发任务包标记）才复用；多条不猜；运行中不迁移
@@ -486,8 +560,11 @@ assert module.select_reuse_session([other_module, legacy], target, "工作流",
 assert module.select_reuse_session([row("s-user", title="用户的会话")], target, "工作流") is None
 assert module.select_reuse_session([row("s-other", cwd="/tmp/other", title=title)],
                                    target, "工作流") is None
-assert module.select_reuse_session([row("s-blank", blank=True, title=title)],
-                                   target, "工作流") is None
+# DEV-224：取消 blank 过滤——blank=True 的 [awf] 会话照样入池复用
+sel_blank = module.select_reuse_session([row("s-blank", blank=True, title=title)],
+                                        target, "工作流")
+assert sel_blank is not None and sel_blank["sessionId"] == "s-blank", \
+    "blank 不再过滤，[awf] 会话照样入池"
 assert module.select_reuse_session([], target, "工作流") is None
 
 # 压力不参与筛选（上下文是开发资产）：高压力会话仍被选中，只给提示
@@ -917,7 +994,7 @@ logs, _ = run_dispatch(same_api, "工作流")
 assert same_api.created == [], "同模块应复用，不新建会话"
 assert same_api.prompts and same_api.prompts[0][0] == "s-same", same_api.prompts
 assert "会话来源：复用" in logs[0]
-assert same_api.calls == 1, f"G4 探针与复用查找应合并为一次 session/list，实际 {same_api.calls} 次"
+assert same_api.calls == 2, f"DEV-224：G4 探针 1 次 + 并发安全重读 1 次（session/list 共 {same_api.calls} 次）"
 
 # DEV-126 后标题不含模块：已有的 [awf] <项目> 会话（即使曾按其它模块建过）直接复用，不新建
 shared_api = FakeDispatchApi([row("s-doc", title=module.awf_session_title("lead", "TEST-002 文档"))])
@@ -960,7 +1037,7 @@ payload = json.loads(legacy_json)
 assert payload["reused"] is True and payload["sessionId"] == "s-legacy-json", payload
 assert payload["sessionTitle"] == "[awf] [lead] [TEST-001 冒烟]", payload
 
-# DEV-134 并发上限：池满（3 个都忙）→ 等空闲后再发送（不静默新建第 4 个）
+# DEV-224：池内都忙 → 等任一空闲后再发送（不新建）；原「并发上限」概念已取消
 running_api = FakeDispatchApi(
     [row("s-r1", title=title, running=True, updated=1),
      row("s-r2", title=title, running=True, updated=2),
@@ -969,10 +1046,10 @@ running_api = FakeDispatchApi(
 logs, _ = run_dispatch(running_api, "工作流")
 assert running_api.created == [], running_api.created
 assert running_api.prompts and running_api.prompts[0][0] == "s-r3", running_api.prompts
-assert any("等待队列" in m for m in running_api.emitted), running_api.emitted
+# DEV-224：等待期提示在 pick_claim_session 内部轮询（不再走 wait_session_ready 的「等待队列」文案）
+assert any("复用" in m for m in running_api.emitted), running_api.emitted
 
-# DEV-210/DEV-212 数量上限：每项目 [awf] 会话总数 ≤3；达到 3 且全忙时等待，不拒绝、不新建第 4 个。
-# 自动复用路径已有 running_api 覆盖；这里保留 3 个空闲候选，验证优先复用 [awf] 闲置而非新建。
+# DEV-224：多个 [awf] 候选时优先复用闲置（取 updatedAt 最新），不新建。
 pool3_api = FakeDispatchApi([
     row("s-p1", title=module.awf_session_title("lead", "TEST-310 甲"), updated=1),
     row("s-p2", title=module.awf_session_title("member", "TEST-311 乙"), updated=2),
@@ -983,13 +1060,22 @@ assert pool3_api.created == [], "已有 3 个 [awf] 会话时应优先复用闲�
 assert pool3_api.prompts and pool3_api.prompts[0][0] == "s-p3", pool3_api.prompts
 assert "会话来源：复用" in logs[0], logs
 
-# --new 不碰 session/list：mock sessions() 抛错也应成功（不应报 G4 / 复用检查失败）
-new_api = NoListApi([row("s-same", title=title)])
-logs, _ = run_dispatch(new_api, "工作流", reuse=False, sessions_in_preflight=False)
+# DEV-229：--new 也读 session/list 校验「每项目 [awf] ≤3」——池未满可新建
+new_api = FakeDispatchApi([row("s-same", title=title, running=True)])
+logs, _ = run_dispatch(new_api, "工作流", reuse=False)
 assert new_api.created == ["s-created-1"], new_api.created
 assert new_api.prompts and new_api.prompts[0][0] == "s-created-1", new_api.prompts
-assert new_api.calls == 0, "显式 --new 不应调用 session/list"
+assert new_api.calls >= 1, "DEV-229：--new 需读会话列表校验池上限"
 assert "会话来源：新建" in logs[0]
+# 池满 3 个 [awf] → --new 拒绝第 4 个（--force 逃生）
+full_new_api = FakeDispatchApi(
+    [row(f"s-f{i}", title=title, running=True) for i in (1, 2, 3)])
+full_new_msg = run_dispatch(full_new_api, "工作流", reuse=False, expect_error=True)
+assert "上限" in full_new_msg and full_new_api.created == [], (full_new_msg, full_new_api.created)
+forced_full_api = FakeDispatchApi(
+    [row(f"s-g{i}", title=title, running=True) for i in (1, 2, 3)])
+run_dispatch(forced_full_api, "工作流", reuse=False, force=True)
+assert forced_full_api.created == ["s-created-1"], "DEV-229：--force 可突破池满限制"
 
 # 自动路径的同名保护仍按原逻辑 gated：自动新建遇同名会话要 --force；--new 跳过
 dup_rows = [
@@ -1012,19 +1098,16 @@ timeout_api = FakeDispatchApi(
 timeout_msg = run_dispatch(
     timeout_api, "工作流", idle_wait=0, queue_timeout=0, expect_error=True,
 )
-assert "超时" in timeout_msg and "仍在运行" in timeout_msg, timeout_msg
+assert "超时" in timeout_msg and "等待空闲" in timeout_msg, timeout_msg
 assert "消失" not in timeout_msg, timeout_msg
-assert any("等待队列" in m for m in timeout_api.emitted), timeout_api.emitted
 
-gone_msg = run_dispatch(
-    VanishApi([row("s-r1", title=title, running=True, updated=1),
-               row("s-r2", title=title, running=True, updated=2),
-               row("s-r3", title=title, running=True, updated=3)],
-              disappear_after=3),
-    "工作流", expect_error=True,
-)
-assert "消失" in gone_msg and "重新派发" in gone_msg, gone_msg
-assert "超时" not in gone_msg, gone_msg
+# DEV-224：等待中池变空（会话被删/归档）→ 视为无候选，走新建
+gone_api = VanishApi([row("s-r1", title=title, running=True, updated=1),
+                      row("s-r2", title=title, running=True, updated=2),
+                      row("s-r3", title=title, running=True, updated=3)],
+                     disappear_after=3)
+gone_logs, _ = run_dispatch(gone_api, "工作流")
+assert gone_api.created == ["s-created-1"], gone_api.created
 
 
 
@@ -1130,8 +1213,8 @@ with tempfile.TemporaryDirectory() as tmp:
     (repo / "agent-workflow" / "README.md").write_text("r\n", encoding="utf-8")
     (repo / "agent-workflow" / "workflows" / "dev.md").write_text("w\n", encoding="utf-8")
     (repo / "agent-workflow" / "tasks" / "status.md").write_text("s\n", encoding="utf-8")
-    (repo / "dispatch").mkdir(parents=True)
-    (repo / "dispatch" / "log.md").write_text("log\n", encoding="utf-8")
+    (repo / ".dispatch").mkdir(parents=True)
+    (repo / ".dispatch" / "log.md").write_text("log\n", encoding="utf-8")
     (repo / "src.py").write_text("code\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
@@ -1140,7 +1223,7 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
     # P1：业务代码 + 生成物都脏 → =tasks 应拒
     (repo / "agent-workflow" / "tasks" / "status.md").write_text("s2\n", encoding="utf-8")
-    (repo / "dispatch" / "log.md").write_text("log2\n", encoding="utf-8")
+    (repo / ".dispatch" / "log.md").write_text("log2\n", encoding="utf-8")
     (repo / "src.py").write_text("code2\n", encoding="utf-8")
     try:
         module.check_git(repo, True, "tasks")
@@ -1288,14 +1371,14 @@ assert any("风险提示" in m for m in m2_plain.emitted), m2_plain.emitted
 # DEV-214 并发互斥（decide_new_session + wait_session_ready + 文件锁）
 session_src = inspect.getsource(module.dispatch_session)
 for needle in ("args.module", "resolve_module(", "args.session",
-               "select_reuse_session(", "reuse_rename_needed(",
+               "pick_claim_session(", "reuse_rename_needed(",
                "api.rename(session_id, session_name)", "--new", "pressure_hint(",
                "turn_activity(", "wait_for_landing(", "git_head_sha(", "EXIT_ZOMBIE",
                "decide_new_session(", "wait_session_ready(", "project_new_lock("):
     assert needle in session_src, f"dispatch_session 缺少 {needle}"
 decide_src = inspect.getsource(module.decide_new_session)
-for needle in ("if args.reuse:", "select_reuse_session(", "over_limit_guard(",
-               "args.allow_over_3", "api.create_session(workspace_id)",
+for needle in ("if args.reuse:", "select_reuse_session(",
+               "api.create_session(workspace_id)",
                "api.rename(session_id, session_name)", "复用（并发重读）"):
     assert needle in decide_src, f"decide_new_session 缺少 {needle}"
 wait_src = inspect.getsource(module.wait_session_ready)
@@ -1307,7 +1390,8 @@ main_src = inspect.getsource(module.main)
 for needle in ("--reuse", "--new", "--session", "--idle-wait", "--module",
                "default=DEFAULT_REUSE", "default=DEFAULT_IDLE_WAIT",
                "--session 与 --new 互斥", "--cleanup", "--forget-archived",
-               "--allow-over-3", "run_cleanup(", "run_forget_archived("):
+               "--allow-over-3", "--task-text", "--save-report",
+               "run_cleanup(", "run_forget_archived("):
     assert needle in main_src, f"main 缺少 {needle}"
 
 # --session 参数解析：与 --new / --headless 互斥（argparse 阶段退出 2）
@@ -1320,6 +1404,56 @@ for argv in (["demo", "task.md", "--session", "session-x", "--new"],
             assert code.code == 2, (argv, code.code)
         else:
             raise AssertionError(f"{argv} 应被拒绝")
+
+# ---- DEV-224：全局登记表 + 原子选取 + 都忙等待 ----
+import os as _os224
+import tempfile as _tf224
+
+with _tf224.TemporaryDirectory() as _reg_tmp:
+    _old_home = _os224.environ.get("DSH_HOME")
+    _os224.environ["DSH_HOME"] = _reg_tmp
+    try:
+        assert str(module.registry_file()).startswith(_reg_tmp), module.registry_file()
+        # 占用 → 释放冷却 → 过期清理
+        module.mark_session("s-1", "busy", "lead|T", 60)
+        assert "s-1" in module.occupied_session_ids(module.load_registry())
+        module.release_session("s-1", "lead|T")
+        assert "s-1" in module.occupied_session_ids(module.load_registry()), "冷却期内仍占用"
+        _data = module.load_registry()
+        _data["sessions"]["s-1"]["until"] = time.time() - 1
+        _data = module.prune_registry(_data)
+        assert "s-1" not in _data["sessions"], "过期占用应被清理"
+
+        class _PickApi:
+            def __init__(self, rows_):
+                self.rows_ = rows_
+            def sessions(self):
+                return self.rows_
+
+        # 只有一个空闲 [awf]：第一个 claim 成功；第二个因被占用而等待（timeout=0 → 报错）
+        _once = _PickApi([row("s-free", title=title)])
+        _picked = module.pick_claim_session(_once, target, "a|T", 5)
+        assert _picked and _picked["sessionId"] == "s-free", _picked
+        assert module.pick_claim_session(_once, target, "b|T", 0) is None, \
+            "DEV-229：被占用会话不应再被选中（池未满 → 交调用方新建）" 
+        # 池内没有 [awf] 会话 → None（调用方新建）
+        assert module.pick_claim_session(
+            _PickApi([row("s-user", title="用户会话")]), target, "a|T", 5) is None
+        # DEV-229：池未满（1<3）都忙 → 返回 None，交调用方新建扩充（不在这里等）
+        assert module.pick_claim_session(
+            _PickApi([row("s-busy", title=title, running=True)]), target, "a|T", 0) is None
+        # DEV-229：池满（3 个都忙）→ 等待超时报错（不新建第 4 个）
+        _full = [row(f"s-f{i}", title=title, running=True) for i in (1, 2, 3)]
+        try:
+            module.pick_claim_session(_PickApi(_full), target, "a|T", 0)
+            raise AssertionError("池满全忙应等待超时")
+        except module.DispatchError as _e:
+            assert "等待空闲" in str(_e)
+    finally:
+        if _old_home is None:
+            _os224.environ.pop("DSH_HOME", None)
+        else:
+            _os224.environ["DSH_HOME"] = _old_home
 PY
 then
   ok "会话复用：选择不看压力 / [awf] 优先 / running 等待 / --session 互斥"
@@ -1477,18 +1611,8 @@ assert module.select_reuse_session(
     archived_rows, target, "工作流", sender="lead",
     archived_ids={"s-new"})["sessionId"] == "s-old", "archived_ids 参数排除生效"
 
-# ---- ② --new 上限校验：池≥3 且全忙需 --allow-over-3，确认后留痕 ----
+# ---- ② DEV-224：每项目 3 个上限已取消（over_limit_guard 删除，--allow-over-3 仅兼容参数） ----
 pool3_busy = [row(f"s-b{i}", running=True, updated=i) for i in (1, 2, 3)]
-try:
-    module.over_limit_guard(pool3_busy, False, json_mode=True)
-    raise AssertionError("池满全忙且未确认应拒发")
-except module.DispatchError as error:
-    assert "--allow-over-3" in str(error) and "超项目上限" in str(error), str(error)
-note = module.over_limit_guard(pool3_busy, True, json_mode=True)
-assert "超上限新建" in note and "--allow-over-3" in note, "确认后返回留痕说明"
-assert module.over_limit_guard([row("s-x", running=True)], True, json_mode=True) == "", "池未满不拦"
-assert module.over_limit_guard(
-    pool3_busy[:2] + [row("s-idle", running=False)], False, json_mode=True) == "", "池满但有空闲不拦"
 
 
 class FakeDispatchApi:
@@ -1520,7 +1644,7 @@ class FakeDispatchApi:
 
 
 def run_dispatch(api, task_module, reuse=True, new=False, expect_error=False,
-                 allow_over_3=False, json_mode=False):
+                 allow_over_3=False, json_mode=False, force=False):
     logs = []
     output = io.StringIO()
     original = (module.preflight, module.append_log, module.emit)
@@ -1536,7 +1660,7 @@ def run_dispatch(api, task_module, reuse=True, new=False, expect_error=False,
     text = (f"任务：TEST-001 冒烟\n\n- 目标项目：{project}（{target}）\n- 模块：{task_module}\n")
     args = argparse.Namespace(
         session="", reuse=reuse and not new, module="", title="", wait=False, timeout=600,
-        idle_wait=300, queue_timeout=5, force=False, team=False, json=json_mode, headless=False,
+        idle_wait=300, queue_timeout=5, force=force, team=False, json=json_mode, headless=False,
         handoff=False, dry_run=False, add_workspace=False, allow_dirty=False,
         allow_active=False, apply=False, prune=False, web_url="",
         allow_legacy_reuse=False, sender="lead", new=new, allow_over_3=allow_over_3,
@@ -1557,21 +1681,22 @@ def run_dispatch(api, task_module, reuse=True, new=False, expect_error=False,
     return logs, output.getvalue()
 
 
-# 派发主流程：--new 遇池满全忙 → 拒绝并给出 --allow-over-3；确认后放行且日志留痕
+# 派发主流程（DEV-229）：--new 池满 3 拒绝（--force 逃生），池未满才新建
 over_api = FakeDispatchApi(pool3_busy)
-over_msg = run_dispatch(over_api, "工作流", reuse=False, new=True, expect_error=True)
-assert isinstance(over_msg, str) and "--allow-over-3" in over_msg, over_msg
-over_ok_api = FakeDispatchApi([row("s-b1", running=True, updated=1),
-                               row("s-b2", running=True, updated=2),
-                               row("s-b3", running=True, updated=3)])
-logs, _ = run_dispatch(over_ok_api, "工作流", reuse=False, new=True, allow_over_3=True)
-assert over_ok_api.created == ["s-created-1"], over_ok_api.created
-assert "超上限新建（--allow-over-3 确认）" in logs[0], "超限新建必须日志留痕"
+_error = run_dispatch(over_api, "工作流", reuse=False, new=True, expect_error=True)
+assert "上限" in _error and over_api.created == [], (over_api.created, _error)
+under_api = FakeDispatchApi([row("s-b1", running=True, updated=1)])
+logs, _ = run_dispatch(under_api, "工作流", reuse=False, new=True)
+assert under_api.created == ["s-created-1"], under_api.created
+force_api = FakeDispatchApi(pool3_busy)
+logs, _ = run_dispatch(force_api, "工作流", reuse=False, new=True, force=True)
+assert force_api.created == ["s-created-1"], "DEV-229：--force 可突破池满限制"
 
 # ---- ③ 并发新建互斥：文件锁串行化 + 锁后重读池再决策 ----
 lock_path = module.project_lock_path(target)
 assert lock_path.name == f".lock-{project}", lock_path
-assert str(lock_path).startswith(str(pathlib.Path.cwd())), "锁文件必须位于本地 .dispatch/ 下"
+assert ".awf-dispatch" in str(lock_path) and "locks" in str(lock_path), \
+    "DEV-225：锁文件在全局 .awf-dispatch/locks/，不再在项目 .dispatch/ 生成"
 # 持锁期间第二个调用方阻塞，释放后拿到
 held_at = []
 result = []
@@ -1599,7 +1724,7 @@ class CreateApi:
         self.created = []
         self.renamed = []
     def create_session(self, workspace_id):
-        created = row("s-concurrent-1")
+        created = row("s-concurrent-%d" % (len(self.created) + 1))
         self.created.append(created["sessionId"])
         return {"sessionId": created["sessionId"]}
     def rename(self, session_id, new_title):
@@ -1623,20 +1748,27 @@ busy_decided = module.decide_new_session(
     target, "ws", args_reuse, "工作流", title, title, "lead", lambda r: False)
 assert busy_decided["reused"] is True and busy_decided["running"] is True, busy_decided
 assert busy_decided["sessionId"] == "s-concurrent-1", busy_decided
-# 重读后仍无候选 → 新建（自动路径同名保护：同名运行中会话需 --force 才放行新建）
-dup = [row("s-dup", title_value=title, running=True, updated=5)]
+# DEV-229：池未满（1<3）都忙但不同名 → 新建扩充（不触发同名保护）
+other = [row("s-dup", title_value=module.awf_session_title("lead", "TEST-999 其他"),
+             running=True, updated=5)]
+new_decided = module.decide_new_session(api_concurrent, other, target, "ws", args_reuse,
+                                        "工作流", title, title, "lead", lambda r: False)
+assert new_decided["reused"] is False and new_decided["source"] == "新建", new_decided
+assert api_concurrent.created == ["s-concurrent-1"], api_concurrent.created
+# 同名忙会话（池未满）→ 同名保护拒绝（防止重复派发；--force 放行）
+same = [row("s-dup", title_value=title, running=True, updated=5)]
 try:
-    module.decide_new_session(api_concurrent, dup, target, "ws", args_reuse,
+    module.decide_new_session(api_concurrent, same, target, "ws", args_reuse,
                               "工作流", title, title, "lead", lambda r: False)
-    raise AssertionError("同名保护应拦自动新建")
-except module.DispatchError as error:
-    assert "--force" in str(error), str(error)
+    raise AssertionError("同名忙会话应被同名保护拒绝")
+except module.DispatchError as _e:
+    assert "同名会话" in str(_e), str(_e)
 created = module.decide_new_session(
     api_concurrent, [], target, "ws",
     argparse.Namespace(reuse=True, force=True, allow_over_3=True, json=False),
     "工作流", title, title, "lead", lambda r: False)
 assert created["reused"] is False and created["source"] == "新建", created
-assert created["sessionId"] == "s-concurrent-1" and api_concurrent.renamed, created
+assert created["sessionId"] == "s-concurrent-2" and api_concurrent.renamed, created
 
 # ---- ④ --cleanup：列出每项目超 3 的空闲 [awf] 会话；--apply 归档 + 写台账 ----
 clean_rows = [row("s1", updated=1), row("s2", updated=2), row("s3", running=True, updated=3),
@@ -1707,9 +1839,262 @@ else
   bad "DEV-214 四件套断言失败"
 fi
 
+# 1.6b -- DEV-230：坏会话（发送后未启动）自动隔离重发 + 健康过滤 + 启动确认
+if python3 - "$DISPATCH_IMPL" <<'PY'
+import importlib.machinery
+import importlib.util
+import argparse
+import os
+import pathlib
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_dev230", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+target = pathlib.Path("/tmp/dev230-proj")
+project = target.name
+title = module.awf_session_title("lead", "TEST-230 冒烟")
+
+
+def row(sid, running=False, updated=0, title_value=None, agent_available=None, seq=1):
+    values = {"title": title_value if title_value is not None else title}
+    item = {"sessionId": sid, "cwd": str(target), "running": running, "blank": False,
+            "updatedAt": updated, "projections": {"values": values, "asOfSeq": seq}}
+    if agent_available is not None:
+        item["agentAvailable"] = agent_available
+    return item
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    old_cwd, old_home = os.getcwd(), os.environ.get("DSH_HOME")
+    os.chdir(tmp)
+    os.environ["DSH_HOME"] = tmp
+    try:
+        # ① 隔离台账读写 + session_usable（agent 不可用 / 隔离期）
+        assert module.load_quarantined_session_ids() == set(), "无台账应为空集"
+        module.quarantine_session("s-bad", "未启动", ttl=60)
+        assert module.load_quarantined_session_ids() == {"s-bad"}, "隔离台账应记录 s-bad"
+        module.quarantine_session("s-expired", "旧", ttl=-1)
+        assert "s-expired" not in module.load_quarantined_session_ids(), "过期隔离应失效"
+        assert module.session_usable(row("s-bad"), {"s-bad"}) is False
+        assert module.session_usable(row("s-dead", agent_available=False)) is False
+        assert module.session_usable(row("s-ok")) is True
+
+        # ② 复用候选过滤：隔离会话（真实台账里刚写入的 s-bad）/ agent 不可用会话不选中
+        sel = module.select_reuse_session(
+            [row("s-bad", updated=9), row("s-ok", updated=1)], target, "工作流", sender="lead")
+        assert sel is not None and sel["sessionId"] == "s-ok", sel
+        dead = module.select_reuse_session(
+            [row("s-dead", agent_available=False, updated=9)], target, "工作流", sender="lead")
+        assert dead is None or dead["sessionId"] != "s-dead", dead
+
+        # ③ 启动确认：running=True 直接通过；running 恒 False 超时失败；asOfSeq 推过也算启动
+        class ProbeApi:
+            def __init__(self, running, seqs):
+                self.running = running
+                self.seqs = list(seqs)
+                self.calls = 0
+            def sessions(self):
+                seq = self.seqs[min(self.calls, len(self.seqs) - 1)]
+                self.calls += 1
+                return [{"sessionId": "s-x", "running": self.running,
+                         "projections": {"asOfSeq": seq}}]
+
+        ok1, _ = module.confirm_session_started(ProbeApi(True, [1]), "s-x", timeout=1, interval=0.05)
+        assert ok1 is True, "running=True 应确认启动"
+        ok2, why2 = module.confirm_session_started(ProbeApi(False, [1]), "s-x", timeout=0.2, interval=0.05)
+        assert ok2 is False and "未启动" in why2, (ok2, why2)
+        ok3, _ = module.confirm_session_started(ProbeApi(False, [1, 2]), "s-x", timeout=1, interval=0.05)
+        assert ok3 is True, "asOfSeq 推进应视为已启动"
+
+        # ④ dispatch_session 级：坏会话未启动 → 隔离 + 归档 + 自动新建重发一次
+        class BadSessionApi:
+            def __init__(self):
+                self.rows = [row("s-old", updated=5)]
+                self.created = []
+                self.archived = []
+                self.prompts = []
+                self.renamed = []
+            def sessions(self):
+                return [dict(r) for r in self.rows]
+            def create_session(self, workspace_id):
+                sid = "s-new-%d" % (len(self.created) + 1)
+                self.created.append(sid)
+                self.rows.append(row(sid, running=False))
+                return {"sessionId": sid}
+            def rename(self, session_id, new_title):
+                self.renamed.append((session_id, new_title))
+            def prompt(self, session_id, text, request_id):
+                self.prompts.append(session_id)
+                if session_id.startswith("s-new"):  # 新建会话正常启动
+                    for item in self.rows:
+                        if item["sessionId"] == session_id:
+                            item["running"] = True
+            def archive_session(self, session_id):
+                self.archived.append(session_id)
+                self.rows = [r for r in self.rows if r["sessionId"] != session_id]
+            def rpc(self, method, params, timeout=30):
+                raise module.DispatchError("unknown rpc " + method)
+
+        api = BadSessionApi()
+        args = argparse.Namespace(
+            session="", reuse=True, module="", title="", wait=False, timeout=600,
+            idle_wait=300, queue_timeout=5, force=False, team=False, json=False,
+            headless=False, handoff=False, dry_run=False, add_workspace=False,
+            allow_dirty=False, allow_active=False, apply=False, prune=False, web_url="",
+            allow_legacy_reuse=False, sender="lead", new=False, allow_over_3=False,
+            cleanup=False, forget_archived=False, launch_timeout=1,
+            allow_dirty_scope="", check_role=False, allow_role_mismatch=False)
+        original = (module.preflight, module.append_log, module.emit)
+        module.preflight = lambda t, a, need_channel=True: {
+            "api": api, "workspace": {"title": "w", "workspaceId": "id"}, "sessions": api.sessions()}
+        module.append_log = lambda entry: pathlib.Path("/tmp/awf-dispatch-log.md")
+        module.emit = lambda message, json_mode=False: None
+        try:
+            rc = module.dispatch_session(
+                target, pathlib.Path("/tmp/TEST-230.md"),
+                "任务：TEST-230 冒烟\n\n- 目标项目：/tmp/dev230-proj\n- 模块：测试\n",
+                "TEST-230", "dev", args)
+        finally:
+            module.preflight, module.append_log, module.emit = original
+        assert rc == 0, rc
+        assert api.archived == ["s-old"], api.archived
+        assert "s-old" in module.load_quarantined_session_ids(), "坏会话应写入隔离台账"
+        assert api.created == ["s-new-1"], api.created
+        assert api.prompts == ["s-old", "s-new-1"], api.prompts
+    finally:
+        os.chdir(old_cwd)
+        if old_home is None:
+            os.environ.pop("DSH_HOME", None)
+        else:
+            os.environ["DSH_HOME"] = old_home
+PY
+then
+  ok "DEV-230：坏会话自动隔离重发 / 健康过滤 / 启动确认"
+else
+  bad "DEV-230 坏会话兜底与健康过滤失败"
+fi
+
+# 1.6c -- DEV-231：派发去重（同票据 + 同项目 + 同内容 24h 只派一次）
+if python3 - "$DISPATCH_IMPL" <<'PY'
+import importlib.machinery
+import importlib.util
+import argparse
+import os
+import pathlib
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("awf_dispatch_dev231", str(source))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+
+target = pathlib.Path("/tmp/dev231-proj")
+
+with tempfile.TemporaryDirectory() as tmp:
+    old_home = os.environ.get("DSH_HOME")
+    os.environ["DSH_HOME"] = tmp
+    try:
+        # ① inflight 台账：写入/命中/内容变化放行/不同票据放行/--force/过期/项目隔离
+        assert module.load_inflight()["dispatches"] == {}, "无台账应为空"
+        module.record_inflight("TEST-231", target, "s-1", "abc123", "t")
+        data = module.load_inflight()
+        assert data["dispatches"]["TEST-231"]["sessionId"] == "s-1"
+        dup = module.check_dispatch_duplicate("TEST-231", target, "abc123")
+        assert dup is not None and dup["sessionId"] == "s-1", "同票据同内容应命中"
+        assert module.check_dispatch_duplicate("TEST-231", target, "diffhash") is None, "内容变化放行"
+        assert module.check_dispatch_duplicate("TEST-999", target, "abc123") is None, "不同票据放行"
+        assert module.check_dispatch_duplicate("TEST-231", target, "abc123", force=True) is None, "--force 跳过"
+        data = module.load_inflight()
+        data["dispatches"]["TEST-231"]["at"] -= module.INFLIGHT_TTL + 1
+        module.save_inflight(data)
+        assert module.check_dispatch_duplicate("TEST-231", target, "abc123") is None, "过期记录不拦"
+        module.record_inflight("TEST-232", target, "s-2", "h", "t")
+        assert module.check_dispatch_duplicate(
+            "TEST-232", pathlib.Path("/tmp/other-proj"), "h") is None, "不同项目不拦"
+
+        # ② dispatch_session 级：同票据同内容第二次被拒绝；--force 放行
+        class NewApi:
+            def __init__(self):
+                self.rows = []
+                self.created = []
+                self.renamed = []
+                self.prompts = []
+            def sessions(self):
+                return []
+            def create_session(self, workspace_id):
+                sid = "s-new-%d" % (len(self.created) + 1)
+                self.created.append(sid)
+                return {"sessionId": sid}
+            def rename(self, session_id, new_title):
+                self.renamed.append((session_id, new_title))
+            def prompt(self, session_id, text, request_id):
+                self.prompts.append(session_id)
+            def archive_session(self, session_id):
+                pass
+            def rpc(self, method, params, timeout=30):
+                raise module.DispatchError("unknown rpc " + method)
+
+        def make_args(**over):
+            base = dict(
+                session="", reuse=False, module="", title="", wait=False, timeout=600,
+                idle_wait=300, queue_timeout=5, force=False, team=False, json=False,
+                headless=False, handoff=False, dry_run=False, add_workspace=False,
+                allow_dirty=False, allow_active=False, apply=False, prune=False, web_url="",
+                allow_legacy_reuse=False, sender="lead", new=True, allow_over_3=False,
+                cleanup=False, forget_archived=False, launch_timeout=0,
+                allow_dirty_scope="", check_role=False, allow_role_mismatch=False,
+                dedupe=True)
+            base.update(over)
+            return argparse.Namespace(**base)
+
+        ticket_text = "任务：TEST-231 冒烟\n\n- 目标项目：/tmp/dev231-proj\n- 模块：测试\n"
+
+        def run(api, args):
+            orig = (module.preflight, module.append_log, module.emit)
+            module.preflight = lambda t, a, need_channel=True: {
+                "api": api, "workspace": {"title": "w", "workspaceId": "id"}, "sessions": []}
+            module.append_log = lambda entry: pathlib.Path("/tmp/awf-dispatch-log.md")
+            module.emit = lambda message, json_mode=False: None
+            try:
+                return module.dispatch_session(
+                    target, pathlib.Path("/tmp/TEST-231.md"), ticket_text, "TEST-231", "dev", args)
+            finally:
+                module.preflight, module.append_log, module.emit = orig
+
+        api1 = NewApi()
+        assert run(api1, make_args()) == 0, "首次派发应成功"
+        assert api1.created == ["s-new-1"]
+        assert "TEST-231" in module.load_inflight()["dispatches"], "首次派发应写入 inflight"
+        try:
+            run(NewApi(), make_args())
+            raise AssertionError("同票据同内容第二次应被拒绝")
+        except module.DispatchError as error:
+            assert "重复派发" in str(error), str(error)
+        forced_api = NewApi()
+        assert run(forced_api, make_args(force=True)) == 0, "--force 应放行"
+        assert forced_api.created == ["s-new-1"]
+    finally:
+        if old_home is None:
+            os.environ.pop("DSH_HOME", None)
+        else:
+            os.environ["DSH_HOME"] = old_home
+PY
+then
+  ok "DEV-231：派发去重（同票据同内容拒绝 / --force 放行 / 过期与项目隔离）"
+else
+  bad "DEV-231 派发去重断言失败"
+fi
+
 # 1.7 -- DEV-215：满池等待返回值同步 + 并发记账提示
-if grep -q 'session_id = row\["sessionId"\]' "$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch" \
-   && grep -q '并发记账提示（DEV-215）' "$KIT_DIR/skills/cross-project-dispatch/scripts/awf-dispatch"; then
+if grep -q 'session_id = row\["sessionId"\]' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch" \
+   && grep -q '并发记账提示（DEV-215）' "$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch"; then
   ok "DEV-215 满池等待后以返回会话为准 + 并发记账提示注入"
 else
   bad "DEV-215 等待同步/并发提示缺失"
@@ -1883,7 +2268,7 @@ set -e
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "check 通过" || bad "check 未通过"
 
 # 3. status 生成
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep '## 当前进行中' "$PROJ/agent-workflow/tasks/status.md" "status 含当前进行中"
 
 # 4. 进行中任务缺字段 → check 失败（DEV-127 目录式：current/DEV-001.md）
@@ -1915,7 +2300,7 @@ cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" <<'EOF'
 ### 下一步
 继续。
 EOF
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "补齐后 check 通过" || bad "补齐后 check 未通过"
 
 # 6. 事实文件变更 → 入口过期 → bootstrap 修复
@@ -1926,19 +2311,19 @@ if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
 else
   ok "project.yaml 变更后 check 失败"
 fi
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "bootstrap 后 check 通过" || bad "bootstrap 后 check 未通过"
 assert_grep '变更后的定位' "$PROJ/AGENTS.md" "入口已刷新"
 
 # 7. --force 保留事实文件与任务账本
-"$KIT_DIR/bin/awf" init "$PROJ" --name "改名" --force >/dev/null
+"$SKILLS_BIN" init "$PROJ" --name "改名" --force >/dev/null
 assert_grep 'purpose: 变更后的定位' "$PROJ/agent-workflow/project.yaml" "--force 保留 project.yaml"
 assert_grep 'DEV-001' "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" "--force 保留任务文件"
 assert_grep '变更后的定位' "$PROJ/AGENTS.md" "--force 后入口仍同步"
 
 # 8. 入口外内容不被覆盖
 printf '\n## 团队约定\n- 保留我\n' >> "$PROJ/AGENTS.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
 assert_grep '保留我' "$PROJ/AGENTS.md" "区块外内容保留"
 assert_grep 'awf:begin' "$PROJ/AGENTS.md" "受控区块仍存在"
 
@@ -1946,19 +2331,19 @@ assert_grep 'awf:begin' "$PROJ/AGENTS.md" "受控区块仍存在"
 assert_file "$DSH_AGENTS_HOME/projects.tsv" "projects.tsv"
 assert_grep '冒烟项目' "$DSH_AGENTS_HOME/projects.tsv" "init 自动登记别名"
 assert_grep '冒烟项目' "$DSH_AGENTS_HOME/AGENTS.md" "全局索引含别名"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" projects | grep -q "冒烟项目" ) && ok "projects 列出项目" || bad "projects 未列出项目"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 | grep -q "$PROJ" ) && ok "find 返回路径" || bad "find 未返回路径"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" register >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" projects | grep -q "冒烟项目" ) && ok "projects 列出项目" || bad "projects 未列出项目"
+( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 | grep -q "$PROJ" ) && ok "find 返回路径" || bad "find 未返回路径"
+( cd "$PROJ" && "$SKILLS_BIN" register >/dev/null )
 [ "$(wc -l < "$DSH_AGENTS_HOME/projects.tsv" | tr -d ' ')" = "1" ] && ok "重复登记不产生重复行" || bad "登记出现重复行"
 
 # bootstrap 自愈：把路径改错后刷新
 sed -i '' "s|$PROJ|/wrong/path|" "$DSH_AGENTS_HOME/projects.tsv" 2>/dev/null \
   || sed -i "s|$PROJ|/wrong/path|" "$DSH_AGENTS_HOME/projects.tsv"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
 assert_grep "$PROJ" "$DSH_AGENTS_HOME/projects.tsv" "bootstrap 刷新索引路径"
 
 # --no-register 跳过
-"$KIT_DIR/bin/awf" init "$TMP/proj2" --name "不登记" --no-register >/dev/null
+"$SKILLS_BIN" init "$TMP/proj2" --name "不登记" --no-register >/dev/null
 if grep -q "不登记" "$DSH_AGENTS_HOME/projects.tsv"; then
   bad "--no-register 仍写入索引"
 else
@@ -1969,7 +2354,7 @@ fi
 cp "$PROJ/AGENTS.md" "$PROJ/AGENTS.full"
 grep -v 'awf:end' "$PROJ/AGENTS.full" > "$PROJ/AGENTS.md" || true
 before_size="$(wc -c < "$PROJ/AGENTS.md" | tr -d ' ')"
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null 2>&1 ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null 2>&1 ); then
   bad "缺少 awf:end 时 bootstrap 未失败"
 else
   ok "缺少 awf:end 时 bootstrap 失败"
@@ -2024,7 +2409,7 @@ else
   printf '%s\n' "$out" | grep -q '状态非法' && ok "F1 非法状态值被 check 拒绝" || bad "F1 非法状态值未被点名：$out"
 fi
 rm -f "$PROJ/agent-workflow/tasks/docs/current/DOCS-100.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F1 恢复合法状态后 check 通过" || bad "F1 恢复后 check 未通过"
 
 # 14. F2：status.md 新鲜度（账本改动后未刷新 → 过期失败；DEV-127 目录式）
@@ -2049,7 +2434,7 @@ if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
 else
   printf '%s\n' "$out" | grep -q 'status.md 已过期' && ok "F2 status 过期被 check 发现" || bad "F2 过期信息缺失：$out"
 fi
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F2 刷新 status 后 check 通过" || bad "F2 刷新后 check 未通过"
 
 # 15. F3：任务文件校验（DEV-127 目录式；非法状态/缺字段被点名）
@@ -2073,7 +2458,7 @@ else
   printf '%s\n' "$out" | grep -q '状态非法' && ok "F3 指明状态非法" || bad "F3 未指明状态非法：$out"
 fi
 rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-200.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3 移除非法文件后 check 通过" || bad "F3 修复后 check 未通过"
 mv "$PROJ/agent-workflow/tasks/debug/done/README.md" "$PROJ/agent-workflow/tasks/debug/done/README.md.hid"
 if ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
@@ -2103,7 +2488,7 @@ else
 fi
 sed -i '' 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/todo/DEV-102.md" 2>/dev/null \
   || sed -i 's/| Status |/| 状态 |/' "$PROJ/agent-workflow/tasks/dev/todo/DEV-102.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 按指引修复后 check 通过" || bad "F3+ 修复后 check 未通过"
 
 # 15.2 F3+：任务文件正文引用迁移字样不污染状态列与字段检测
@@ -2122,33 +2507,33 @@ cat > "$PROJ/agent-workflow/tasks/dev/current/DEV-103.md" <<'EOF'
 ### 下一步
 x
 EOF
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 grep -q '| dev | DEV-103 | P1 | review | t3 | 正文含迁移字样 |' "$PROJ/agent-workflow/tasks/status.md" \
   && ok "F3+ 正文引用迁移字样不污染状态列" \
   || bad "F3+ 状态列被正文污染：$(grep 'DEV-103' "$PROJ/agent-workflow/tasks/status.md")"
 ( cd "$PROJ" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F3+ 正文引用迁移字样时 check 通过" || bad "F3+ 正文引用迁移字样时 check 失败"
 rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-001.md" "$PROJ/agent-workflow/tasks/dev/current/DEV-103.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 16. F4：team-flow 文档 approval 语义统一为 automatic（无 staged 审批残留）
-if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $KIT_DIR/skills/team-flow/SKILL.md >/dev/null; then
-  bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $KIT_DIR/skills/team-flow/SKILL.md | tr '\n' ';')"
+if grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $SKILLS_DIR/team-flow/SKILL.md >/dev/null; then
+  bad "F4 team-flow 仍有 staged 审批残留：$(grep -nE '不自己批准|用户点确认|确认后创建成员|不确认就不启动' $SKILLS_DIR/team-flow/SKILL.md | tr '\n' ';')"
 else
   ok "F4 team-flow 无 staged 审批残留"
 fi
-grep -q 'approval=automatic' $KIT_DIR/skills/team-flow/SKILL.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
+grep -q 'approval=automatic' $SKILLS_DIR/team-flow/SKILL.md && ok "F4 team-flow 保留 automatic 语义" || bad "F4 team-flow 无 automatic 语义"
 
 # 17. F5：入口（AGENTS.md.tmpl）精简——只含路由与技能指针，细则全部下沉技能（不内联）
 F5_PAT='必报点总表（DISPATCH-145|回执规则总表（DISPATCH-145|远程办公状态（remote|状态透明化（DISPATCH-144|回执投递通道（DISPATCH-146|空闲/收尾/自检报平安（DISPATCH-147'
-if grep -qE "$F5_PAT" "$KIT_DIR/templates/AGENTS.md.tmpl"; then
-  bad "F5 入口模板仍内联 DISPATCH 细则：$(grep -oE "$F5_PAT" "$KIT_DIR/templates/AGENTS.md.tmpl" | sort -u | tr '\n' ';')"
+if grep -qE "$F5_PAT" "$SKILLS_TPL/AGENTS.md.tmpl"; then
+  bad "F5 入口模板仍内联 DISPATCH 细则：$(grep -oE "$F5_PAT" "$SKILLS_TPL/AGENTS.md.tmpl" | sort -u | tr '\n' ';')"
 else
   ok "F5 入口模板无 DISPATCH 细则内联（精简为指针）"
 fi
 # 指针必须存在：入口指向技能 SKILL.md 与 DISPATCH.md
-if grep -q '技能库' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-  && [ -f "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" ] \
-  && [ -f "$KIT_DIR/skills/team-flow/SKILL.md" ]; then
+if grep -q '技能库' "$SKILLS_TPL/AGENTS.md.tmpl" \
+  && [ -f "$SKILLS_DIR/cross-project-dispatch/SKILL.md" ] \
+  && [ -f "$SKILLS_DIR/team-flow/SKILL.md" ]; then
   ok "F5 入口指向技能库；流程技能文件存在"
 else
   bad "F5 入口未指向技能库或流程技能缺失"
@@ -2156,10 +2541,10 @@ fi
 
 # 18. F6：kit 形态副本漂移被 check 拒绝（根 → agent-workflow/ 双向）
 F6R="$TMP/f6kit"
-"$KIT_DIR/bin/awf" init "$F6R" --name f6 --no-register >/dev/null
+"$SKILLS_BIN" init "$F6R" --name f6 --no-register >/dev/null
 mkdir -p "$F6R/bin"
-cp "$KIT_DIR/bin/awf" "$F6R/bin/awf"
-cp -R "$KIT_DIR/templates/." "$F6R/templates/"
+cp "$SKILLS_BIN" "$F6R/bin/awf"
+cp -R "$SKILLS_TPL/." "$F6R/templates/"
 chmod +x "$F6R/bin/awf"
 if ( cd "$F6R" && ./agent-workflow/check_workflow.sh >/dev/null 2>&1 ); then
   ok "F6 副本一致时 check 通过"
@@ -2180,15 +2565,15 @@ if out="$(cd "$F6R" && ./agent-workflow/check_workflow.sh 2>&1)"; then
 else
   printf '%s\n' "$out" | grep -q '副本漂移' && ok "F6 根侧模板漂移被 check 拒绝" || bad "F6 根侧漂移信息缺失"
 fi
-cp "$KIT_DIR/templates/AGENTS.md.tmpl" "$F6R/templates/AGENTS.md.tmpl"
+cp "$SKILLS_TPL/AGENTS.md.tmpl" "$F6R/templates/AGENTS.md.tmpl"
 ( cd "$F6R" && ./agent-workflow/check_workflow.sh >/dev/null ) && ok "F6 恢复同步后 check 通过" || bad "F6 恢复同步后 check 未通过"
 
 # 19. F6：release-prep 先检测漂移再覆盖（有漂移拒绝，禁止静默回滚）
 RPD="$TMP/rpdrift"
-"$KIT_DIR/bin/awf" init "$RPD" --name rpdrift --no-register >/dev/null
+"$SKILLS_BIN" init "$RPD" --name rpdrift --no-register >/dev/null
 mkdir -p "$RPD/bin" "$RPD/test"
-cp "$KIT_DIR/bin/awf" "$RPD/bin/awf"
-cp -R "$KIT_DIR/templates/." "$RPD/templates/"
+cp "$SKILLS_BIN" "$RPD/bin/awf"
+cp -R "$SKILLS_TPL/." "$RPD/templates/"
 chmod +x "$RPD/bin/awf"
 printf '0.0.1\n' > "$RPD/VERSION"
 printf '# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n' > "$RPD/CHANGELOG.md"
@@ -2197,7 +2582,7 @@ printf '#!/bin/sh\nexit 0\n' > "$RPD/test/smoke.sh"
 chmod +x "$RPD/agent-workflow/check_workflow.sh" "$RPD/test/smoke.sh"
 printf '\n> 本地发版模板改动\n' >> "$RPD/agent-workflow/templates/AGENTS.md.tmpl"
 set +e
-rp_out="$("$KIT_DIR/bin/awf" release-prep --root "$RPD" 0.5.0 2>&1)"
+rp_out="$("$SKILLS_BIN" release-prep --root "$RPD" 0.5.0 2>&1)"
 rp_code=$?
 set -e
 if [ "$rp_code" != "0" ] && printf '%s\n' "$rp_out" | grep -q '漂移'; then
@@ -2207,7 +2592,7 @@ else
 fi
 [ "$(cat "$RPD/VERSION")" = "0.0.1" ] && ok "F6 拒绝后 VERSION 未被改写" || bad "F6 拒绝后 VERSION 被改写"
 cp "$RPD/templates/AGENTS.md.tmpl" "$RPD/agent-workflow/templates/AGENTS.md.tmpl"
-if ( cd "$RPD" && "$KIT_DIR/bin/awf" release-prep --root "$RPD" 0.5.0 >/dev/null 2>&1 ); then
+if ( cd "$RPD" && "$SKILLS_BIN" release-prep --root "$RPD" 0.5.0 >/dev/null 2>&1 ); then
   ok "F6 消除漂移后 release-prep 成功"
 else
   bad "F6 消除漂移后 release-prep 失败"
@@ -2219,10 +2604,10 @@ if "$DISPATCH_CLI" --help 2>&1 | grep -q -- '--allow-legacy-reuse'; then
 else
   bad "RT-1 --help 未列出 --allow-legacy-reuse"
 fi
-if grep -q -- '--allow-legacy-reuse' $KIT_DIR/skills/cross-project-dispatch/SKILL.md; then
-  ok "RT-1 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 同步 --allow-legacy-reuse"
+if grep -q -- '--allow-legacy-reuse' $SKILLS_DIR/cross-project-dispatch/SKILL.md; then
+  ok "RT-1 $SKILLS_DIR/cross-project-dispatch/SKILL.md 同步 --allow-legacy-reuse"
 else
-  bad "RT-1 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺 --allow-legacy-reuse"
+  bad "RT-1 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺 --allow-legacy-reuse"
 fi
 
 # 20.1 RT-1/2/3 单元回归（mock API / 真实 git 仓库；不接触真实会话）
@@ -2526,16 +2911,16 @@ else
   bad "RT-1/2/3 单元回归失败（见上方 Traceback）"
 fi
 
-# 20.2 RT-2：$KIT_DIR/skills/cross-project-dispatch/SKILL.md 退出码表同步 headless 独立码（5）
-if grep -q '^| 5 |' $KIT_DIR/skills/cross-project-dispatch/SKILL.md && grep -q '非零退出' $KIT_DIR/skills/cross-project-dispatch/SKILL.md; then
-  ok "RT-2 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 退出码表含 5（headless 非零退出）"
+# 20.2 RT-2：$SKILLS_DIR/cross-project-dispatch/SKILL.md 退出码表同步 headless 独立码（5）
+if grep -q '^| 5 |' $SKILLS_DIR/cross-project-dispatch/SKILL.md && grep -q '非零退出' $SKILLS_DIR/cross-project-dispatch/SKILL.md; then
+  ok "RT-2 $SKILLS_DIR/cross-project-dispatch/SKILL.md 退出码表含 5（headless 非零退出）"
 else
-  bad "RT-2 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 退出码表未同步 headless 独立码"
+  bad "RT-2 $SKILLS_DIR/cross-project-dispatch/SKILL.md 退出码表未同步 headless 独立码"
 fi
-if grep -q '含本任务 ID' $KIT_DIR/skills/cross-project-dispatch/SKILL.md; then
-  ok "RT-3 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 落地判定含 commit 归因"
+if grep -q '含本任务 ID' $SKILLS_DIR/cross-project-dispatch/SKILL.md; then
+  ok "RT-3 $SKILLS_DIR/cross-project-dispatch/SKILL.md 落地判定含 commit 归因"
 else
-  bad "RT-3 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 未写明 commit 归因"
+  bad "RT-3 $SKILLS_DIR/cross-project-dispatch/SKILL.md 未写明 commit 归因"
 fi
 
 # 21. DEV-115 激活式路由：票据来源校验（ticket_source 解析 + 禁止转派 + 旧票据兼容）
@@ -2609,8 +2994,8 @@ else
 fi
 
 # 21.2 DEV-115 + DEV-128：协议规则同步（模板路由段 / 流程与派发文档 / 设计文档）
-if grep -q '来源：用户 | 工作流' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '继续转派' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '来源：用户 | 工作流' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '继续转派' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-128 跨项目技能含票据来源字段与继续转派语义"
 else
   bad "DEV-128 跨项目技能缺少票据来源/继续转派"
@@ -2648,7 +3033,7 @@ cat > "$PROJ/agent-workflow/tasks/debug/current/DEBUG-200.md" <<'D117'
 ### 下一步
 验证默认 locale 下解析正确。
 D117
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 dev117_locale_check() {
   # $1 = LC_ALL 值；空串 = 继承调用环境（即"默认 locale"，不强制 LC_ALL=C）
@@ -2673,33 +3058,33 @@ else
 fi
 
 # 22.1 check --with-smoke 开关与默认末尾提示
-if "$KIT_DIR/bin/awf" check --help 2>&1 | grep -q -- '--with-smoke'; then
+if "$SKILLS_BIN" check --help 2>&1 | grep -q -- '--with-smoke'; then
   ok "DEV-117 check --help 列出 --with-smoke"
 else
   bad "DEV-117 check --help 未列出 --with-smoke"
 fi
-if ( cd "$KIT_DIR" && ./bin/awf check ) 2>&1 | grep -q '请运行 bash test/smoke.sh'; then
+if ( cd "$KIT_DIR" && "$SKILLS_BIN" check ) 2>&1 | grep -q '请运行 bash test/smoke.sh'; then
   ok "DEV-117 check 默认输出末尾提示跑 smoke（kit 形态）"
 else
   bad "DEV-117 check 默认未提示跑 smoke"
 fi
 
 # 22.2 install-hooks：模板存在 / 安装 / 检查 / 脏账本拒绝提交 / 卸载
-assert_file "$KIT_DIR/templates/pre-commit" "templates/pre-commit"
+assert_file "$SKILLS_TPL/pre-commit" "templates/pre-commit"
 assert_file "$PROJ/agent-workflow/templates/pre-commit" "init 复制的 pre-commit 模板"
 git init -q "$PROJ" 2>/dev/null || true
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks --check 2>&1 | grep -q 'NONE' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks --check 2>&1 | grep -q 'NONE' ); then
   ok "DEV-117 install-hooks --check 识别未安装状态"
 else
   bad "DEV-117 install-hooks --check 未识别未安装状态"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks >/dev/null 2>&1 ) \
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks >/dev/null 2>&1 ) \
    && [ -x "$PROJ/.git/hooks/pre-commit" ]; then
   ok "DEV-117 install-hooks 安装成功且可执行"
 else
   bad "DEV-117 install-hooks 安装失败"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks --check 2>&1 | grep -q '已安装且与模板一致' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks --check 2>&1 | grep -q '已安装且与模板一致' ); then
   ok "DEV-117 install-hooks --check 确认已安装且与模板一致"
 else
   bad "DEV-117 install-hooks --check 安装状态不符"
@@ -2722,31 +3107,31 @@ else
     bad "DEV-117 钩子拒绝了但缺中文提示（见 $TMP/d117-hook.log）"
   fi
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" install-hooks --uninstall >/dev/null 2>&1 ) \
+if ( cd "$PROJ" && "$SKILLS_BIN" install-hooks --uninstall >/dev/null 2>&1 ) \
    && [ ! -f "$PROJ/.git/hooks/pre-commit" ]; then
   ok "DEV-117 install-hooks --uninstall 卸载成功"
 else
   bad "DEV-117 install-hooks --uninstall 卸载失败"
 fi
 rm -f "$PROJ/agent-workflow/tasks/dev/current/DEV-201.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 23. DEV-118：worker 名牌（role 自述 + find/projects/register 带出）
 # init 项目 yaml 无 role 键（DEV-119 后模板不再预置空 role: 行）→ find 回退 name，输出三列
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 ) 2>&1 \
+if ( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 ) 2>&1 \
    | grep -Eq '^[^	]+	[^	]+	[^	]+$'; then
   ok "DEV-118 find 输出三列（id/路径/role），role 缺省不报错"
 else
   bad "DEV-118 find 输出未达三列或缺省 role 报错"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 2>&1 | grep -q '冒烟项目' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 2>&1 | grep -q '冒烟项目' ); then
   ok "DEV-118 find 缺省 role 回退到 name（冒烟项目）"
 else
   bad "DEV-118 find 缺省 role 未回退到 name"
 fi
 
 # 23.1 DEV-119/121：模板源无字面空 role 键（防吞值回归）；init 缺省保留空 role 键（方案 B 跳过空值）
-if grep -q '^role: *$' "$KIT_DIR/templates/project.yaml.tmpl"; then
+if grep -q '^role: *$' "$SKILLS_TPL/project.yaml.tmpl"; then
   bad "DEV-119 模板源含字面空 role: 键（会吞用户后填值）"
 else
   ok "DEV-119 模板源无字面空 role: 键（防回归，改为 {{ROLE}} 占位）"
@@ -2758,20 +3143,20 @@ else
 fi
 # 追加第二行 role（模拟用户后填）→ find 立即输出该 role，不再回退 name
 printf '\nrole: 生成脚手架并维护任务账本\n' >> "$PROJ/agent-workflow/project.yaml"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" bootstrap >/dev/null )
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" find 冒烟 | grep -q '生成脚手架并维护任务账本' ); then
+( cd "$PROJ" && "$SKILLS_BIN" bootstrap >/dev/null )
+if ( cd "$PROJ" && "$SKILLS_BIN" find 冒烟 | grep -q '生成脚手架并维护任务账本' ); then
   ok "DEV-119 后填 role（追加行）find 立即带出，不被空行吞掉"
 else
   bad "DEV-119 后填 role 未生效（空行吞值回归）"
 fi
 # projects 表格含角色列并带出 role；register 报已登记名牌
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" projects | grep -q '角色' ) \
-   && ( cd "$PROJ" && "$KIT_DIR/bin/awf" projects | grep -q '生成脚手架并维护任务账本' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" projects | grep -q '角色' ) \
+   && ( cd "$PROJ" && "$SKILLS_BIN" projects | grep -q '生成脚手架并维护任务账本' ); then
   ok "DEV-118 projects 表格含「角色」列并带出 role"
 else
   bad "DEV-118 projects 表格缺角色列/role"
 fi
-if ( cd "$PROJ" && "$KIT_DIR/bin/awf" register 2>&1 | grep -q '已登记 worker 名牌' ); then
+if ( cd "$PROJ" && "$SKILLS_BIN" register 2>&1 | grep -q '已登记 worker 名牌' ); then
   ok "DEV-118 register 对已有 role 项目提示已登记名牌"
 else
   bad "DEV-118 register 名牌提示缺失"
@@ -2779,21 +3164,21 @@ fi
 
 # 23.2 DEV-119：仅空 role / 无数值 role → find 仍回退 name（不回归）
 PROJ3="$TMP/proj3"
-"$KIT_DIR/bin/awf" init "$PROJ3" --name "空角色项目" >/dev/null 2>&1 || true
-if ( cd "$PROJ3" && "$KIT_DIR/bin/awf" find 空角色 2>&1 | grep -q '空角色项目' ); then
+"$SKILLS_BIN" init "$PROJ3" --name "空角色项目" >/dev/null 2>&1 || true
+if ( cd "$PROJ3" && "$SKILLS_BIN" find 空角色 2>&1 | grep -q '空角色项目' ); then
   ok "DEV-119 无数值 role 时 find 回退 name（不回归）"
 else
   bad "DEV-119 无数值 role 未回退 name"
 fi
 printf 'role: \n' >> "$PROJ3/agent-workflow/project.yaml"   # 模拟旧模板遗留空键
-if ( cd "$PROJ3" && "$KIT_DIR/bin/awf" find 空角色 2>&1 | grep -q '空角色项目' ); then
+if ( cd "$PROJ3" && "$SKILLS_BIN" find 空角色 2>&1 | grep -q '空角色项目' ); then
   ok "DEV-119 仅空 role 键时 find 仍回退 name（解析跳过空值）"
 else
   bad "DEV-119 仅空 role 键未回退 name"
 fi
 # 双 role 键（旧项目：空行在前、有值在后）→ 取第一个有值项
 printf 'role: 双键兜底取值\n' >> "$PROJ3/agent-workflow/project.yaml"
-if ( cd "$PROJ3" && "$KIT_DIR/bin/awf" find 空角色 | grep -q '双键兜底取值' ); then
+if ( cd "$PROJ3" && "$SKILLS_BIN" find 空角色 | grep -q '双键兜底取值' ); then
   ok "DEV-119 双 role 键 yaml 取到有值项（旧项目兼容）"
 else
   bad "DEV-119 双 role 键未取到有值项"
@@ -2801,13 +3186,13 @@ fi
 
 # 23.3 DEV-121：init --role 初始化即登记能力名牌；缺省给出填写提示（保留空键，find 回退）
 PROJ4="$TMP/proj4"
-"$KIT_DIR/bin/awf" init "$PROJ4" --name "能力项目" --role "擅长冒烟测试" > "$TMP/proj4-init.log" 2>&1
+"$SKILLS_BIN" init "$PROJ4" --name "能力项目" --role "擅长冒烟测试" > "$TMP/proj4-init.log" 2>&1
 if grep -q '^role: 擅长冒烟测试$' "$PROJ4/agent-workflow/project.yaml"; then
   ok "DEV-121 init --role 写入 project.yaml 的 role 字段"
 else
   bad "DEV-121 init --role 未写入 role 字段"
 fi
-if ( cd "$PROJ4" && "$KIT_DIR/bin/awf" find 能力项目 | grep -q '擅长冒烟测试' ); then
+if ( cd "$PROJ4" && "$SKILLS_BIN" find 能力项目 | grep -q '擅长冒烟测试' ); then
   ok "DEV-121 init --role 后 find 立即带出能力自述"
 else
   bad "DEV-121 init --role 后 find 未带出能力自述"
@@ -2823,14 +3208,14 @@ else
   bad "DEV-121 有 role 时仍输出填写提示"
 fi
 PROJ5="$TMP/proj5"
-"$KIT_DIR/bin/awf" init "$PROJ5" --name "缺省能力" > "$TMP/proj5-init.log" 2>&1
+"$SKILLS_BIN" init "$PROJ5" --name "缺省能力" > "$TMP/proj5-init.log" 2>&1
 if grep -q '填写本项目的 worker 能力自述' "$TMP/proj5-init.log"; then
   ok "DEV-121 init 缺省 role 时给出填写提示"
 else
   bad "DEV-121 init 缺省 role 未给填写提示"
 fi
 if grep -q '^role: *$' "$PROJ5/agent-workflow/project.yaml" \
-   && ( cd "$PROJ5" && "$KIT_DIR/bin/awf" find 缺省能力 2>&1 | grep -q '缺省能力' ); then
+   && ( cd "$PROJ5" && "$SKILLS_BIN" find 缺省能力 2>&1 | grep -q '缺省能力' ); then
   ok "DEV-121 init 缺省保留空 role 键且 find fallback name"
 else
   bad "DEV-121 init 缺省空 role 键/fallback 异常"
@@ -2848,7 +3233,7 @@ else
   bad "DEV-122 --help 缺少 --check-role"
 fi
 # 24.2 决策三件套模板与跨项目规范含 role（防文档回归）
-if grep -q 'role' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
+if grep -q 'role' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
    && grep -q 'role' "$DISPATCH_IMPL"; then
   ok "DEV-122 决策三件套模板与跨项目规范含 role 匹配语义"
 else
@@ -2902,7 +3287,7 @@ fi
 
 # 25. DEV-123：--check-role 过度匹配修复（泛词停用 + 2/3/4-gram 混合）
 ROLE_KIT="擅长 agent 工作流框架：脚手架生成、awf 工具链、校验/发版"
-"$KIT_DIR/bin/awf" init "$TMP/proj6" --name "误判回归" --role "$ROLE_KIT" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj6" --name "误判回归" --role "$ROLE_KIT" >/dev/null 2>&1
 printf '# 任务：生成本周周报并总结 git 提交\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：收集本周会话与提交，生成周报。\n' > "$ROLE_TASK_DIR/zhoubao.md"
 if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj6" "$ROLE_TASK_DIR/zhoubao.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-kit.log" 2>&1 ); then
@@ -2915,7 +3300,7 @@ else
   bad "DEV-123 kit 回归场景退出码非 0"
 fi
 ROLE_ZB="擅长收集 DSH 会话历史与 git 提交，归纳生成日报/周报"
-"$KIT_DIR/bin/awf" init "$TMP/proj7" --name "周报匹配" --role "$ROLE_ZB" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj7" --name "周报匹配" --role "$ROLE_ZB" >/dev/null 2>&1
 if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj7" "$ROLE_TASK_DIR/zhoubao.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-zb.log" 2>&1 ); then
   if grep -q 'role 校验：匹配' "$ROLE_TASK_DIR/out-zb.log"; then
@@ -2927,7 +3312,7 @@ else
   bad "DEV-123 周报匹配场景退出码非 0"
 fi
 ROLE_UXR="擅长 Rokid UXR SDK 的 Unity 示例开发与真机联调测试"
-"$KIT_DIR/bin/awf" init "$TMP/proj8" --name "领域词命中" --role "$ROLE_UXR" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj8" --name "领域词命中" --role "$ROLE_UXR" >/dev/null 2>&1
 printf '# 任务：Unity 真机联调\n- 目标项目：演示项目（/演示路径/演示）\n- 任务编号：由目标自排\n- 来源：用户\n- 路由裁决（派发方 → 演示项目）：目标 演示项目 / 通道 派发 / 理由 领域验证\n正文：在真机联调 Unity 示例。\n' > "$ROLE_TASK_DIR/unity.md"
 if ( cd "$TMP" && "$DISPATCH_CLI" "$TMP/proj8" "$ROLE_TASK_DIR/unity.md" \
      --check-role --dry-run --headless > "$ROLE_TASK_DIR/out-uxr.log" 2>&1 ); then
@@ -2940,37 +3325,37 @@ else
   bad "DEV-123 领域词场景退出码非 0"
 fi
 
-# 26. DEV-124：经验/工具积累闭环（开工读取 + 收尾沉淀 + tools 标准 + check 软提示）
+# 26. DEV-124：经验积累闭环（开工读取 + 收尾沉淀 + 项目本地技能 + check 软提示）
 # 26.1 开工顺序含「读同类经验」
-if grep -q '过往结论' "$KIT_DIR/templates/AGENTS.md.tmpl" \
-   && grep -q 'memory/history' "$KIT_DIR/templates/AGENTS.md.tmpl"; then
+if grep -q '过往结论' "$SKILLS_TPL/AGENTS.md.tmpl" \
+   && grep -q 'memory/history' "$SKILLS_TPL/AGENTS.md.tmpl"; then
   ok "DEV-124 开工顺序含「先读 history 同类经验」"
 else
   bad "DEV-124 开工顺序缺读同类经验步骤"
 fi
-# 26.2 dev/debug 收尾含沉淀到 memory/history 与 tools 收录
-if grep -q 'memory/history' "$KIT_DIR/skills/dev/SKILL.md" \
-   && grep -q 'memory/history' "$KIT_DIR/skills/debug/SKILL.md" \
-   && grep -q 'tools/README.md' "$KIT_DIR/skills/dev/SKILL.md" \
-   && grep -q 'tools/README.md' "$KIT_DIR/skills/debug/SKILL.md"; then
-  ok "DEV-124 dev/debug 收尾含沉淀 memory/history + tools 收录（技能手册）"
+# 26.2 dev/debug 收尾含沉淀到 memory/history 与项目本地技能
+if grep -q 'memory/history' "$SKILLS_DIR/dev/SKILL.md" \
+   && grep -q 'memory/history' "$SKILLS_DIR/debug/SKILL.md" \
+   && grep -q '项目本地技能' "$SKILLS_DIR/dev/SKILL.md" \
+   && grep -q '项目本地技能' "$SKILLS_DIR/debug/SKILL.md"; then
+  ok "DEV-124 dev/debug 收尾含沉淀 memory/history + 项目本地技能"
 else
   bad "DEV-124 dev/debug 收尾缺沉淀步骤"
 fi
 # 26.3 init 项目 memory/README 含「可复用/何时沉淀」定义
-"$KIT_DIR/bin/awf" init "$TMP/proj9" --name "积累闭环" >/dev/null 2>&1
+"$SKILLS_BIN" init "$TMP/proj9" --name "积累闭环" >/dev/null 2>&1
 if grep -q '可复用' "$TMP/proj9/agent-workflow/memory/README.md" \
    && grep -q '何时沉淀' "$TMP/proj9/agent-workflow/memory/README.md"; then
   ok "DEV-124 memory/README 含可复用定义与沉淀时机"
 else
   bad "DEV-124 memory/README 缺可复用定义"
 fi
-# 26.4 init 项目 tools/README 含晋升三要素（可执行/用法注释/归属）
-if grep -q 'shebang' "$TMP/proj9/agent-workflow/tools/README.md" \
-   && grep -q '用法注释' "$TMP/proj9/agent-workflow/tools/README.md"; then
-  ok "DEV-124 tools/README 含晋升三要素"
+# 26.4 init 不再生成 tools/ 目录（统一技能目录，可复用手册收敛为项目本地技能）
+if [ ! -e "$TMP/proj9/agent-workflow/tools" ] \
+   && grep -q '项目本地技能' "$TMP/proj9/agent-workflow/README.md"; then
+  ok "DEV-124 init 不再生成 tools/（统一到项目本地技能）"
 else
-  bad "DEV-124 tools/README 缺晋升三要素"
+  bad "DEV-124 init 仍生成 tools/ 或 README 未提项目本地技能"
 fi
 # 26.5 check 软提示：无沉淀+≥3 归档 → 提示但 rc=0；补沉淀 → 无提示
 cat >> "$TMP/proj9/agent-workflow/tasks/dev/done.md" <<'PROJ9EOF'
@@ -3010,15 +3395,15 @@ cat >> "$TMP/proj9/agent-workflow/tasks/dev/done.md" <<'PROJ9EOF'
 造数归档。
 | HIST-103 | P3 | 造数沉淀三 | 2026-11-03 |
 PROJ9EOF
-( cd "$TMP/proj9" && "$KIT_DIR/bin/awf" status >/dev/null 2>&1 \
-  && "$KIT_DIR/bin/awf" check > "$TMP/proj9-check1.log" 2>&1 ); P9RC=$?
+( cd "$TMP/proj9" && "$SKILLS_BIN" status >/dev/null 2>&1 \
+  && "$SKILLS_BIN" check > "$TMP/proj9-check1.log" 2>&1 ); P9RC=$?
 if [ "$P9RC" -eq 0 ] && grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check1.log"; then
   ok "DEV-124 check 软提示：无沉淀+3 归档 → 提示且 rc=0"
 else
   bad "DEV-124 check 软提示未出现（rc=${P9RC}"
 fi
 printf '# 经验沉淀\n\n- 背景：造数验证\n- 结论：软提示工作正常\n' > "$TMP/proj9/agent-workflow/memory/history/软提示验证_2026-11-04.md"
-( cd "$TMP/proj9" && "$KIT_DIR/bin/awf" check > "$TMP/proj9-check2.log" 2>&1 ); P9RC2=$?
+( cd "$TMP/proj9" && "$SKILLS_BIN" check > "$TMP/proj9-check2.log" 2>&1 ); P9RC2=$?
 if [ "$P9RC2" -eq 0 ] && ! grep -q 'memory/history/ 无沉淀' "$TMP/proj9-check2.log"; then
   ok "DEV-124 check 软提示：有沉淀 → 提示消失（rc=0）"
 else
@@ -3062,14 +3447,14 @@ cat > "$PROJ/agent-workflow/tasks/dev/todo/DEV-300.md" <<'D28'
 ### 下一步
 跑 smoke。
 D28
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/todo/README.md" "DEV-127 todo/README 列 DEV-300"
 
 # 认领：文件移入 current/ + 状态改 active
 mv "$PROJ/agent-workflow/tasks/dev/todo/DEV-300.md" "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md"
 sed -i '' 's/| 状态 | todo |/| 状态 | active |/' "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md" 2>/dev/null \
   || sed -i 's/| 状态 | todo |/| 状态 | active |/' "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/current/README.md" "认领后 current/README 列 DEV-300"
 if grep -q 'DEV-300' "$PROJ/agent-workflow/tasks/dev/todo/README.md"; then
   bad "认领后 todo/README 不应再有 DEV-300"
@@ -3082,7 +3467,7 @@ mv "$PROJ/agent-workflow/tasks/dev/current/DEV-300.md" "$PROJ/agent-workflow/tas
 printf '| 完成日期 | %s |\n' "$(date +%Y-%m-%d 2>/dev/null || echo 2026-11-04)" >> "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
 sed -i '' 's/| 状态 | active |/| 状态 | done |/' "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md" 2>/dev/null \
   || sed -i 's/| 状态 | active |/| 状态 | done |/' "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 assert_grep 'DEV-300' "$PROJ/agent-workflow/tasks/dev/done/README.md" "归档后 done/README 列 DEV-300"
 if out="$(cd "$PROJ" && ./agent-workflow/check_workflow.sh 2>&1)"; then
   ok "目录式账本生命周期后 check 通过"
@@ -3090,20 +3475,20 @@ else
   bad "目录式生命周期后 check 失败：$(printf '%s\n' "$out" | grep -E 'FAIL|过期' | head -3)"
 fi
 rm -f "$PROJ/agent-workflow/tasks/dev/done/DEV-300.md"
-( cd "$PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 29. DEV-138：派发三规则（默认异步 / 派发即子代理不建队 / 票据瘦身+分析归 worker）
 # 29.2 模板与工作流规范同步三规则
-if grep -q '派发三规则' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '默认异步' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '不启用智能体团队承载派发' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '票据瘦身' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '返回 router' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '派发三规则' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '默认异步' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '不启用智能体团队承载派发' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '票据瘦身' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '返回 router' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-138 技能索引路由段含派发三规则"
 else
   bad "DEV-138 技能索引路由段缺派发三规则"
 fi
-if [ -d "$KIT_DIR/templates/workflows" ]; then
+if [ -d "$SKILLS_TPL/workflows" ]; then
   bad "DEV-138 技能化后不应有 templates/workflows/ 目录（技能即源）"
 elif [ -d "$KIT_DIR/agent-workflow/workflows" ]; then
   bad "DEV-138 技能化后项目内不应有 workflows/ 目录"
@@ -3116,21 +3501,21 @@ if grep -q '派发协议三规则' "$KIT_DIR/docs/design.md" \
 else
   bad "DEV-138 $KIT_DIR/docs/design.md 缺派发协议三规则"
 fi
-if grep -q '不启用智能体团队承载派发' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '启动一个子代理会话' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '不启用智能体团队承载派发' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '启动一个子代理会话' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-138 cross-project 技能写清派发即子代理（不建队承载）"
 else
   bad "DEV-138 cross-project 技能未写清派发即子代理"
 fi
-if grep -q '不启用智能体团队承载派发' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
+if grep -q '不启用智能体团队承载派发' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
   ok "DEV-138 跨项目技能写清派发不建队承载（无默认建队残留）"
 else
   bad "DEV-138 跨项目技能未写清不建队承载"
 fi
 # 29.3 旧语义清除：不再有「团队派发模式（默认」「--wait 是团队模式默认」「每个目标一个 dispatcher」
 stale_ok=1
-for f in "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" "$KIT_DIR/templates/AGENTS.md.tmpl" \
-         "$KIT_DIR/templates/workflows/cross-project.md" "$KIT_DIR/agent-workflow/workflows/cross-project.md"; do
+for f in "$SKILLS_DIR/cross-project-dispatch/SKILL.md" "$SKILLS_TPL/AGENTS.md.tmpl" \
+         "$SKILLS_TPL/workflows/cross-project.md" "$KIT_DIR/agent-workflow/workflows/cross-project.md"; do
   if grep -q '团队派发模式（默认\|每个目标一个 dispatcher\|--wait 是团队模式' "$f"; then
     stale_ok=0
     bad "DEV-138 旧派发语义残留：$f"
@@ -3140,7 +3525,7 @@ if [ "$stale_ok" -eq 1 ]; then
   ok "DEV-138 派发文档/模板无旧团队派发语义残留"
 fi
 # 30. 回执契约与投递通道（行为验证见 bin/awf-dispatch；技能文档章节完整性见下）
-SKILL_CROSS="$KIT_DIR/skills/cross-project-dispatch/SKILL.md"
+SKILL_CROSS="$SKILLS_DIR/cross-project-dispatch/SKILL.md"
 for section in "必报点总表" "回执投递通道" "回执正文排版" "远程办公状态" "派发方转达用户回执格式" "僵尸会话与落地判定" "退出码与失败处理"; do
   grep -q "$section" "$SKILL_CROSS" && ok "技能章节齐全：$section" || bad "技能缺章节：$section"
 done
@@ -3155,45 +3540,45 @@ fi
 # 3.13+ 行为断言（保留原有独立实现块）
 
 # 30.1 派发生命周期闭环（必有回执是主机制，登记 active 作兜底锚点）
-if grep -q '派发生命周期' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '兜底锚点' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 有派发生命周期闭环（五步 + 兜底锚点）"
+if grep -q '派发生命周期' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '兜底锚点' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 有派发生命周期闭环（五步 + 兜底锚点）"
 else
-  bad "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺派发生命周期闭环"
+  bad "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺派发生命周期闭环"
 fi
-if grep -q '目标 worker' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '派发时间' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '验收标准' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q '关联票据' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
+if grep -q '目标 worker' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '派发时间' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '验收标准' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q '关联票据' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 提供登记样例字段（目标 worker/关联票据/派发时间/验收标准）"
 else
-  bad "DISPATCH-133/134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 登记样例字段缺失"
+  bad "DISPATCH-133/134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 登记样例字段缺失"
 fi
 # 30.2 必有回执是主机制（成功必须回执 / 失败必须回执 / 需用户确认·多轮对话）
 if grep -q '必有回执' "$DISPATCH_IMPL" \
-   && grep -q '必有回执' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 必有回执是主机制（成功/失败都必须回执，需用户确认+多轮对话）"
+   && grep -q '必有回执' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 必有回执是主机制（成功/失败都必须回执，需用户确认+多轮对话）"
 else
-  bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺必有回执语义"
+  bad "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺必有回执语义"
 fi
 # 30.3 无回执仅当会话失联；登记 active 只是兜底
-if grep -q '兜底锚点' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md" \
-   && grep -q 'active' "$KIT_DIR/skills/cross-project-dispatch/SKILL.md"; then
-  ok "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 无回执仅当会话失联（登记 active 是兜底锚点）"
+if grep -q '兜底锚点' "$SKILLS_DIR/cross-project-dispatch/SKILL.md" \
+   && grep -q 'active' "$SKILLS_DIR/cross-project-dispatch/SKILL.md"; then
+  ok "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 无回执仅当会话失联（登记 active 是兜底锚点）"
 else
-  bad "DISPATCH-134 $KIT_DIR/skills/cross-project-dispatch/SKILL.md 缺兜底语义"
+  bad "DISPATCH-134 $SKILLS_DIR/cross-project-dispatch/SKILL.md 缺兜底语义"
 fi
 # 30.4 旧表述（代理 FAIL/无回执常规化 / 记忆锚点）已从三处源文本清除
 if grep -q '代理 FAIL、超时无回执' "$DISPATCH_IMPL" \
    || grep -q '静默中断' "$DISPATCH_IMPL" \
    || grep -q '记忆锚点' "$DISPATCH_IMPL" \
-   || grep -q '记忆锚点' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   || grep -q '记忆锚点' "$SKILLS_TPL/AGENTS.md.tmpl" \
    || grep -q '记忆锚点' "$DISPATCH_IMPL"; then
   bad "DISPATCH-134 旧表述残留（代理 FAIL/记忆锚点/无回执常规化）"
 else
   ok "DISPATCH-134 旧表述已清除（无回执不再是常规路径）"
 fi
-if diff -q "$KIT_DIR/templates/AGENTS.md.tmpl" \
+if diff -q "$SKILLS_TPL/AGENTS.md.tmpl" \
           "$KIT_DIR/agent-workflow/templates/AGENTS.md.tmpl" >/dev/null \
 ; then
   ok "DISPATCH-134 模板双副本一致（AGENTS.md.tmpl；workflows 技能化退役）"
@@ -3300,7 +3685,7 @@ fi
 if grep -q '用户在 GUI 目标会话内' "$DISPATCH_IMPL" \
    || grep -q '用户在目标会话内直接回复' "$DISPATCH_IMPL" \
    || grep -q '用户在目标会话内回复继续' "$DISPATCH_IMPL" \
-   || grep -q '目标会话多轮对话续聊' "$KIT_DIR/templates/AGENTS.md.tmpl" \
+   || grep -q '目标会话多轮对话续聊' "$SKILLS_TPL/AGENTS.md.tmpl" \
    || grep -q '目标会话多轮对话续聊' "$DISPATCH_IMPL" \
    || grep -q '目标会话多轮对话续聊' "$KIT_DIR/AGENTS.md"; then
   bad "DISPATCH-141 旧表述残留（用户在目标会话内回复即可继续）"
@@ -3311,7 +3696,7 @@ fi
 # 31. DEV-216 / D-216-t1：awf log 执行记录（只增不改）+ awf validate 只读体检
 # 独立初始化一个干净项目，避免复用 $PROJ 中历史用例遗留的账本。
 LOG_PROJ="$TMP/log-proj"
-"$KIT_DIR/bin/awf" init "$LOG_PROJ" --name "体检项目" --no-register >/dev/null
+"$SKILLS_BIN" init "$LOG_PROJ" --name "体检项目" --no-register >/dev/null
 LOG_TASK="$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-310.md"
 cat > "$LOG_TASK" <<'D31'
 ## [DEV-310] 执行记录与体检冒烟
@@ -3333,17 +3718,17 @@ cat > "$LOG_TASK" <<'D31'
 ### 下一步
 跑 smoke。
 D31
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 # 31.1 --help 列出用法与节名
-if ( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log --help 2>&1 ) | grep -q '### Execution Log'; then
+if ( cd "$LOG_PROJ" && "$SKILLS_BIN" log --help 2>&1 ) | grep -q '### Execution Log'; then
   ok "D-216-t1 awf log --help 列出 Execution Log 用法"
 else
   bad "D-216-t1 awf log --help 缺 Execution Log 用法"
 fi
 
 # 31.2 无节自动补 + 追加一条（格式：- 时间 · 类型 · @谁 · 说明）
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-310 --note "第一条记录" --type implement --owner smoke-test >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-310 --note "第一条记录" --type implement --owner smoke-test >/dev/null )
 assert_grep '^### Execution Log$' "$LOG_TASK" "D-216-t1 awf log 无节自动补 Execution Log 节"
 assert_grep '^### 下一步$' "$LOG_TASK" "D-216-t1 awf log 保留原有小节（只增不改）"
 if grep -Eq '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} · implement · @smoke-test · 第一条记录$' "$LOG_TASK"; then
@@ -3353,7 +3738,7 @@ else
 fi
 
 # 31.3 第二条追加：不覆盖第一条，顺序追加
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-310 --note "第二条记录" >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-310 --note "第二条记录" >/dev/null )
 if [ "$(grep -c '^- [0-9]' "$LOG_TASK")" = "2" ] && grep -q '第一条记录' "$LOG_TASK"; then
   ok "D-216-t1 awf log 追加第二条且不覆盖旧记录"
 else
@@ -3368,7 +3753,7 @@ else
 fi
 
 # 31.4 不存在任务 → 明确错误 + 非零
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-999 --note x 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-999 --note x 2>&1 )"; then
   bad "D-216-t1 awf log 对不存在任务未报错"
 else
   case "$out" in
@@ -3398,8 +3783,8 @@ cat > "$DONE_TASK" <<'D31D'
 ### 下一步
 无。
 D31D
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" log DEV-311 --note x 2>&1 )"; then
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" log DEV-311 --note x 2>&1 )"; then
   bad "D-216-t1 awf log 对已归档任务未报错"
 else
   case "$out" in
@@ -3409,7 +3794,7 @@ else
 fi
 
 # 31.6 validate：账本正常 → 退出 0
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   ok "D-216-t1 awf validate 账本正常退出 0"
 else
   bad "D-216-t1 awf validate 账本正常却失败：$(printf '%s\n' "$out" | head -3)"
@@ -3421,7 +3806,7 @@ ledger_hash() {
       | while IFS= read -r hf; do shasum "$hf"; done | shasum | cut -d' ' -f1 )
 }
 before_hash="$(ledger_hash "$LOG_PROJ")"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate >/dev/null 2>&1 ) || true
+( cd "$LOG_PROJ" && "$SKILLS_BIN" validate >/dev/null 2>&1 ) || true
 after_hash="$(ledger_hash "$LOG_PROJ")"
 if [ "$before_hash" = "$after_hash" ]; then
   ok "D-216-t1 awf validate 只读（账本 hash 不变）"
@@ -3432,7 +3817,7 @@ fi
 # 31.7 状态值非法 → 非零并列出问题
 sed -i '' 's/| 状态 | active |/| 状态 | doing |/' "$LOG_TASK" 2>/dev/null \
   || sed -i 's/| 状态 | active |/| 状态 | doing |/' "$LOG_TASK"
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   bad "D-216-t1 awf validate 未发现非法状态"
 else
   case "$out" in
@@ -3445,7 +3830,7 @@ sed -i '' 's/| 状态 | doing |/| 状态 | active |/' "$LOG_TASK" 2>/dev/null \
 
 # 31.8 归档缺完成日期 → 非零并列出问题（恢复时插回字段表，不能追加到文末）
 grep -v '^| 完成日期 |' "$DONE_TASK" > "$DONE_TASK.tmp" && mv "$DONE_TASK.tmp" "$DONE_TASK"
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   bad "D-216-t1 awf validate 未发现缺完成日期"
 else
   case "$out" in
@@ -3458,7 +3843,7 @@ awk '1; /^\| Owner \| smoke \|$/ { print "| 完成日期 | 2026-11-08 |" }' "$DO
 
 # 31.9 README 索引与文件不一致 → 非零并列出问题（不代修）
 cp "$LOG_TASK" "$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-312.md"
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   bad "D-216-t1 awf validate 未发现 README 索引不一致"
 else
   case "$out" in
@@ -3467,7 +3852,7 @@ else
   esac
 fi
 before_hash="$(ledger_hash "$LOG_PROJ")"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate >/dev/null 2>&1 ) || true
+( cd "$LOG_PROJ" && "$SKILLS_BIN" validate >/dev/null 2>&1 ) || true
 after_hash="$(ledger_hash "$LOG_PROJ")"
 if [ "$before_hash" = "$after_hash" ]; then
   ok "D-216-t1 awf validate 有问题时也不修改文件"
@@ -3475,8 +3860,8 @@ else
   bad "D-216-t1 awf validate 有问题时修改了文件"
 fi
 rm -f "$LOG_PROJ/agent-workflow/tasks/dev/current/DEV-312.md"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
-if out="$( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" validate 2>&1 )"; then
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
+if out="$( cd "$LOG_PROJ" && "$SKILLS_BIN" validate 2>&1 )"; then
   ok "D-216-t1 修复后 awf validate 恢复退出 0"
 else
   bad "D-216-t1 修复后 awf validate 仍失败：$(printf '%s\n' "$out" | head -3)"
@@ -3485,7 +3870,7 @@ fi
 # 31.10 骨架生成含 Execution Log 节：release-prep 任务 + 旧 todo 迁移任务
 assert_grep '^### Execution Log$' "$REL/agent-workflow/tasks/dev/done/DEV-008.md" \
   "D-216-t1 release-prep 生成的任务骨架含 Execution Log 节"
-assert_grep '^### Execution Log$' "$KIT_DIR/templates/README.md" \
+assert_grep '^### Execution Log$' "$SKILLS_TPL/README.md" \
   "D-216-t1 任务块模板含 Execution Log 节"
 cat > "$LOG_PROJ/agent-workflow/tasks/dev/todo.md" <<'D31B'
 # 待开发
@@ -3494,7 +3879,7 @@ cat > "$LOG_PROJ/agent-workflow/tasks/dev/todo.md" <<'D31B'
 |--------|--------|------|----------|
 | DEV-320 | P2 | 迁移骨架冒烟 | 2026-11-08 |
 D31B
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
 if [ -f "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md" ] \
   && grep -q '^### Execution Log$' "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md"; then
   ok "D-216-t1 旧 todo 迁移生成的骨架含 Execution Log 节"
@@ -3505,7 +3890,7 @@ rm -f "$LOG_PROJ/agent-workflow/tasks/dev/todo/DEV-320.md"
 
 # 清理本次用例任务并刷新索引
 rm -f "$LOG_TASK" "$DONE_TASK"
-( cd "$LOG_PROJ" && "$KIT_DIR/bin/awf" status >/dev/null )
+( cd "$LOG_PROJ" && "$SKILLS_BIN" status >/dev/null )
 
 printf '\n通过 %d 项，失败 %d 项\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

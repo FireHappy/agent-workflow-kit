@@ -8,7 +8,12 @@ set -eu
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # DEV-218：技能/CLI/模板唯一源 = 插件 dsh-awf-dashboard/skills/（根 skills/bin/templates 已移除）
-SKILLS_DIR="$KIT_DIR/dsh-awf-dashboard/skills"
+# 技能形态（安装后 ~/.agents/skills/agent-workflow-scaffold/）：插件层不存在，同级目录即技能库
+if [ -d "$KIT_DIR/dsh-awf-dashboard/skills" ]; then
+  SKILLS_DIR="$KIT_DIR/dsh-awf-dashboard/skills"
+else
+  SKILLS_DIR="$(cd "$KIT_DIR/.." && pwd)"
+fi
 SKILLS_BIN="$SKILLS_DIR/agent-workflow-scaffold/bin/awf"
 SKILLS_TPL="$SKILLS_DIR/agent-workflow-scaffold/templates"
 DISPATCH_IMPL="$SKILLS_DIR/cross-project-dispatch/scripts/awf-dispatch"
