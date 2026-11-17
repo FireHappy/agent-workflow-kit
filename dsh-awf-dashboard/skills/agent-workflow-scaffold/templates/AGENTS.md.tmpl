@@ -27,7 +27,9 @@
 ## 本地个性化技能
 
 - 本工程专属流程放 `agent-workflow/skills/<name>/SKILL.md`，frontmatter 写 `name` / `description` / `whenToUse`，与全局技能同格式。
-- **打包技能统一命名 `build`**：`agent-workflow/skills/build/SKILL.md`（frontmatter `name: build`），全局 `unity-build-install` 第 0 步按此标准路径读取。
+- **本地技能目录名与它覆盖的全局技能同名**：`build`（打包，覆盖 `unity-build-install`）、`release`（发版，覆盖 `release`）、其他全局技能同理；不要另造 `build-android`、`release-tagging` 这类名字。
+- 标准路径：`agent-workflow/skills/<name>/SKILL.md`，frontmatter `name: <name>`；全局技能第 0 步按此路径读取，命中即走本地流程、不回退默认。
+- 一个流程只留一个本地技能：多目标/多产物时主入口不变，用参数或步骤区分。
 - 全局技能（如 `unity-build-install`、`release`）第 0 步会先读本目录：命中本地技能就按本地技能执行，**不再走全局默认通道**；本地技能不存在时才回退默认流程。
 - 本地技能与代码不一致时以代码为准，并把差异写回本地技能（工具方法名、菜单路径、产物路径、已知坑）。
 
