@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Changed
+- **骨架 1.5.2**：AGENTS 模板补充「本地个性化技能」按项目定制的说明（同一全局技能在不同项目的本地定制以各自代码为准，框架只约定目录/命名/优先级）。骨架版本 1.5.1 → 1.5.2，各项目 `awf upgrade` 后模板与 kit 一致（账本/记忆/本地技能保留）。
 - **骨架 1.5.1（DEV-237 收尾）**：项目模板与规范不再引用 `tools/`（收尾沉淀改为项目本地技能 `agent-workflow/skills/<name>/`）；AGENTS 入口里的状态命令路径由已失效的 `~/.dsh/skills/agent-workflow-scaffold/bin/awf status` 改为 `~/.agents/skills/...`。骨架版本 1.5.0 → 1.5.1，各项目 `awf upgrade` 后模板/入口与本 kit 一致（账本/记忆/本地技能保留）。
 
 ## [1.8.1] - 2026-11-13
